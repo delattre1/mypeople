@@ -525,11 +525,9 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_page(self, path):
         try:
             with open(path, "r", encoding="utf-8") as f:
-                html = f.read()
-            html = html.replace("__TTYD_PORT__", str(CFG["TTYD_BROWSER_PORT"]))
-            html = html.replace("__HOST_ID__", HOST_ID)
+                html = C.render_page(f.read())
         except Exception:
-            html = "<h1>mypeople</h1>"
+            html = C.render_page("<h1>mypeople</h1>")
         self._send(200, raw=html, ctype="text/html; charset=utf-8", extra=self._page_extra())
 
     def do_HEAD(self):

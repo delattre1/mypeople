@@ -69,6 +69,62 @@ def load_env():
 
 CFG = load_env()
 
+# ---------- running version (single source: package __version__) ----------
+# The runtime is copied out of the package into INSTALL_DIR and runs under a bare interpreter,
+# so `import mypeople` is not reachable from here in a real install. firstrun.materialize()
+# stamps INSTALL_DIR/VERSION from __version__; that file is this runtime's channel to it.
+VERSION_UNKNOWN = "dev"
+
+def version():
+    """Version of the install actually serving this process. Never raises: a page must not
+    500 over a version string."""
+    env = os.environ.get("MYPEOPLE_VERSION")
+    if env and env.strip():
+        return env.strip()
+    try:
+        with open(os.path.join(CFG["INSTALL_DIR"], "VERSION")) as f:
+            v = f.read().strip()
+        if v:
+            return v
+    except Exception:
+        pass
+    # running straight from the source tree / an editable install
+    try:
+        import mypeople
+        return mypeople.__version__
+    except Exception:
+        pass
+    return VERSION_UNKNOWN
+
+
+# ---------- page rendering (shared by both front doors) ----------
+_VERSION_BADGE = """
+<style>
+#mp-version-badge{position:fixed;right:8px;bottom:8px;z-index:2147483000;
+ font:500 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.02em;
+ color:#8b949e;background:rgba(22,27,34,.82);border:1px solid rgba(139,148,158,.22);
+ border-radius:999px;padding:4px 8px;pointer-events:none;user-select:none;
+ backdrop-filter:blur(4px);opacity:.75}
+@media print{#mp-version-badge{display:none}}
+</style>
+<div id="mp-version-badge" title="MyPeople version serving this page">__MP_VERSION__</div>
+"""
+
+def render_page(html):
+    """Substitute the page placeholders every UI page shares, and make the running version
+    visible on it. Injecting here (rather than in each .html) is what makes 'every page'
+    true by construction — including pages added later."""
+    html = html.replace("__TTYD_PORT__", str(CFG["TTYD_BROWSER_PORT"]))
+    html = html.replace("__HOST_ID__", CFG["HOST_ID"])
+    if "id=\"mp-version-badge\"" not in html:
+        badge = _VERSION_BADGE
+        if "</body>" in html:
+            html = html.replace("</body>", badge + "</body>", 1)
+        else:
+            html += badge
+    return html.replace("__MP_VERSION__", "v" + version())
+
+
 # ---------- session cookie (stateless, HMAC-signed; NOT the secret) ----------
 def _hmac(msg):
     return hmac.new(CFG.get("QUEUE_SECRET", "").encode(), msg.encode(), hashlib.sha256).hexdigest()[:24]

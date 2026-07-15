@@ -66,6 +66,17 @@ def _replace_file(src, dst):
             pass
 
 
+def _write_file(dst, text):
+    """Same replace-don't-write-through discipline as _replace_file, for content we generate
+    rather than copy."""
+    try:
+        os.unlink(dst)
+    except OSError:
+        pass
+    with open(dst, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
 def materialize(install):
     """Copy the packaged runtime into a WRITABLE INSTALL_DIR. Idempotent: never overwrite
     existing daemon code differently, and NEVER clobber live state (board/roster/logs)."""
@@ -84,6 +95,12 @@ def materialize(install):
     bc = os.path.join(rt, "boss-CLAUDE.md")
     if os.path.exists(bc):
         _replace_file(bc, os.path.join(install, "boss-CLAUDE.md"))
+    # Stamp the version this runtime was materialized from. The daemons run the copies above
+    # under a bare interpreter with no route back to the package, so this file is how they (and
+    # the UI) know which version is serving. Rewritten here so an upgrade cannot leave a stale
+    # number on the pages; a hand-placed VERSION is replaced the same way the code trees are.
+    from . import __version__
+    _write_file(os.path.join(install, "VERSION"), __version__ + "\n")
     # writable state skeletons — create empty, never overwrite existing board/roster/logs
     for sub in ("todos", "run", "status", "logs"):
         os.makedirs(os.path.join(install, sub), exist_ok=True)
