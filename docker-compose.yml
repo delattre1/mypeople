@@ -1,7 +1,7 @@
 services:
   mypeople:
-    image: ghcr.io/delattre1/mypeople:0.4.0
-    pull_policy: missing
+    image: ghcr.io/delattre1/mypeople:latest
+    pull_policy: always
     init: true
     ports:
       - "${MYPEOPLE_TODO_PORT:-9933}:9933"
