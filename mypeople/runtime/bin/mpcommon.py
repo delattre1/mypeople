@@ -110,12 +110,70 @@ _VERSION_BADGE = """
 <div id="mp-version-badge" title="MyPeople version serving this page">__MP_VERSION__</div>
 """
 
+# Shown on every page while this node has no AI login. It is deliberately loud and at the top of
+# the document: the failure it describes ("nothing happens when I ask for anything") is otherwise
+# indistinguishable from the product being broken.
+_LOGIN_BANNER_TMPL = """
+<style>
+#mp-login-banner{position:sticky;top:0;z-index:2147483001;
+ font:500 13px/1.5 ui-sans-serif,-apple-system,Segoe UI,Roboto,sans-serif;
+ color:#f0d8a8;background:#4a3410;border-bottom:1px solid #8a6520;padding:10px 16px}
+#mp-login-banner b{color:#ffd479}
+#mp-login-banner code{display:inline-block;margin:2px 6px 0 0;padding:2px 7px;
+ font:500 12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+ color:#ffe9bd;background:rgba(0,0,0,.35);border:1px solid rgba(255,212,121,.25);border-radius:5px;
+ user-select:all}
+</style>
+<div id="mp-login-banner">
+  <b>Login required.</b> This node has no AI login yet, so no agent can run.
+  Run it inside this node: __MP_LOGIN_STEPS__
+  <span style="opacity:.8">The Boss starts by itself ~15s after login — no restart needed.</span>
+</div>
+"""
+
+def auth_state():
+    """This node's login state, as published by the package (firstrun.write_auth_state).
+
+    Absent file => say nothing. An install that predates the file, or a runtime driven without
+    the CLI, must not grow a scary banner just because it cannot find a status file.
+    """
+    try:
+        with open(os.path.join(CFG["INSTALL_DIR"], "status", "auth.json")) as f:
+            state = json.load(f)
+        return state if isinstance(state, dict) else {}
+    except Exception:
+        return {}
+
+
+def _login_banner():
+    """The 'you still have to log in' notice, or '' when this node is fine."""
+    state = auth_state()
+    if not state or state.get("authenticated") is not False:
+        return ""
+    steps = "".join(
+        "<code>%s</code>" % html_escape(line) for line in (state.get("howto") or []))
+    return _LOGIN_BANNER_TMPL.replace("__MP_LOGIN_STEPS__", steps)
+
+
+def html_escape(s):
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
 def render_page(html):
     """Substitute the page placeholders every UI page shares, and make the running version
     visible on it. Injecting here (rather than in each .html) is what makes 'every page'
     true by construction — including pages added later."""
     html = html.replace("__TTYD_PORT__", str(CFG["TTYD_BROWSER_PORT"]))
     html = html.replace("__HOST_ID__", CFG["HOST_ID"])
+    banner = _login_banner()
+    if banner and "id=\"mp-login-banner\"" not in html:
+        if "<body" in html:
+            idx = html.index("<body")
+            end = html.index(">", idx) + 1
+            html = html[:end] + banner + html[end:]
+        else:
+            html = banner + html
     if "id=\"mp-version-badge\"" not in html:
         badge = _VERSION_BADGE
         if "</body>" in html:

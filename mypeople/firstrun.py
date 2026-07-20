@@ -5,7 +5,7 @@ INSTALL_DIR from the packaged runtime, resolves the selected backend's auth, wri
 config file (~/.config/mypeople/queue.env, fresh QUEUE_SECRET per install), wires Claude/Codex
 lifecycle hooks, and installs the functional tmux.conf. Starting daemons + spawning the Boss is
 the CLI's job (see cli.up)."""
-import os, sys, json, shutil, secrets, socket, stat, subprocess, shlex
+import os, sys, json, shutil, secrets, socket, stat, subprocess, shlex, time
 
 VALID_BACKENDS = ("claude", "codex", "grok")
 LIFECYCLE_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop")
@@ -212,6 +212,48 @@ def resolve_auth(preferred=None, chooser=None):
             "This node is not authenticated for %s. Run `claude auth login`, `codex login` or "
             "`grok login` inside THIS node, then re-run MyPeople. Never copy or mount credentials "
             "from another node." % requested)
+
+
+def auth_state_path(install=None):
+    return os.path.join(install or install_dir(), "status", "auth.json")
+
+
+def login_howto():
+    """The exact commands that fix an unauthenticated node, phrased for where it is running.
+
+    Written into the auth state file so the CLI, the board and the HUD all quote the same
+    instruction instead of three copies drifting apart.
+    """
+    if os.environ.get("MYPEOPLE_CONTAINER") == "1":
+        return ["docker compose exec -it mypeople claude auth login",
+                "or open the terminal tab above and run:  claude auth login",
+                "(`codex login` / `grok login` work too)"]
+    return ["claude auth login",
+            "(`codex login` / `grok login` work too)",
+            "then re-run `mypeople up`"]
+
+
+def write_auth_state(install, authenticated, backend=None, message="", requested=""):
+    """Publish this node's login state where the runtime can read it.
+
+    The daemons run out of INSTALL_DIR under a bare interpreter with no route back to this
+    package (same constraint that makes INSTALL_DIR/VERSION exist), so a file is how the pages
+    and the boss supervisor learn whether this node can actually talk to an AI backend.
+    """
+    path = auth_state_path(install)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _atomic_json(path, {
+            "authenticated": bool(authenticated),
+            "backend": backend or "",
+            "requested": requested or "",
+            "message": message or "",
+            "howto": [] if authenticated else login_howto(),
+            "checked_at": int(time.time()),
+        })
+    except Exception:
+        pass  # a status file must never be the reason the stack fails to come up
+    return path
 
 
 def _prompt_backend(available):
@@ -455,22 +497,40 @@ def install_tmux_conf(install):
 
 
 # ---------------------------------------------------------------- orchestration
-def ensure(preferred_backend=None):
-    """Idempotent first-run configuration. Returns (install, host, selected backend)."""
+def ensure(preferred_backend=None, allow_unauthenticated=None):
+    """Idempotent first-run configuration. Returns (install, host, selected backend).
+
+    `backend` comes back None when this node has no login yet AND exiting is not an option --
+    see the login-required branch below.
+    """
     install = install_dir()
     materialize(install)
     configured = _read_env_val("DEFAULT_BACKEND")
     requested = (preferred_backend or os.environ.get("MYPEOPLE_BACKEND") or
                  os.environ.get("DEFAULT_BACKEND") or configured)
+    if allow_unauthenticated is None:
+        # Only PID 1 under a restart policy. An installer or an interactive `mypeople up` still
+        # refuses cleanly and starts nothing -- that behaviour is the reference, not the bug.
+        allow_unauthenticated = os.environ.get("MYPEOPLE_CONTAINER") == "1"
     ok, backend, msg = resolve_auth(requested, chooser=_prompt_backend)
     if not ok:
         _echo("\n[mypeople] " + msg + "\n")
-        sys.exit(2)
-    _echo("[mypeople] auth: %s" % msg)
-    fresh = write_queue_env(install, backend)
+        if not allow_unauthenticated:
+            sys.exit(2)
+        # In a container this process IS the container. Exiting here hands `restart:
+        # unless-stopped` a process whose only possible outcome is the same exit code, so the
+        # user gets an endless restart loop and dead ports instead of a login prompt (card
+        # f0e7101c94). Come up degraded instead: the board and the HUD serve, they say what is
+        # missing, and the boss supervisor starts the Boss by itself once the login lands.
+        _echo("[mypeople] LOGIN REQUIRED — starting board + HUD only; no agent can run yet.")
+        backend = None
+    else:
+        _echo("[mypeople] auth: %s" % msg)
+    fresh = write_queue_env(install, backend or requested or "claude")
     write_claude_config(install)
     write_codex_config(install)
     install_tmux_conf(install)
+    write_auth_state(install, ok, backend, msg, requested or "")
     host = os.environ.get("HOST_ID") or _read_env_val("HOST_ID") or socket.gethostname().split(".")[0]
     _echo("[mypeople] install dir: %s  (config: %s%s)" %
           (install, CONFIG_PATH, ", fresh" if fresh else ", reused"))

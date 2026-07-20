@@ -5,6 +5,7 @@
   mypeople            (no verb)                        alias for `up` (what `uvx mypeople` runs)
   mypeople down                                        stop daemons (board/roster kept on disk)
   mypeople status                                      health + agents + roster
+  mypeople auth-check [--quiet]                        re-check this node's AI login (exit 0 = ready)
   mypeople verify                                      run the shipped acceptance harness
   mypeople logs [name]                                 tail INSTALL_DIR/logs/*.log
 """
@@ -80,6 +81,17 @@ def urls(cfg):
     }
 
 
+def print_login_required(cfg):
+    print("\n  " + "=" * 66)
+    print("  MyPeople is UP but this node has no AI login yet.")
+    print("  The board and the HUD below work; no agent can run until you log in.\n")
+    for line in firstrun.login_howto():
+        print("    %s" % line)
+    print("\n  The Boss starts by itself within ~15s of a successful login —")
+    print("  you do NOT need to restart the container.")
+    print("  " + "=" * 66)
+
+
 def print_urls(cfg):
     u = urls(cfg)
     print("\n  mypeople is up:")
@@ -125,12 +137,18 @@ def cmd_up(args):
     if not wait_health(cfg):
         print("[mypeople] WARNING: HUD health not ready after 40s; check `mypeople logs`",
               file=sys.stderr)
-    # Ensure the Boss deterministically. Existing nodes must resume their persisted session;
-    # only a node without a Boss roster entry may create the initial session.
-    mp = os.path.join(bindir, "mp")
-    subprocess.run(["python3", mp, "ensure-boss", "%s/main:Boss" % host,
-                    "--backend", backend],
-                   env=env, cwd=install)
+    if backend is None:
+        # Login-required mode: the front doors are up and say so, but there is no backend to
+        # spawn an agent against yet. boss-supervisor.sh re-checks and starts the Boss on its
+        # own the moment a login lands, so the user never needs a down/up cycle.
+        print_login_required(cfg)
+    else:
+        # Ensure the Boss deterministically. Existing nodes must resume their persisted session;
+        # only a node without a Boss roster entry may create the initial session.
+        mp = os.path.join(bindir, "mp")
+        subprocess.run(["python3", mp, "ensure-boss", "%s/main:Boss" % host,
+                        "--backend", backend],
+                       env=env, cwd=install)
     print_urls(cfg)
     if foreground:
         if os.environ.get("MYPEOPLE_CONTAINER") == "1":
@@ -217,6 +235,38 @@ def cmd_down(args):
     return 0
 
 
+# ---------------------------------------------------------------- auth-check
+def cmd_auth_check(args):
+    """Re-resolve this node's login and republish the auth state file.
+
+    Called on a loop by boss-supervisor.sh so a login performed while the stack is already
+    running takes effect without a down/up cycle. Exits 0 when this node can run agents.
+    """
+    install = firstrun.install_dir()
+    state = {}
+    try:
+        with open(firstrun.auth_state_path(install)) as f:
+            state = json.load(f) or {}
+    except Exception:
+        state = {}
+    # Honour an explicit backend choice; with none, ANY completed login unblocks the node --
+    # the user must not be forced into claude just because it is the default name in the config.
+    requested = (state.get("requested") or "").strip() or None
+    ok, backend, msg = firstrun.resolve_auth(requested, chooser=None)
+    firstrun.write_auth_state(install, ok, backend if ok else None, msg,
+                              requested or "")
+    if ok:
+        # Persist the backend the login actually landed on, so every later spawn agrees with it.
+        if (firstrun._read_env_val("DEFAULT_BACKEND") or "") != backend:
+            firstrun.write_queue_env(install, backend)
+        if "--quiet" not in args:
+            print("[mypeople] auth: %s" % msg)
+        return 0
+    if "--quiet" not in args:
+        print("[mypeople] %s" % msg, file=sys.stderr)
+    return 1
+
+
 # ---------------------------------------------------------------- status
 def cmd_status(args):
     cfg = load_cfg()
@@ -272,7 +322,8 @@ def main():
     if not argv or argv[0] == "up":
         return cmd_up(argv[1:] if argv else [])
     verb, rest = argv[0], argv[1:]
-    table = {"down": cmd_down, "status": cmd_status, "verify": cmd_verify, "logs": cmd_logs}
+    table = {"down": cmd_down, "status": cmd_status, "verify": cmd_verify, "logs": cmd_logs,
+             "auth-check": cmd_auth_check}
     fn = table.get(verb)
     if not fn:
         print(__doc__)
