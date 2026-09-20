@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>MyPlow</title>
+<!--
+  Shown for the seconds between double-click and the board being ready. The Rust side
+  navigates this window to the board once `mypeople up` returns, so nothing here is
+  interactive and nothing here calls Tauri.
+-->
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid; place-content: center; justify-items: center; gap: 1.25rem;
+    background: #11130f; color: #d8d2c4;
+    font: 400 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    -webkit-user-select: none; user-select: none;
+  }
+  h1 { margin: 0; font-size: 1.5rem; letter-spacing: .22em; font-weight: 500; }
+  p  { margin: 0; opacity: .55; }
+  .bar { width: 190px; height: 2px; background: #2c2f26; overflow: hidden; }
+  .bar i { display: block; width: 40%; height: 100%; background: #9ab35e; animation: slide 1.15s ease-in-out infinite; }
+  @keyframes slide { 0% { transform: translateX(-100%) } 100% { transform: translateX(250%) } }
+  @media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 100% } }
+</style>
+<h1>MYPLOW</h1>
+<div class="bar"><i></i></div>
+<p>starting the daemons&hellip;</p>

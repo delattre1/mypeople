@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The splash page is static and the board pages are served by our own daemons over loopback; neither calls Tauri. Nothing is granted.",
+  "windows": ["main"],
+  "permissions": []
+}

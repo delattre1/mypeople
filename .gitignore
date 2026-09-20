@@ -8,3 +8,6 @@ __pycache__/
 mypeople/runtime/verify/node_modules/
 mypeople/runtime/verify/videos/
 mypeople/runtime/verify/browser.out
+desktop/src-tauri/runtime/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/

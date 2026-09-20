@@ -70,7 +70,7 @@ class EnsureWithoutLoginTests(unittest.TestCase):
         # A MyPlow agent runs with MYPEOPLE_BACKEND/DEFAULT_BACKEND exported, and ensure()
         # honours those as an explicit request. Left in place, every test below would silently
         # be testing "claude was demanded" rather than "nothing was demanded".
-        for key in ("MYPEOPLE_BACKEND", "DEFAULT_BACKEND", "MYPEOPLE_CONTAINER"):
+        for key in ("MYPEOPLE_BACKEND", "DEFAULT_BACKEND", "MYPEOPLE_CONTAINER", "MYPEOPLE_DESKTOP"):
             p = mock.patch.dict(os.environ)
             p.start()
             self.addCleanup(p.stop)
@@ -101,6 +101,18 @@ class EnsureWithoutLoginTests(unittest.TestCase):
         self.assertTrue(host, "...but the node still has an identity and must come up")
         self.assertTrue(os.path.exists(firstrun.CONFIG_PATH),
                         "the daemons need QUEUE_SECRET/HOST_ID even with nobody logged in")
+
+    def test_desktop_app_comes_up_and_points_at_its_own_terminal(self):
+        """A double-clicked .app has no terminal to refuse into: exiting is a window that never
+        opens. It must come up like the container does, and must not tell a Mac user to run
+        `docker compose exec`."""
+        with with_auth(), mock.patch.dict(os.environ, {"MYPEOPLE_DESKTOP": "1"}):
+            _, host, backend = firstrun.ensure()
+        self.assertIsNone(backend)
+        self.assertTrue(host)
+        howto = self._state()["howto"]
+        self.assertTrue(any("auth login" in line for line in howto))
+        self.assertFalse(any("docker" in line for line in howto), howto)
 
     def test_native_install_still_refuses_cleanly(self):
         """An installer has a human reading stderr and no restart policy. Unchanged on purpose."""

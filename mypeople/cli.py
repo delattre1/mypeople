@@ -132,7 +132,7 @@ def print_login_required(cfg):
     for line in firstrun.login_howto():
         print("    %s" % line)
     print("\n  The Boss starts by itself within ~15s of a successful login —")
-    print("  you do NOT need to restart the container.")
+    print("  you do NOT need to restart MyPlow.")
     print("  " + "=" * 66)
 
 
