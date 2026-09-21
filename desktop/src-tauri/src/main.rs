@@ -12,9 +12,11 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-use tauri::{Manager, RunEvent};
+use tauri::webview::NewWindowResponse;
+use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
 
 /// A `Command` for the carried interpreter, with the carried runtime ahead of everything.
 ///
@@ -99,6 +101,46 @@ fn stop_runtime(res: &Path) {
     let _ = python(res).args(["-m", "mypeople.cli", "down"]).status();
 }
 
+/// Loopback is our own daemons: the ttyd terminals and the board. Anything else is the internet.
+fn is_local(url: &Url) -> bool {
+    matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "0.0.0.0" | "::1" | "[::1]"))
+}
+
+/// Every `window.open(...)` and `target="_blank"` link in the pages lands here.
+///
+/// WKWebView silently drops a new-window request unless the app handles it, so without this
+/// the click on an agent's name — which opens its live terminal — did nothing in the app while
+/// it opened a tab in a browser. It is handled once, here, for every such link the pages have
+/// (agent names, proof links, links inside comments) instead of patching each caller.
+///
+/// Our own terminals open as a new MyPlow window, the app's equivalent of the browser tab.
+/// Links to the outside world (a GitHub PR in a comment) go to the default browser via macOS's
+/// own `open`, where the user's logins live; rendering GitHub inside MyPlow would be a browser
+/// without their session.
+fn open_new_window(app: &AppHandle, url: Url) -> NewWindowResponse<tauri::Wry> {
+    if !is_local(&url) {
+        if matches!(url.scheme(), "http" | "https" | "mailto") {
+            let _ = Command::new("/usr/bin/open").arg(url.as_str()).status();
+        }
+        return NewWindowResponse::Deny;
+    }
+    // A window of our own, pointed straight at the URL, rather than handing WebKit a popup to
+    // load into. A popup has to be built on the opener's exact webview configuration (macOS
+    // requires it) and inherits the page's window.open() features; an ordinary window has
+    // neither constraint, and the terminal page never uses window.opener, so declining the
+    // popup loses nothing.
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let label = format!("term-{}", N.fetch_add(1, Ordering::Relaxed));
+    let _ = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+        .title("MyPlow")
+        .inner_size(1100.0, 720.0)
+        .on_document_title_changed(|w, title| {
+            let _ = w.set_title(&title);
+        })
+        .build();
+    NewWindowResponse::Deny
+}
+
 fn resources(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .resource_dir()
@@ -110,6 +152,17 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
             let res = resources(&handle);
+
+            // Built here rather than in tauri.conf.json: only a window made in code can carry the
+            // new-window handler, and without it every link that opens a new tab is dead.
+            let opener = handle.clone();
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("MyPlow")
+                .inner_size(1280.0, 860.0)
+                .min_inner_size(900.0, 600.0)
+                .center()
+                .on_new_window(move |url, _features| open_new_window(&opener, url))
+                .build()?;
 
             // Off the main thread: first run materializes the install and can take seconds,
             // and blocking here would mean a beachball instead of the splash.

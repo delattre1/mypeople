@@ -7,17 +7,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "MyPlow",
-        "width": 1280,
-        "height": 860,
-        "minWidth": 900,
-        "minHeight": 600,
-        "center": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
