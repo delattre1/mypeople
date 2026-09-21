@@ -14,6 +14,11 @@ QUEUE_URL = CFG["QUEUE_URL"]
 SECRET = CFG.get("QUEUE_SECRET", "")
 TTYD_PORT = CFG["TTYD_PORT"]
 DEFAULT_BACKEND = CFG.get("DEFAULT_BACKEND", "claude")
+# Backend for NEW agents spawned without --backend (what the Boss does when it hires). Split from
+# DEFAULT_BACKEND on purpose: ensure-boss counts the Boss alive only if its window runs
+# DEFAULT_BACKEND, so moving that knob to change new agents would make the supervisor "recover" a
+# healthy Boss within one tick. Unset means the same as DEFAULT_BACKEND, as before.
+DEFAULT_AGENT_BACKEND = (CFG.get("DEFAULT_AGENT_BACKEND", "") or DEFAULT_BACKEND).strip().lower()
 DEFAULT_CLAUDE_MODEL = CFG.get("DEFAULT_CLAUDE_MODEL", CFG["DEFAULT_ENG_MODEL"])
 DEFAULT_CODEX_MODEL = CFG.get("DEFAULT_CODEX_MODEL", "")
 DEFAULT_GROK_MODEL = CFG.get("DEFAULT_GROK_MODEL", "")
@@ -533,7 +538,7 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
               file=sys.stderr)
         return 2
     aid = full_aid(argv[0])
-    backend = DEFAULT_BACKEND
+    backend = None  # resolved after the flags: the Boss and new agents default differently
     cwd = None
     boss = None
     boss_given = False
@@ -592,6 +597,8 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
         print("ERROR: --boss given with an empty/whitespace value (unset $AGENT_ID bug); refusing to "
               "create an agent whose boss resolves to '<host>/'.", file=sys.stderr)
         return 3
+    if backend is None:
+        backend = DEFAULT_BACKEND if is_master else DEFAULT_AGENT_BACKEND
     backend = (backend or "").strip().lower()
     if backend not in VALID_BACKENDS:
         print("ERROR: unsupported backend %r; choose claude, codex or grok" % backend, file=sys.stderr)
