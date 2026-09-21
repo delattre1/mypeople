@@ -125,3 +125,18 @@ mypeople up --client
 
 For cross-host terminal links, set `TTYD_PUBLIC_URL` to a browser-reachable URL for that worker,
 such as `http://worker.lan:7681`. A same-host board derives the terminal host from the browser origin.
+
+## GitHub PR watcher
+
+Agents open PRs and ask for reviews; this plugin makes sure they hear back. Every minute it finds the
+open PRs your GitHub login authored, and sends each new review, inline review comment or comment to
+the agent whose board card links that PR — the Boss if no card does. Needs the `gh` CLI logged in.
+
+```bash
+export GITHUB_PRS=1                        # in ~/.config/mypeople/queue.env, then mypeople down && mypeople up
+export GITHUB_PRS_AUTHOR="your-login"      # optional, default: whoever gh is logged in as
+```
+
+`python3 "$INSTALL_DIR/plugins/github-prs/github-prs.py" status` lists the PRs it watches and where
+each one would be delivered. The first time it sees a PR it records the existing comments silently,
+so turning it on never replays old reviews.

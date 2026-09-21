@@ -81,6 +81,8 @@ while true; do
   ensure "ttyd -W -a -p $TTYD_PORT"        "exec ttyd -W -a -p $TTYD_PORT $TTYD_CLIENT_OPTS '$BIN/ttyd-attach.sh'"
   ensure "ttyd -a -p $TTYD_RO_PORT"        "exec ttyd -a -p $TTYD_RO_PORT $TTYD_CLIENT_OPTS '$BIN/ttyd-attach.sh'"
   ensure "$BIN/boss-supervisor.sh"         "exec bash '$BIN/boss-supervisor.sh'"
+  # GitHub PR watcher: off until queue.env sets GITHUB_PRS (see the plugin's header).
+  [ -n "${GITHUB_PRS:-}" ] && ensure "$ID/plugins/github-prs/github-prs.py" "exec python3 '$ID/plugins/github-prs/github-prs.py' serve"
   recycle_leaked_ttyd "ttyd -W -a -p $TTYD_PORT"
   recycle_leaked_ttyd "ttyd -a -p $TTYD_RO_PORT"
   sleep 10

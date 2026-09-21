@@ -269,6 +269,8 @@ def cmd_down(args):
     for pat in ("supervise.sh", "queue-server.py", "todo-server.py", "queue-client.py",
                 "board-exporter.py", "boss-supervisor.sh"):
         subprocess.run(["pkill", "-f", os.path.join(bindir, pat)], capture_output=True)
+    subprocess.run(["pkill", "-f", os.path.join(install, "plugins", "github-prs", "github-prs.py")],
+                   capture_output=True)
     # Writable + read-only ttyd. On Linux, supervise.sh detaches children with setsid so
     # killpg on the supervisor does not reach them. Without both pkill patterns, `down`/`up`
     # upgrades leave the RO graph-tile ttyd running with the old argv (card 789b5d04f9).
