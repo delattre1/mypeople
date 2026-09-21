@@ -229,6 +229,10 @@ function relTime(ts){
   if(d<86400) return Math.round(d/3600)+"h ago";
   return Math.round(d/86400)+"d ago";
 }
+// "14m ago" is computed once, when a comment is drawn, and the board only redraws when the data
+// changes -- so a thread left open kept its old labels until a new message or a reopen. Every label
+// carries its timestamp; this refreshes them in place, without redrawing anything.
+function refreshRelTimes(){ for(const e of document.querySelectorAll(".ev-ago[data-ts]")){ const t=relTime(e.dataset.ts); if(e.textContent!==t) e.textContent=t; } }
 function initials(name){ if(!name) return "?"; name=String(name);
   if(name==="CEO") return "CEO";
   let base = name.split("/").pop(); return base.slice(0,2).toUpperCase(); }
@@ -351,7 +355,7 @@ function evEl(it){
     const a=document.createElement("a"); a.className="asg-link"; a.href="#"; a.textContent=label;
     a.addEventListener("click",e=>openAgent(label,e)); h.appendChild(a);
   } else { h.appendChild(document.createTextNode(label||"")); }
-  const ago=document.createElement("span"); ago.className="ev-ago"; ago.textContent=relTime(it.ts); h.appendChild(ago);
+  const ago=document.createElement("span"); ago.className="ev-ago"; ago.dataset.ts=it.ts; ago.textContent=relTime(it.ts); h.appendChild(ago);
   const txt=document.createElement("div"); txt.className="ev-text";
   try{
     if(it.kind==="proof"){
@@ -581,6 +585,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
   setInterval(()=>fetchBoard(false), 3000);
   setInterval(loadAgents, 6000);
   setInterval(healthWatch, 3000);
+  setInterval(refreshRelTimes, 30000);
 });
 </script>
 </body>
