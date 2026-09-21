@@ -37,7 +37,7 @@ class SeedRunsBeforeTheAuthGateTests(unittest.TestCase):
         self.install = os.path.join(self.tmp.name, "install")
         os.makedirs(self.home)
         config = os.path.join(self.install, "config", "queue.env")
-        for key in ("MYPEOPLE_BACKEND", "DEFAULT_BACKEND", "MYPEOPLE_CONTAINER"):
+        for key in ("MYPEOPLE_BACKEND", "DEFAULT_BACKEND", "MYPEOPLE_CONTAINER", "MYPEOPLE_DESKTOP"):
             p = mock.patch.dict(os.environ)
             p.start()
             self.addCleanup(p.stop)
