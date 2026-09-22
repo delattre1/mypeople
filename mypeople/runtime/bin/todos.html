@@ -281,6 +281,12 @@ function matches(task){
   const hay=(task.id+" "+(task.text||"")+" "+(task.assignee||"")).toLowerCase();
   return query.split(/\s+/).filter(Boolean).every(w=>hay.includes(w));
 }
+// Active cards always sit above done and cancelled ones -- in a search, and with "show done" or
+// "show cancelled" on. The sort is stable, so each group keeps its own pins-first, board order.
+function activeFirst(tasks){
+  const finished=t=>t.state==="done"||t.state==="cancelled";
+  return tasks.slice().sort((a,b)=>finished(a)-finished(b));
+}
 function visible(task){
   if(query) return matches(task);
   if(lens==="recurring") return task.state==="recurring";
@@ -338,10 +344,9 @@ function cardEl(task){
 function render(){
   const list=$("#list"); list.innerHTML="";
   const {pins, normal}=orderedTasks();
-  const vpins=pins.filter(visible), vnorm=normal.filter(visible);
-  vpins.forEach(t=>list.appendChild(cardEl(t)));
-  vnorm.forEach(t=>list.appendChild(cardEl(t)));
-  const n=vpins.length+vnorm.length;
+  const shown=activeFirst([...pins.filter(visible), ...normal.filter(visible)]);
+  shown.forEach(t=>list.appendChild(cardEl(t)));
+  const n=shown.length;
   $("#searchN").textContent = query ? n+(n===1?" match":" matches") : "";
   if(query && !n){ const li=document.createElement("li"); li.className="no-match"; li.textContent="No task matches “"+query+"”"; list.appendChild(li); }
   $("#recurN").textContent=Object.values(BOARD.tasks).filter(t=>t.state==="recurring").length;

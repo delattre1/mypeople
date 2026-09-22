@@ -36,6 +36,12 @@ for (const q of JSON.parse(process.env.QUERIES)) {
   query = q;
   out[q] = tasks.filter(visible).map(t => t.id);
 }
+// Board order as given (pins first), with finished cards interleaved.
+out.__order = activeFirst([
+  {id: "pin-done", state: "done"}, {id: "pin-live", state: "working"},
+  {id: "n1-cancelled", state: "cancelled"}, {id: "n2-live", state: "working"},
+  {id: "n3-done", state: "done"}, {id: "n4-live", state: "blocked"},
+]).map(t => t.id);
 console.log(JSON.stringify(out));
 """
 
@@ -72,6 +78,15 @@ class BoardSearchTests(unittest.TestCase):
 
     def test_matches_the_card_id(self):
         self.assertEqual(["c3"], self.out["c3"])
+
+    def test_active_cards_always_come_first_in_board_order(self):
+        # every live card above every finished one; each group keeps its own (pins-first) order
+        self.assertEqual(["pin-live", "n2-live", "n4-live", "pin-done", "n1-cancelled", "n3-done"],
+                         self.out["__order"])
+
+    def test_a_search_lists_active_matches_before_finished_ones(self):
+        self.assertIn("activeFirst([...pins.filter(visible), ...normal.filter(visible)])",
+                      HTML)
 
     def test_no_match_is_empty(self):
         self.assertEqual([], self.out["zzz"])
