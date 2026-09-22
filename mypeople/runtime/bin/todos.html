@@ -30,6 +30,12 @@ h1{font-family:var(--serif);font-size:34px;font-weight:400;margin:0;color:var(--
 .addbar{display:flex;gap:10px;margin:20px 0 16px;}
 #addInput{flex:1;font-family:var(--sans);font-size:18px;background:var(--surface);border:1px solid var(--dark-border);border-radius:14px;padding:16px 20px;color:var(--text-dark);}
 #addInput::placeholder{color:var(--muted-dark);}
+.searchbar{display:none;gap:12px;align-items:center;margin:0 0 14px;}
+.searchbar.on{display:flex;}
+#search{flex:1;font-family:var(--sans);font-size:16px;background:var(--surface);border:1px solid var(--dark-border);border-radius:12px;padding:11px 16px;color:var(--text-dark);}
+#search::placeholder{color:var(--muted-dark);}
+#searchN{margin-top:0;white-space:nowrap;}
+.no-match{list-style:none;padding:18px 4px;color:var(--muted-dark);font-family:var(--mono);font-size:13px;}
 .btn-volt{background:var(--volt);color:var(--midnight);border:none;border-radius:14px;font-family:var(--sans);font-size:17px;font-weight:700;padding:0 22px;cursor:pointer;}
 .btn-volt:hover{box-shadow:0 0 0 3px var(--volt-glow);}
 .vb-label{font-family:var(--mono);font-size:10px;text-transform:uppercase;color:var(--muted-dark);}
@@ -146,6 +152,10 @@ body.modal-open #modalbg{display:flex;}
     <button class="vbtn" data-toggle="cancelled">show cancelled</button>
     <button class="vbtn" data-lens="recurring">recurring · <span id="recurN">0</span></button>
     <span class="boss-msg subt" id="bossMsg"></span>
+  </div>
+  <div class="searchbar" id="searchbar">
+    <input id="search" type="search" placeholder="Filter tasks by title, owner or id…  (Esc to clear)" autocomplete="off" spellcheck="false">
+    <span class="subt" id="searchN"></span>
   </div>
   <ul id="list"></ul>
 </div>
@@ -264,7 +274,15 @@ function orderedTasks(){
   const normal = (BOARD.order||[]).map(id=>t[id]).filter(x=>x && !x.pinned);
   return {pins, normal};
 }
+// Cmd/Ctrl+F filter. Every word must appear (AND), matched against the same fields the Graph's
+// search uses: id, title and owner.
+let query="";
+function matches(task){
+  const hay=(task.id+" "+(task.text||"")+" "+(task.assignee||"")).toLowerCase();
+  return query.split(/\s+/).filter(Boolean).every(w=>hay.includes(w));
+}
 function visible(task){
+  if(query) return matches(task);
   if(lens==="recurring") return task.state==="recurring";
   if(task.state==="recurring") return false;           // recurring never on working board
   if(task.state==="done" && !showDone) return false;
@@ -323,6 +341,9 @@ function render(){
   const vpins=pins.filter(visible), vnorm=normal.filter(visible);
   vpins.forEach(t=>list.appendChild(cardEl(t)));
   vnorm.forEach(t=>list.appendChild(cardEl(t)));
+  const n=vpins.length+vnorm.length;
+  $("#searchN").textContent = query ? n+(n===1?" match":" matches") : "";
+  if(query && !n){ const li=document.createElement("li"); li.className="no-match"; li.textContent="No task matches “"+query+"”"; list.appendChild(li); }
   $("#recurN").textContent=Object.values(BOARD.tasks).filter(t=>t.state==="recurring").length;
   $("[data-toggle='done']").classList.toggle("active", showDone);
   $("[data-toggle='cancelled']").classList.toggle("active", showCancelled);
@@ -466,6 +487,18 @@ function openCard(id, fromHistory){
 function closeCard(push){ openTaskId=null; document.body.classList.remove("modal-open"); $("#modal").dataset.sig="";
   if(push!==false){ const u=new URL(location.href); u.searchParams.delete("task"); history.pushState({},"",u); } }
 document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&openTaskId) closeCard(); });
+// The app's web view has no find bar of its own, and the browser's only highlights text: take the
+// shortcut and filter the board instead.
+document.addEventListener("keydown",e=>{
+  if((e.metaKey||e.ctrlKey) && !e.altKey && e.key.toLowerCase()==="f"){
+    e.preventDefault(); $("#searchbar").classList.add("on"); const s=$("#search"); s.focus(); s.select();
+  }
+});
+$("#search").addEventListener("input",e=>{ query=e.target.value.trim().toLowerCase(); render(); });
+$("#search").addEventListener("keydown",e=>{
+  if(e.key==="Escape"){ e.preventDefault(); e.stopPropagation(); e.target.value=""; query=""; e.target.blur();
+    $("#searchbar").classList.remove("on"); render(); }
+});
 $("#modalbg").addEventListener("click", e=>{ if(e.target.id==="modalbg") closeCard(); });
 
 // ---- data ----
