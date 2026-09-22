@@ -477,14 +477,43 @@ def emit_task_event(board, task, reason, by=None):
     ping_boss('[todo] task %s "%s": %s' % (tid, title_of(task), reason))
 
 
+def owner_relay(card_id, by, bodytext):
+    """The owner's copy of a comment: their words, whole and unchanged, plus where it was said.
+
+    Same shape the Boss relays by hand, so an agent reads exactly what it read before.
+    """
+    return '%s on card %s, verbatim: "%s"' % (by, card_id, bodytext)
+
+
+def deliver_comment(card_id, title, owner, by, bodytext):
+    """Owner first, then the Boss. Runs off the request thread: mp_send blocks up to 25s."""
+    delivered = False
+    if owner:
+        delivered = mp_send(owner, owner_relay(card_id, by, bodytext)) == 0
+    # ping_boss stays the one seam for Boss notifications; it is what the verbatim-relay tests
+    # pin, and what any future change to Boss delivery has to go through.
+    ping_boss('[todo] comment on %s "%s" by %s%s: %s'
+              % (card_id, title, by,
+                 " (already delivered to %s)" % owner if delivered else "", bodytext))
+
+
 def emit_comment_event(board, task, by, bodytext):
     if task.get("test"):
         return
-    tid = task["id"]
-    # Boss ping: exempt only the Boss's own comment
-    if by != BOSS_AGENT:
-        task["pingsToBoss"] = task.get("pingsToBoss", 0) + 1
-        ping_boss('[todo] comment on %s "%s" by %s: %s' % (tid, title_of(task), by, bodytext))
+    if by == BOSS_AGENT:
+        return                                  # the Boss's own comment pings nobody
+    task["pingsToBoss"] = task.get("pingsToBoss", 0) + 1
+    # Straight to the card's owner. Routing through the Boss meant every word waited for a whole
+    # agent turn before it moved: measured on the CEO's own card, a median of 18s between his
+    # comment and the owner acting on it, worst case 439s. The board already knows the owner, so
+    # that hop buys nothing. The Boss is still told -- and told the owner already has it, so it
+    # does not relay the same words a second time.
+    owner = (task.get("assignee") or "").strip()
+    if owner in (by, BOSS_AGENT):
+        owner = ""
+    threading.Thread(target=deliver_comment,
+                     args=(task["id"], title_of(task), owner, by, bodytext),
+                     daemon=True).start()
 
 
 # ---------------- proof kind classification ----------------
