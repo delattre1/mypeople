@@ -175,3 +175,65 @@ class WiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CatchupTests(unittest.TestCase):
+    """The reviews the ordinary poll can never announce: they landed before it was watching."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.m = load(self.tmp.name)
+        self.reviews = [{"id": 1, "user": {"login": "srosro"}, "state": "APPROVED",
+                         "submitted_at": "2026-09-20T10:00:00Z", "body": "ship it",
+                         "html_url": PR + "#r1"}]
+        self.comments = []
+        self.sent = []
+        api = {"reviews": lambda: self.reviews, "comments": lambda: self.comments}
+        p = mock.patch.object(self.m, "gh", lambda *a: api["reviews" if "/reviews" in a[-1] else "comments"]())
+        p.start(); self.addCleanup(p.stop)
+        for name, fn in {
+            "open_prs": lambda author: [("acme/app", 8, "t", PR)],
+            "fetch_board": lambda: {"tasks": {"a": card("node/main:eng-1", comments=[PR])}},
+            "deliver": lambda agent, text: (self.sent.append((agent, text)), True)[1],
+        }.items():
+            q = mock.patch.object(self.m, name, fn); q.start(); self.addCleanup(q.stop)
+        env = mock.patch.dict(os.environ, {"HOST_ID": "node", "MYPEOPLE_CONFIG_PATH": "/nonexistent"})
+        env.start(); self.addCleanup(env.stop)
+
+    def test_an_unanswered_review_is_reported_and_delivered_to_the_owner(self):
+        found = self.m.catchup("fleet", {})
+        self.assertEqual([("acme/app", 8)], [(r, n) for r, n, _ in found])
+        (agent, text), = self.sent
+        self.assertEqual("node/main:eng-1", agent)
+        self.assertIn("[catch-up]", text)
+        self.assertIn("approved", text)
+
+    def test_a_review_we_already_answered_is_left_alone(self):
+        self.comments = [{"user": {"login": "fleet"}, "created_at": "2026-09-20T11:00:00Z"}]
+        self.assertEqual([], self.m.catchup("fleet", {}))
+        self.assertEqual([], self.sent)
+
+    def test_our_own_review_is_not_something_to_answer(self):
+        self.reviews = [dict(self.reviews[0], user={"login": "fleet"})]
+        self.assertEqual([], self.m.catchup("fleet", {}))
+
+    def test_a_dry_run_sends_nothing(self):
+        found = self.m.catchup("fleet", {}, send=False)
+        self.assertEqual(1, len(found))
+        self.assertEqual([], self.sent)
+
+    def test_running_it_twice_does_not_send_twice(self):
+        state = {}
+        self.m.catchup("fleet", state)
+        self.assertEqual(1, len(self.sent))
+        # the ordinary poll must not repeat what catch-up just sent
+        self.assertEqual([], self.m.fresh_events("acme/app#8", [ev("review:1")], state))
+
+    def test_a_pr_no_card_owns_tells_the_boss_what_to_do(self):
+        with mock.patch.object(self.m, "fetch_board", lambda: {"tasks": {}}):
+            self.m.catchup("fleet", {})
+        (agent, text), = self.sent
+        self.assertEqual("node/main:Boss", agent)
+        self.assertIn("no card on the board links this PR", text)
+        self.assertIn("give it to an agent", text)

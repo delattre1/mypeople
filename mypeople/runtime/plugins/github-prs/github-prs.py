@@ -19,6 +19,8 @@ without being sent, so turning this on never replays a PR's history at anyone.
     github-prs.py serve        poll forever (what supervise.sh runs)
     github-prs.py once         one poll, then exit
     github-prs.py status       login, open PRs, and where each one would be delivered
+    github-prs.py catchup      deliver every review still unanswered (use after downtime)
+    github-prs.py catchup-dry  list them without sending anything
 """
 import json
 import os
@@ -151,7 +153,7 @@ def owner_for_pr(board, pr_url):
     return best[1] if best else ""
 
 
-def format_event(repo, n, event, owned):
+def format_event(repo, n, event, owned, orphan=False):
     body = " ".join(HTML_COMMENT.sub("", event["body"]).split())
     if len(body) > SNIPPET:
         body = body[:SNIPPET - 1] + "…"
@@ -160,7 +162,13 @@ def format_event(repo, n, event, owned):
     head = "[PR %s] %s#%d%s by %s" % (what, repo, n, " (your PR)" if owned else "", event["user"])
     if verdict:
         head += " — %s" % verdict
-    return "%s: %s %s" % (head, body or "(no text)", event["url"])
+    tail = ""
+    if orphan:
+        # Landing on the Boss with nobody owning it is how a review goes unanswered: it reads as
+        # one more line among everything else the Boss is told. Say what to do with it.
+        tail = (" — no card on the board links this PR, so nobody owns it: give it to an agent"
+                " or handle it yourself.")
+    return "%s: %s %s%s" % (head, body or "(no text)", event["url"], tail)
 
 
 # ---------------------------------------------------------------- the fleet
@@ -224,13 +232,72 @@ def poll(author, state):
             log("board unreadable (%s); sending to the Boss" % e)
     for repo, n, url, e in outbox:
         agent, owned = route(board, url)
-        text = format_event(repo, n, e, owned)
+        text = format_event(repo, n, e, owned, orphan=not owned)
         if not deliver(agent, text) and agent != boss_id():
             log("%s unreachable; sending to the Boss" % agent)
-            agent, text = boss_id(), format_event(repo, n, e, False)
+            agent, text = boss_id(), format_event(repo, n, e, False, orphan=True)
             deliver(agent, text)
         log("%s#%d %s -> %s" % (repo, n, e["key"], agent))
     save_state(state)
+
+
+def unanswered(author, repo, n):
+    """The newest review on this PR that nothing of ours answered after it, or None.
+
+    Bootstrap never replays history on purpose, so a review that landed before this plugin
+    existed -- or while it was down -- is never announced by the ordinary poll. That silence is
+    exactly what leaves an approval sitting for days.
+    """
+    try:
+        revs = gh("api", "--paginate", "repos/%s/pulls/%d/reviews?per_page=100" % (repo, n)) or []
+        cms = gh("api", "--paginate", "repos/%s/issues/%d/comments?per_page=100" % (repo, n)) or []
+    except RuntimeError as e:
+        log("catch-up: %s#%d unreadable: %s" % (repo, n, e))
+        return None
+    theirs = [r for r in revs
+              if (r.get("user") or {}).get("login") != author and r.get("submitted_at")]
+    if not theirs:
+        return None
+    last = max(theirs, key=lambda r: r["submitted_at"])
+    ours = [c.get("created_at") or "" for c in cms
+            if (c.get("user") or {}).get("login") == author]
+    if any(t > last["submitted_at"] for t in ours):
+        return None
+    return {"key": "review:%s" % last["id"], "kind": "review",
+            "user": (last.get("user") or {}).get("login", "?"), "body": last.get("body") or "",
+            "state": last.get("state") or "", "url": last.get("html_url") or ""}
+
+
+def catchup(author, state, send=True):
+    """Every open PR whose newest review is still unanswered, delivered like a normal event.
+
+    Safe to run twice: what it sends is marked seen, so the ordinary poll will not repeat it.
+    """
+    board = None
+    try:
+        board = fetch_board()
+    except Exception as e:
+        log("board unreadable (%s); routing to the Boss" % e)
+    seen = set(state.setdefault("seen", []))
+    found = []
+    for repo, n, _, url in open_prs(author):
+        event = unanswered(author, repo, n)
+        if not event:
+            continue
+        found.append((repo, n, event))
+        if not send:
+            continue
+        agent, owned = route(board, url)
+        if not deliver(agent, "[catch-up] " + format_event(repo, n, event, owned, orphan=not owned)) \
+                and agent != boss_id():
+            agent = boss_id()
+            deliver(agent, "[catch-up] " + format_event(repo, n, event, False, orphan=True))
+        seen.add(event["key"])
+        log("catch-up %s#%d %s -> %s" % (repo, n, event["key"], agent))
+    if send:
+        state["seen"] = sorted(seen)
+        save_state(state)
+    return found
 
 
 def main(argv):
@@ -249,6 +316,13 @@ def main(argv):
             print("  %s#%d -> %s%s" % (repo, n, agent, "" if owned else "  (no card links it)"))
         return 0
     state = load_state()
+    if cmd in ("catchup", "catchup-dry"):
+        found = catchup(author, state, send=(cmd == "catchup"))
+        print("%d open PR(s) with an unanswered review%s"
+              % (len(found), "" if cmd == "catchup" else " (dry run, nothing sent)"))
+        for repo, n, event in found:
+            print("  %s#%d %s by %s" % (repo, n, (event["state"] or "").lower(), event["user"]))
+        return 0
     if cmd == "once":
         poll(author, state)
         return 0

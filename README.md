@@ -138,5 +138,7 @@ export GITHUB_PRS_AUTHOR="your-login"      # optional, default: whoever gh is lo
 ```
 
 `python3 "$INSTALL_DIR/plugins/github-prs/github-prs.py" status` lists the PRs it watches and where
-each one would be delivered. The first time it sees a PR it records the existing comments silently,
+each one would be delivered. `… catchup` delivers every review still waiting for an
+answer (use it after downtime, or when a review lands while the watcher is off); `… catchup-dry`
+lists them without sending. The first time it sees a PR it records the existing comments silently,
 so turning it on never replays old reviews.
