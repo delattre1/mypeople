@@ -206,7 +206,7 @@ class CatchupTests(unittest.TestCase):
         self.assertEqual([("acme/app", 8)], [(r, n) for r, n, _ in found])
         (agent, text), = self.sent
         self.assertEqual("node/main:eng-1", agent)
-        self.assertIn("[catch-up]", text)
+        self.assertIn("[catch-up", text)
         self.assertIn("approved", text)
 
     def test_a_review_we_already_answered_is_left_alone(self):
@@ -229,6 +229,27 @@ class CatchupTests(unittest.TestCase):
         self.assertEqual(1, len(self.sent))
         # the ordinary poll must not repeat what catch-up just sent
         self.assertEqual([], self.m.fresh_events("acme/app#8", [ev("review:1")], state))
+
+    def test_an_old_review_is_left_out_of_the_default_sweep(self):
+        # 158-day-old reviews on forgotten PRs turned the sweep into noise
+        self.reviews = [dict(self.reviews[0], submitted_at="2026-01-01T10:00:00Z")]
+        self.assertEqual([], self.m.catchup("fleet", {}))
+        self.assertEqual([], self.sent)
+
+    def test_asking_for_no_limit_reaches_back(self):
+        self.reviews = [dict(self.reviews[0], submitted_at="2026-01-01T10:00:00Z")]
+        self.assertEqual(1, len(self.m.catchup("fleet", {}, max_age_days=0)))
+
+    def test_the_delivered_line_says_how_old_the_review_is(self):
+        self.m.catchup("fleet", {})
+        (_, text), = self.sent
+        self.assertRegex(text, r"^\[catch-up, \d+d old\] ")
+
+    def test_an_unreadable_timestamp_does_not_crash_the_sweep(self):
+        self.reviews = [dict(self.reviews[0], submitted_at="not-a-date")]
+        self.assertEqual(1, len(self.m.catchup("fleet", {})), "unknown age must not be dropped")
+        (_, text), = self.sent
+        self.assertTrue(text.startswith("[catch-up] "), text[:40])
 
     def test_a_pr_no_card_owns_tells_the_boss_what_to_do(self):
         with mock.patch.object(self.m, "fetch_board", lambda: {"tasks": {}}):

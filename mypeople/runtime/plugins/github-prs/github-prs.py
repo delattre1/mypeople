@@ -19,9 +19,11 @@ without being sent, so turning this on never replays a PR's history at anyone.
     github-prs.py serve        poll forever (what supervise.sh runs)
     github-prs.py once         one poll, then exit
     github-prs.py status       login, open PRs, and where each one would be delivered
-    github-prs.py catchup      deliver every review still unanswered (use after downtime)
+    github-prs.py catchup [--days N]      deliver every review still unanswered
+                               (default: reviews from the last 30 days; 0 = no limit)
     github-prs.py catchup-dry  list them without sending anything
 """
+import calendar
 import json
 import os
 import re
@@ -39,6 +41,8 @@ INTERVAL = int(os.environ.get("GITHUB_PRS_INTERVAL") or 60)
 FULL_SWEEP_SECS = 30 * 60   # updatedAt does not move for every event (a body-less approve), so recheck all
 SEARCH_LIMIT = 100          # gh search's ceiling; hitting it is logged, never silent
 SNIPPET = 400
+# Catch-up reaches back this far by default; --days overrides it, 0 means no limit.
+CATCHUP_MAX_AGE_DAYS = int(os.environ.get("GITHUB_PRS_CATCHUP_DAYS") or 30)
 GH_TIMEOUT = 60
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
 # A comment that is only a slash command ("/srosro-review") is a trigger an agent posted, not a
@@ -241,6 +245,15 @@ def poll(author, state):
     save_state(state)
 
 
+def age_days(iso):
+    """Whole days since an ISO-8601 UTC timestamp, or None if it cannot be read."""
+    try:
+        t = time.strptime(iso.replace("Z", "GMT"), "%Y-%m-%dT%H:%M:%S%Z")
+        return max(0, int((time.time() - calendar.timegm(t)) / 86400))
+    except (ValueError, AttributeError):
+        return None
+
+
 def unanswered(author, repo, n):
     """The newest review on this PR that nothing of ours answered after it, or None.
 
@@ -265,10 +278,11 @@ def unanswered(author, repo, n):
         return None
     return {"key": "review:%s" % last["id"], "kind": "review",
             "user": (last.get("user") or {}).get("login", "?"), "body": last.get("body") or "",
-            "state": last.get("state") or "", "url": last.get("html_url") or ""}
+            "state": last.get("state") or "", "url": last.get("html_url") or "",
+            "age_days": age_days(last["submitted_at"])}
 
 
-def catchup(author, state, send=True):
+def catchup(author, state, send=True, max_age_days=CATCHUP_MAX_AGE_DAYS):
     """Every open PR whose newest review is still unanswered, delivered like a normal event.
 
     Safe to run twice: what it sends is marked seen, so the ordinary poll will not repeat it.
@@ -284,14 +298,22 @@ def catchup(author, state, send=True):
         event = unanswered(author, repo, n)
         if not event:
             continue
+        # A months-old review on a forgotten PR is not news, and mixing it in makes the whole
+        # sweep read as noise. Reach further back only when asked.
+        if max_age_days and (event.get("age_days") or 0) > max_age_days:
+            log("catch-up: skipping %s#%d, its review is %d days old (limit %d)"
+                % (repo, n, event["age_days"], max_age_days))
+            continue
         found.append((repo, n, event))
         if not send:
             continue
         agent, owned = route(board, url)
-        if not deliver(agent, "[catch-up] " + format_event(repo, n, event, owned, orphan=not owned)) \
+        tag = "[catch-up%s] " % ("" if event.get("age_days") is None
+                                 else ", %dd old" % event["age_days"])
+        if not deliver(agent, tag + format_event(repo, n, event, owned, orphan=not owned)) \
                 and agent != boss_id():
             agent = boss_id()
-            deliver(agent, "[catch-up] " + format_event(repo, n, event, False, orphan=True))
+            deliver(agent, tag + format_event(repo, n, event, False, orphan=True))
         seen.add(event["key"])
         log("catch-up %s#%d %s -> %s" % (repo, n, event["key"], agent))
     if send:
@@ -317,11 +339,16 @@ def main(argv):
         return 0
     state = load_state()
     if cmd in ("catchup", "catchup-dry"):
-        found = catchup(author, state, send=(cmd == "catchup"))
+        days = CATCHUP_MAX_AGE_DAYS
+        if "--days" in argv:
+            days = int(argv[argv.index("--days") + 1])
+        found = catchup(author, state, send=(cmd == "catchup"), max_age_days=days)
         print("%d open PR(s) with an unanswered review%s"
               % (len(found), "" if cmd == "catchup" else " (dry run, nothing sent)"))
         for repo, n, event in found:
-            print("  %s#%d %s by %s" % (repo, n, (event["state"] or "").lower(), event["user"]))
+            print("  %s#%d %s by %s%s" % (repo, n, (event["state"] or "").lower(), event["user"],
+                                          "" if event.get("age_days") is None
+                                          else "  (%dd old)" % event["age_days"]))
         return 0
     if cmd == "once":
         poll(author, state)
