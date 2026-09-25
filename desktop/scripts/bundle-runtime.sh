@@ -83,6 +83,36 @@ for tool in ttyd tmux asciinema; do
   vendor_deps "$OUT/bin/$tool"
 done
 
+# libwebsockets dlopens its event-loop plugin at runtime, so it never appears in otool -L and the
+# dependency walk above cannot see it. The directory it looks in is compiled into the library --
+# Homebrew's Cellar -- which exists on no other Mac: that is why ttyd started but served nothing on
+# the CEO's Air ("failed to load evlib_uv"). Carry the plugins and point the library at our own lib
+# directory instead.
+for plug in "$(dirname "$(command -v ttyd)")"/../lib/libwebsockets-evlib_*.dylib; do
+  [ -f "$plug" ] || continue
+  base="$(basename "$plug")"
+  say "$base <- $plug"
+  cp "$plug" "$OUT/lib/$base"
+  chmod u+w "$OUT/lib/$base"
+  install_name_tool -id "@executable_path/../lib/$base" "$OUT/lib/$base" 2>/dev/null
+  vendor_deps "$OUT/lib/$base"
+done
+python3 - "$OUT" <<'PY'
+import glob, re, sys
+out = sys.argv[1]
+for lib in glob.glob(out + "/lib/libwebsockets.*.dylib"):
+    blob = open(lib, "rb").read()
+    dirs = [d for d in re.findall(rb"/[\x20-\x7e]{8,120}", blob)
+            if d.endswith(b"/lib") and b"libwebsockets" in d]
+    if not dirs:
+        continue
+    want = b"@executable_path/../lib"          # shorter than any real prefix, so it fits in place
+    for d in dirs:
+        blob = blob.replace(d, want + b"\x00" * (len(d) - len(want)))
+    open(lib, "wb").write(blob)
+    print("[bundle] %s: plugin dir %s -> %s" % (lib.split("/")[-1], dirs[0].decode(), want.decode()))
+PY
+
 # install_name_tool invalidates the signature it rewrote, and arm64 macOS SIGKILLs any
 # unsigned Mach-O — the binary dies with 137 and prints nothing. Ad-hoc signing makes them
 # runnable now; `cargo tauri build` re-signs the whole bundle with the Developer ID for a
@@ -110,8 +140,17 @@ else
     xargs -0 codesign --force --timestamp --options runtime --sign "$IDENTITY"
   find "$OUT/bin" "$OUT/python/bin" -type f -perm -u+x -print0 |
     while IFS= read -r -d '' f; do
-      file -b "$f" | grep -q Mach-O &&
+      file -b "$f" | grep -q Mach-O || continue
+      # ttyd alone gets library validation switched off. Its libwebsockets dlopens an event-loop
+      # plugin (libwebsockets-evlib_uv.dylib) from a directory compiled into the library, i.e.
+      # Homebrew's. Under the hardened runtime a plugin signed by anyone else is refused, and ttyd
+      # dies with "failed to load evlib_uv" before it ever listens -- no terminal tiles at all.
+      if [ "$(basename "$f")" = "ttyd" ] && [ -f "$HERE/../src-tauri/ttyd.entitlements" ]; then
+        codesign --force --timestamp --options runtime \
+                 --entitlements "$HERE/../src-tauri/ttyd.entitlements" --sign "$IDENTITY" "$f"
+      else
         codesign --force --timestamp --options runtime --sign "$IDENTITY" "$f"
+      fi
     done
 fi
 
@@ -136,4 +175,25 @@ for probe in "bin/ttyd --version" "bin/tmux -V" "bin/asciinema --version" "pytho
   fi
 done
 
-say "ok — $(du -shL "$OUT" | cut -f1) in $OUT, all carried binaries run"
+# ttyd --version exits before libwebsockets ever builds its event loop, so the probe above says
+# "runs" for a ttyd that cannot serve a single tile. Start it for real and fetch a page: that is
+# the failure that reached the CEO (signed ttyd, "failed to load evlib_uv", no terminals).
+port=$((40000 + RANDOM % 20000))
+env -i PATH=/usr/bin:/bin "$OUT/bin/ttyd" -a -p "$port" /bin/echo >"$OUT/.ttyd-probe.log" 2>&1 &
+probe_pid=$!
+served=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  sleep 0.5
+  served="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/" 2>/dev/null || true)"
+  [ "$served" = "200" ] && break
+done
+kill "$probe_pid" 2>/dev/null
+if [ "$served" != "200" ]; then
+  echo "[bundle] ttyd starts but does not serve (HTTP ${served:-none}) — the terminals would be dead:" >&2
+  tail -3 "$OUT/.ttyd-probe.log" >&2
+  rm -f "$OUT/.ttyd-probe.log"
+  exit 1
+fi
+rm -f "$OUT/.ttyd-probe.log"
+
+say "ok — $(du -shL "$OUT" | cut -f1) in $OUT, all carried binaries run and ttyd serves"

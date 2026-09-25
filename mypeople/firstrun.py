@@ -87,9 +87,49 @@ def _read_registry_roles(path):
         return {}
 
 
+def _version_tuple(text):
+    """(5, 13, 1) from "5.13.1". None when it is not a plain numeric version."""
+    parts = (text or "").strip().split(".")
+    if not parts or not all(p.isdigit() for p in parts):
+        return None
+    return tuple(int(p) for p in parts)
+
+
+def installed_version(install):
+    try:
+        with open(os.path.join(install, "VERSION")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def refuse_downgrade(install):
+    """True when INSTALL_DIR already holds a NEWER release than this package carries.
+
+    Materialize overwrites the install with whatever the caller ships, and the desktop app
+    carries its own copy of the runtime. So an old .app -- one left in a build folder, or simply
+    reopened by macOS after a reboot -- silently rolled a 5.13.1 install back to 5.8.0 twice on
+    the CEO's Mac, taking every feature since with it and breaking message delivery. Nothing here
+    can tell an intended downgrade from an accident, so the older side always yields.
+
+    Set MYPEOPLE_ALLOW_DOWNGRADE=1 to force it (a deliberate rollback still has a way through).
+    """
+    if os.environ.get("MYPEOPLE_ALLOW_DOWNGRADE") == "1":
+        return False
+    from . import __version__
+    here, there = _version_tuple(__version__), _version_tuple(installed_version(install))
+    return bool(here and there and there > here)
+
+
 def materialize(install):
     """Copy the packaged runtime into a WRITABLE INSTALL_DIR. Idempotent: never overwrite
     existing daemon code differently, and NEVER clobber live state (board/roster/logs)."""
+    from . import __version__
+    if refuse_downgrade(install):
+        _echo("[mypeople] this build is %s and %s already runs %s — leaving it alone.\n"
+              "[mypeople] open the current app, or set MYPEOPLE_ALLOW_DOWNGRADE=1 to force it."
+              % (__version__, install, installed_version(install)))
+        return
     rt = runtime_dir()
     os.makedirs(install, exist_ok=True)
     # code trees: refresh from the package so upgrades take effect (state dirs excluded below).

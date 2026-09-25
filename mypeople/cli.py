@@ -92,6 +92,10 @@ def restart_if_serving_stale(cfg, install):
     """
     if not _daemons_running(install):
         return False
+    if firstrun.refuse_downgrade(install):
+        # An older app must not cycle a newer install's daemons either: they are running the
+        # install's own, newer code, which is exactly what should keep serving.
+        return False
     stamp = _serving_version_path(install)
     try:
         with open(stamp) as f:
