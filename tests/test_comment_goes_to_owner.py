@@ -77,6 +77,24 @@ class CommentDeliveryTests(unittest.TestCase):
         self.emit(self.task(), by=self.srv.BOSS_AGENT)
         self.assertEqual([], self.sent)
 
+    def test_boss_chat_goes_to_the_boss_with_the_reply_path(self):
+        self.emit(self.task(id="bc1", assignee="", bossChat=True), body="how is the fleet?")
+        self.assertEqual([self.srv.BOSS_AGENT], [a for a, _ in self.sent])
+        msg = self.sent[0][1]
+        self.assertIn("[boss chat] CEO: how is the fleet?", msg)
+        self.assertIn("mp comment bc1", msg, "the Boss is told where its answer goes")
+
+    def test_the_board_gets_exactly_one_boss_chat_card(self):
+        board = self.srv.default_board()
+        self.assertTrue(self.srv.ensure_boss_chat(board))
+        tid = board["bossChat"]
+        self.assertTrue(board["tasks"][tid]["bossChat"])
+        self.assertFalse(self.srv.ensure_boss_chat(board), "idempotent across restarts")
+        del board["tasks"][tid]
+        self.assertTrue(self.srv.ensure_boss_chat(board), "a deleted chat card comes back")
+        self.assertEqual(1, sum(1 for t in board["tasks"].values() if t.get("bossChat")))
+        self.assertEqual([], self.sent, "creating it pings nobody")
+
     def test_a_test_card_is_still_silent(self):
         self.emit(self.task(test=True))
         self.assertEqual([], self.sent)

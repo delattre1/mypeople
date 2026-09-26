@@ -59,6 +59,7 @@ h1{font-family:var(--serif);font-size:34px;font-weight:400;margin:0;color:var(--
 ul#list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px;}
 li.task{background:var(--surface);border:1px solid var(--dark-border);border-radius:18px;padding:16px 18px;cursor:pointer;}
 li.task.done .task-text{text-decoration:line-through;color:var(--muted-dark);}
+li.task.boss-chat{border-color:var(--volt);}
 .task-top{display:flex;gap:14px;align-items:flex-start;}
 .check{width:38px;height:38px;border-radius:11px;border:2px solid var(--border2);background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 auto;color:#fff;font-size:20px;}
 .check:hover{border-color:var(--volt);}
@@ -270,9 +271,11 @@ function wireInlineText(el, task){
 
 function orderedTasks(){
   const t=BOARD.tasks||{};
-  const pins = Object.values(t).filter(x=>x.pinned).sort((a,b)=>(a.pinRank||0)-(b.pinRank||0));
-  const normal = (BOARD.order||[]).map(id=>t[id]).filter(x=>x && !x.pinned);
-  return {pins, normal};
+  // The Boss chat card (card 3303b00b4c) sits above everything, pins included.
+  const boss = Object.values(t).find(x=>x.bossChat);
+  const pins = Object.values(t).filter(x=>x.pinned && !x.bossChat).sort((a,b)=>(a.pinRank||0)-(b.pinRank||0));
+  const normal = (BOARD.order||[]).map(id=>t[id]).filter(x=>x && !x.pinned && !x.bossChat);
+  return {boss, pins, normal};
 }
 // Cmd/Ctrl+F filter. Every word must appear (AND), matched against the same fields the Graph's
 // search uses: id, title and owner.
@@ -313,6 +316,15 @@ function cardEl(task){
   const txt=document.createElement("div"); txt.className="task-text"; txt.textContent=task.text||"(untitled)";
   wireInlineText(txt,task);
   const meta=document.createElement("div"); meta.className="meta";
+  if(task.bossChat){   // a conversation, not a task: no done check, no pin, no owner
+    li.classList.add("boss-chat"); txt.textContent="💬 "+(task.text||"Boss");
+    const sub=document.createElement("span"); sub.className="tag"; sub.textContent="chat with the Boss"; meta.appendChild(sub);
+    if(hasUnread(task)){ const u=document.createElement("span"); u.className="unread-badge"; u.textContent=task.unread; meta.appendChild(u); }
+    main.appendChild(txt); main.appendChild(meta);
+    const top=document.createElement("div"); top.className="task-top"; top.appendChild(main); li.appendChild(top);
+    li.addEventListener("click", ()=>openCard(task.id));
+    return li;
+  }
   const badge=document.createElement("span"); badge.className="badge st-"+task.state; badge.textContent=stateLabel(task.state);
   meta.appendChild(badge);
   if(hasUnread(task)){ const u=document.createElement("span"); u.className="unread-badge"; u.textContent=task.unread; meta.appendChild(u); }
@@ -343,8 +355,9 @@ function cardEl(task){
 
 function render(){
   const list=$("#list"); list.innerHTML="";
-  const {pins, normal}=orderedTasks();
-  const shown=activeFirst([...pins.filter(visible), ...normal.filter(visible)]);
+  const {boss, pins, normal}=orderedTasks();
+  const shown=[...(boss && (!query || matches(boss)) ? [boss] : []),
+               ...activeFirst([...pins.filter(visible), ...normal.filter(visible)])];
   shown.forEach(t=>list.appendChild(cardEl(t)));
   const n=shown.length;
   $("#searchN").textContent = query ? n+(n===1?" match":" matches") : "";
@@ -449,7 +462,7 @@ function renderModal(task, forceBottom){
   jump.onclick=()=>{ stickBottom=true; thr.scrollTo({top:thr.scrollHeight,behavior:"smooth"}); };
   thr.appendChild(jump);
   const comp=document.createElement("div"); comp.className="composer";
-  const ta=document.createElement("textarea"); ta.id="composer"; ta.placeholder="Write a comment…";
+  const ta=document.createElement("textarea"); ta.id="composer"; ta.placeholder=task.bossChat?"Message the Boss…":"Write a comment…";
   if(draft!==null) ta.value=draft;   // restore the draft the CEO was typing before this rebuild
   const send=document.createElement("button"); send.className="btn-volt"; send.textContent="Send";
   const post=async ()=>{ const v=ta.value.trim(); if(!v)return; ta.value="";
@@ -458,7 +471,7 @@ function renderModal(task, forceBottom){
   send.onclick=post;
   ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); post(); }});
   comp.appendChild(ta); comp.appendChild(send);
-  m.appendChild(head); m.appendChild(row); m.appendChild(ownerHistory); m.appendChild(thr); m.appendChild(comp);
+  m.appendChild(head); if(!task.bossChat){ m.appendChild(row); m.appendChild(ownerHistory); } m.appendChild(thr); m.appendChild(comp);
   if(draftFocused){ ta.focus(); try{ ta.setSelectionRange(selStart,selEnd); }catch(e){} }   // keep the CEO's cursor where it was
   // reveal the show-more toggle only when the clamped title actually overflows its 3-line box
   requestAnimationFrame(()=>{ if(ti.classList.contains("clamped") && ti.scrollHeight-ti.clientHeight>2){ more.style.display="block"; } });

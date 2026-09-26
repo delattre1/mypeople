@@ -485,8 +485,37 @@ def owner_relay(card_id, by, bodytext):
     return '%s on card %s, verbatim: "%s"' % (by, card_id, bodytext)
 
 
-def deliver_comment(card_id, title, owner, by, bodytext):
+def boss_chat_relay(card_id, by, bodytext):
+    """The Boss chat card is a conversation, not a task: say so, and say where the answer goes."""
+    return ('[boss chat] %s: %s\n(reply on the Boss chat card: mp comment %s "your answer")'
+            % (by, bodytext, card_id))
+
+
+def ensure_boss_chat(board):
+    """Caller holds LOCK. Give the board its one Boss chat card, pinned to the top by the UI.
+
+    A flag, not a pin: pinRank is append-only, so a pin would land last among the pinned cards.
+    Created silently -- no task event, no watchdog job -- since nobody is meant to own it.
+    Returns True when the board changed."""
+    t = board["tasks"].get(board.get("bossChat") or "")
+    if t and t.get("bossChat"):
+        return False
+    tid = uuid.uuid4().hex[:10]
+    board["tasks"][tid] = {"id": tid, "text": "Boss", "state": "working", "bossChat": True,
+                           "assignee": "", "ownerHistory": [], "ownerNeedsReplacement": False,
+                           "pinned": False, "pinRank": None, "doneCondition": "", "workToDone": "",
+                           "done": False, "verified": False, "unread": 0, "pingsToBoss": 0,
+                           "comments": [], "proofs": [], "test": False,
+                           "created": now(), "updated": now(), "lastAction": now()}
+    board["order"].insert(0, tid)
+    board["bossChat"] = tid
+    return True
+
+
+def deliver_comment(card_id, title, owner, by, bodytext, boss_chat=False):
     """Owner first, then the Boss. Runs off the request thread: mp_send blocks up to 25s."""
+    if boss_chat:
+        return ping_boss(boss_chat_relay(card_id, by, bodytext))
     delivered = False
     if owner:
         delivered = mp_send(owner, owner_relay(card_id, by, bodytext)) == 0
@@ -512,7 +541,8 @@ def emit_comment_event(board, task, by, bodytext):
     if owner in (by, BOSS_AGENT):
         owner = ""
     threading.Thread(target=deliver_comment,
-                     args=(task["id"], title_of(task), owner, by, bodytext),
+                     args=(task["id"], title_of(task), owner, by, bodytext,
+                           bool(task.get("bossChat"))),
                      daemon=True).start()
 
 
@@ -1139,7 +1169,7 @@ def main():
     seed_board_if_missing()
     with LOCK:
         board = load_board()
-        if migrate_legacy_owner_fields(board):
+        if migrate_legacy_owner_fields(board) | ensure_boss_chat(board):
             save_board(board)
     threading.Thread(target=watchdog_worker, daemon=True, name="watchdog-worker").start()
     srv = ThreadingHTTPServer((CFG["BIND_ADDR"], TODO_PORT), Handler)
