@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mypeople queue-client (INNER plane): heartbeat + re-announce agents + task poll->tmux relay.
+"""MyPlow queue-client (INNER plane): heartbeat + re-announce agents + task poll->tmux relay.
 Owns the durable roster (run/roster.json) and re-announces live agents every heartbeat so a
 server restart / false-prune self-heals within one cycle. Python stdlib only."""
 import os, sys, json, time, subprocess, threading, urllib.parse

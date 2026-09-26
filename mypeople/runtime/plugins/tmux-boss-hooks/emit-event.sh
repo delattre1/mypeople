@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mypeople lifecycle hook. Gates on AGENT_ID (its FIRST line) so non-agent sessions
+# MyPlow lifecycle hook. Gates on AGENT_ID (its FIRST line) so non-agent sessions
 # has no AGENT_ID and exits silently. Delivers status writes + Boss notification.
 [ -z "$AGENT_ID" ] && exit 0
 EVENT="$1"

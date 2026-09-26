@@ -23,7 +23,7 @@ as_root() {
   elif command -v sudo >/dev/null 2>&1; then
     sudo "$@"
   else
-    echo "[mypeople] root access is required to install host packages: $*" >&2
+    echo "[myplow] root access is required to install host packages: $*" >&2
     return 1
   fi
 }
@@ -34,7 +34,7 @@ install_host_deps() {
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   [ ${#missing[@]} -eq 0 ] && return
-  echo "[mypeople] missing: ${missing[*]}"
+  echo "[myplow] missing: ${missing[*]}"
   if command -v brew >/dev/null 2>&1; then
     local brew_pkgs=()
     command -v tmux >/dev/null 2>&1 || brew_pkgs+=(tmux)
@@ -70,7 +70,7 @@ PY
   fi
   for cmd in python3 tmux ttyd asciinema git curl; do
     command -v "$cmd" >/dev/null 2>&1 || {
-      echo "[mypeople] $cmd is still missing; install it and rerun ./install.sh" >&2
+      echo "[myplow] $cmd is still missing; install it and rerun ./install.sh" >&2
       exit 2
     }
   done
@@ -79,13 +79,13 @@ PY
 install_host_deps
 
 if ! command -v claude >/dev/null 2>&1 || ! probe claude --version >/dev/null 2>&1; then
-  echo "[mypeople] installing Claude Code"
+  echo "[myplow] installing Claude Code"
   curl -fsSL https://claude.ai/install.sh | bash
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
 if ! command -v codex >/dev/null 2>&1 || ! probe codex --version >/dev/null 2>&1; then
-  echo "[mypeople] installing Codex CLI"
+  echo "[myplow] installing Codex CLI"
   curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
@@ -100,14 +100,14 @@ AUTH_PENDING=""
 defer_login() {
   AUTH_PENDING="$1"
   cat >&2 <<EOF
-[mypeople] ============================================================
-[mypeople] AUTH PENDING: this shell has no TTY, so the interactive
-[mypeople] '$BACKEND' login was skipped (it would hang forever here).
-[mypeople] The install continues; agents stay idle until you log in.
-[mypeople] Finish it from a real terminal:
-[mypeople]     $1
-[mypeople]     mypeople up --backend $BACKEND
-[mypeople] ============================================================
+[myplow] ============================================================
+[myplow] AUTH PENDING: this shell has no TTY, so the interactive
+[myplow] '$BACKEND' login was skipped (it would hang forever here).
+[myplow] The install continues; agents stay idle until you log in.
+[myplow] Finish it from a real terminal:
+[myplow]     $1
+[myplow]     mypeople up --backend $BACKEND
+[myplow] ============================================================
 EOF
 }
 
@@ -126,8 +126,8 @@ case "$BACKEND" in
     # Not auto-installed: grok ships an internal self-updater and publishes no install
     # script we can pin, so we require an operator-installed CLI instead of curl|bash.
     if ! command -v grok >/dev/null 2>&1; then
-      echo "[mypeople] MYPEOPLE_BACKEND=grok but the grok CLI is not on PATH." >&2
-      echo "[mypeople] Install Grok yourself, then re-run this installer." >&2
+      echo "[myplow] MYPEOPLE_BACKEND=grok but the grok CLI is not on PATH." >&2
+      echo "[myplow] Install Grok yourself, then re-run this installer." >&2
       exit 2
     fi
     # `grok models` exits 0 even when logged out, so the stdout marker is the only real check.
@@ -136,14 +136,14 @@ case "$BACKEND" in
     }
     ;;
   *)
-    echo "[mypeople] MYPEOPLE_BACKEND must be claude, codex or grok" >&2
+    echo "[myplow] MYPEOPLE_BACKEND must be claude, codex or grok" >&2
     exit 2
     ;;
 esac
 export MYPEOPLE_BACKEND="$BACKEND"
 
 if ! command -v uv >/dev/null 2>&1; then
-  echo "[mypeople] installing uv"
+  echo "[myplow] installing uv"
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
@@ -159,15 +159,15 @@ if [ -n "$AUTH_PENDING" ]; then
   # is correct, not an install failure: the package is installed and only the login is
   # missing, so report what is left to do instead of dying on its exit status.
   mypeople "${UP_ARGS[@]}" || true
-  echo "[mypeople] ============================================================" >&2
-  echo "[mypeople] MyPlow is INSTALLED, but '$BACKEND' is NOT authenticated." >&2
-  echo "[mypeople] Nothing is running yet. From a terminal with a TTY, run:" >&2
-  echo "[mypeople]     $AUTH_PENDING" >&2
-  echo "[mypeople]     mypeople up --backend $BACKEND" >&2
-  echo "[mypeople] Then open http://localhost:${TODO_PORT:-9933}" >&2
-  echo "[mypeople] ============================================================" >&2
+  echo "[myplow] ============================================================" >&2
+  echo "[myplow] MyPlow is INSTALLED, but '$BACKEND' is NOT authenticated." >&2
+  echo "[myplow] Nothing is running yet. From a terminal with a TTY, run:" >&2
+  echo "[myplow]     $AUTH_PENDING" >&2
+  echo "[myplow]     mypeople up --backend $BACKEND" >&2
+  echo "[myplow] Then open http://localhost:${TODO_PORT:-9933}" >&2
+  echo "[myplow] ============================================================" >&2
   exit 0
 fi
 mypeople "${UP_ARGS[@]}"
 mypeople status
-echo "[mypeople] open http://localhost:${TODO_PORT:-9933}"
+echo "[myplow] open http://localhost:${TODO_PORT:-9933}"

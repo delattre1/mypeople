@@ -1,4 +1,4 @@
-"""mypeople CLI — thin wrapper over the existing daemons/supervisor.
+"""MyPlow CLI (command: mypeople) — thin wrapper over the existing daemons/supervisor.
 
   mypeople up [--server|--client|--both] [--backend claude|codex|grok] [--detach]
                                                         bring the stack up (default: both, foreground)
@@ -104,7 +104,7 @@ def restart_if_serving_stale(cfg, install):
         serving = ""
     if serving == __version__:
         return False
-    print("[mypeople] daemons are serving %s, installed is %s — restarting them"
+    print("[myplow] daemons are serving %s, installed is %s — restarting them"
           % (serving or "an older build", __version__))
     cmd_down([])
     time.sleep(1)
@@ -142,7 +142,7 @@ def print_login_required(cfg):
 
 def print_urls(cfg):
     u = urls(cfg)
-    print("\n  mypeople is up:")
+    print("\n  MyPlow is up:")
     print("    board  → %s" % u["board"])
     print("    HUD    → %s" % u["HUD"])
     print("    term   → %s" % u["term"])
@@ -162,7 +162,7 @@ def cmd_up(args):
     if "--backend" in args:
         idx = args.index("--backend")
         if idx + 1 >= len(args):
-            print("[mypeople] --backend needs claude, codex or grok", file=sys.stderr)
+            print("[myplow] --backend needs claude, codex or grok", file=sys.stderr)
             return 2
         backend = args[idx + 1]
 
@@ -183,9 +183,9 @@ def cmd_up(args):
                                       env=env, stdout=lf, stderr=lf, stdin=subprocess.DEVNULL,
                                       start_new_session=True, cwd=install)
     _stamp_serving_version(install)
-    print("[mypeople] daemons starting (role=%s) ..." % role)
+    print("[myplow] daemons starting (role=%s) ..." % role)
     if not wait_health(cfg):
-        print("[mypeople] WARNING: HUD health not ready after 40s; check `mypeople logs`",
+        print("[myplow] WARNING: HUD health not ready after 40s; check `mypeople logs`",
               file=sys.stderr)
     if backend is None:
         # Login-required mode: the front doors are up and say so, but there is no backend to
@@ -214,18 +214,18 @@ def cmd_up(args):
 def _up_client(cfg, env, bindir, foreground):
     up = os.environ.get("UPSTREAM_QUEUE_URL") or cfg.get("UPSTREAM_QUEUE_URL")
     if not up:
-        print("[mypeople] client mode needs UPSTREAM_QUEUE_URL=http://<server-host>:9900",
+        print("[myplow] client mode needs UPSTREAM_QUEUE_URL=http://<server-host>:9900",
               file=sys.stderr)
         return 2
     upstream_secret = os.environ.get("UPSTREAM_QUEUE_SECRET") or cfg.get("UPSTREAM_QUEUE_SECRET")
     if not upstream_secret:
-        print("[mypeople] client mode needs UPSTREAM_QUEUE_SECRET", file=sys.stderr)
+        print("[myplow] client mode needs UPSTREAM_QUEUE_SECRET", file=sys.stderr)
         return 2
     # queue-client consumes QUEUE_URL/QUEUE_SECRET. Override both for this isolated client process.
     env["UPSTREAM_QUEUE_URL"] = up
     env["QUEUE_URL"] = up
     env["QUEUE_SECRET"] = upstream_secret
-    print("[mypeople] client → %s" % up)
+    print("[myplow] client → %s" % up)
     p = subprocess.Popen(["python3", os.path.join(bindir, "queue-client.py")], env=env)
     if foreground:
         try:
@@ -236,7 +236,7 @@ def _up_client(cfg, env, bindir, foreground):
 
 
 def _follow(install, cfg):
-    print("[mypeople] following — Ctrl-C to detach (daemons keep running; `mypeople down` to stop)\n")
+    print("[myplow] following — Ctrl-C to detach (daemons keep running; `mypeople down` to stop)\n")
     daemon_log = os.path.join(install, "logs", "daemon.log")
     try:
         open(daemon_log, "a").close()
@@ -247,7 +247,7 @@ def _follow(install, cfg):
             p.terminate()
         except Exception:
             pass
-        print("\n[mypeople] detached. `mypeople status` / `mypeople down`.")
+        print("\n[myplow] detached. `mypeople status` / `mypeople down`.")
     return 0
 
 
@@ -283,7 +283,7 @@ def cmd_down(args):
     ro = cfg.get("TTYD_RO_PORT") or str(int(port) + 1)
     subprocess.run(["pkill", "-f", "ttyd -W -a -p %s" % port], capture_output=True)
     subprocess.run(["pkill", "-f", "ttyd -a -p %s" % ro], capture_output=True)
-    print("[mypeople] stopped (board/roster kept on disk in %s)" % install)
+    print("[myplow] stopped (board/roster kept on disk in %s)" % install)
     return 0
 
 
@@ -319,12 +319,12 @@ def cmd_auth_check(args):
             firstrun.write_claude_config(install)
             firstrun.write_codex_config(install)
         except Exception as e:
-            print("[mypeople] warning: could not seed backend config: %s" % e, file=sys.stderr)
+            print("[myplow] warning: could not seed backend config: %s" % e, file=sys.stderr)
         if "--quiet" not in args:
-            print("[mypeople] auth: %s" % msg)
+            print("[myplow] auth: %s" % msg)
         return 0
     if "--quiet" not in args:
-        print("[mypeople] %s" % msg, file=sys.stderr)
+        print("[myplow] %s" % msg, file=sys.stderr)
     return 1
 
 
@@ -332,7 +332,7 @@ def cmd_auth_check(args):
 def cmd_status(args):
     cfg = load_cfg()
     if not cfg:
-        print("[mypeople] not configured yet — run `mypeople up`")
+        print("[myplow] not configured yet — run `mypeople up`")
         return 1
     hud = "http://127.0.0.1:%s" % cfg.get("HUD_PORT", "9900")
     secret = cfg.get("QUEUE_SECRET", "")
@@ -352,7 +352,7 @@ def cmd_verify(args):
     install = cfg.get("INSTALL_DIR", firstrun.install_dir())
     vs = os.path.join(install, "verify", "verify.sh")
     if not os.path.exists(vs):
-        print("[mypeople] verify.sh missing; run `mypeople up` first", file=sys.stderr)
+        print("[myplow] verify.sh missing; run `mypeople up` first", file=sys.stderr)
         return 1
     env = child_env(cfg)
     return subprocess.call(["bash", vs], env=env, cwd=install)
@@ -370,7 +370,7 @@ def cmd_logs(args):
                          glob.glob(os.path.join(logdir, "*.out"))))
     files = [f for f in files if os.path.exists(f)]
     if not files:
-        print("[mypeople] no logs in %s" % logdir)
+        print("[myplow] no logs in %s" % logdir)
         return 1
     return subprocess.call(["tail", "-n", "40", "-f"] + files)
 

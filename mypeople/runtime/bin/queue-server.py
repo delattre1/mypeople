@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mypeople queue-server: HTTP queue + registry + reaper + /dashboard + /roster.
+"""MyPlow queue-server: HTTP queue + registry + reaper + /dashboard + /roster.
 Binds BIND_ADDR:HUD_PORT (9900). Reverse-proxies TODO routes to TODO_PORT so both
 front doors serve both pages (symmetric cross-nav, §ITEM-2). Python stdlib only."""
 import os, sys, json, time, threading, uuid

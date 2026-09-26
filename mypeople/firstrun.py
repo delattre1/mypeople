@@ -126,8 +126,8 @@ def materialize(install):
     existing daemon code differently, and NEVER clobber live state (board/roster/logs)."""
     from . import __version__
     if refuse_downgrade(install):
-        _echo("[mypeople] this build is %s and %s already runs %s — leaving it alone.\n"
-              "[mypeople] open the current app, or set MYPEOPLE_ALLOW_DOWNGRADE=1 to force it."
+        _echo("[myplow] this build is %s and %s already runs %s — leaving it alone.\n"
+              "[myplow] open the current app, or set MYPEOPLE_ALLOW_DOWNGRADE=1 to force it."
               % (__version__, install, installed_version(install)))
         return
     rt = runtime_dir()
@@ -243,7 +243,7 @@ def _claude_authenticated():
         # locking out a node that really is logged in.
         return True
     if state == "dead":
-        _echo("[mypeople] claude credential rejected: %s" % detail)
+        _echo("[myplow] claude credential rejected: %s" % detail)
         return False
     return True
 
@@ -377,11 +377,11 @@ def _prompt_backend(available):
             return ""
     except Exception:
         return ""
-    _echo("\n[mypeople] More than one AI backend is authenticated on this node:")
+    _echo("\n[myplow] More than one AI backend is authenticated on this node:")
     for i, b in enumerate(available, 1):
         _echo("  %d) %s" % (i, b))
     try:
-        raw = input("[mypeople] Which should MyPlow use? [1-%d, default %s]: "
+        raw = input("[myplow] Which should MyPlow use? [1-%d, default %s]: "
                     % (len(available), available[0])).strip()
     except (EOFError, KeyboardInterrupt):
         return ""
@@ -469,7 +469,7 @@ def write_queue_env(install, backend):
         "HEARTBEAT_INTERVAL": "10",
     }
     kv["QUEUE_URL"] = os.environ.get("QUEUE_URL", "http://127.0.0.1:%s" % kv["HUD_PORT"])
-    lines = ["# mypeople runtime config — generated on first run (secrets here; never commit)"]
+    lines = ["# MyPlow runtime config — generated on first run (secrets here; never commit)"]
     lines += ['export %s="%s"' % (k, v) for k, v in kv.items()]
     _write_env_file(CONFIG_PATH, lines)
     return True
@@ -637,7 +637,7 @@ def ensure(preferred_backend=None, allow_unauthenticated=None):
     write_codex_config(install)
     ok, backend, msg = resolve_auth(requested, chooser=_prompt_backend)
     if not ok:
-        _echo("\n[mypeople] " + msg + "\n")
+        _echo("\n[myplow] " + msg + "\n")
         if not allow_unauthenticated:
             sys.exit(2)
         # In a container this process IS the container. Exiting here hands `restart:
@@ -645,15 +645,15 @@ def ensure(preferred_backend=None, allow_unauthenticated=None):
         # user gets an endless restart loop and dead ports instead of a login prompt (card
         # f0e7101c94). Come up degraded instead: the board and the HUD serve, they say what is
         # missing, and the boss supervisor starts the Boss by itself once the login lands.
-        _echo("[mypeople] LOGIN REQUIRED — starting board + HUD only; no agent can run yet.")
+        _echo("[myplow] LOGIN REQUIRED — starting board + HUD only; no agent can run yet.")
         backend = None
     else:
-        _echo("[mypeople] auth: %s" % msg)
+        _echo("[myplow] auth: %s" % msg)
     fresh = write_queue_env(install, backend or requested or "claude")
     install_tmux_conf(install)
     write_auth_state(install, ok, backend, msg, requested or "")
     host = os.environ.get("HOST_ID") or _read_env_val("HOST_ID") or socket.gethostname().split(".")[0]
-    _echo("[mypeople] install dir: %s  (config: %s%s)" %
+    _echo("[myplow] install dir: %s  (config: %s%s)" %
           (install, CONFIG_PATH, ", fresh" if fresh else ", reused"))
     return install, host, backend
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""boardstore — SQLite storage engine for the mypeople TODO board.
+"""boardstore — SQLite storage engine for the MyPlow TODO board.
 
 Drop-in replacement for todo-server's JSON persistence (board.v2.json). Preserves the exact
 load/save contract the REST handlers rely on:

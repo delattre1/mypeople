@@ -7,7 +7,7 @@
 #
 #   ./scripts/smoke-test.sh [path/to/MyPlow.app]
 #
-# ⚠️ ISOLATION. This machine runs a live MyPeople fleet, and the live install's config is
+# ⚠️ ISOLATION. This machine runs a live MyPlow fleet, and the live install's config is
 # exported into every agent shell (INSTALL_DIR, QUEUE_SECRET, TMUX, ...). mpcommon.load_env()
 # lets process env override the config file, so an un-overridden run would materialize over
 # the live install, restart the live daemons, and — because tmux keys its socket to the UID,

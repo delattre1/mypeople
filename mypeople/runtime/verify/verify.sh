@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# mypeople DISTRIBUTABLE acceptance harness (Fase-1 scope; see tools/scope-verify.py)
-# mypeople acceptance harness (§14/§15). Exit code = truth (0 = Done). Self-contained.
+# MyPlow DISTRIBUTABLE acceptance harness (Fase-1 scope; see tools/scope-verify.py)
+# MyPlow acceptance harness (§14/§15). Exit code = truth (0 = Done). Self-contained.
 # STANDALONE mode: UPSTREAM_QUEUE_URL unset => J12/J13 skipped.
 set -u
 source "${MYPEOPLE_CONFIG_PATH:-$HOME/.config/mypeople/queue.env}" 2>/dev/null || true
@@ -32,7 +32,7 @@ cleanup(){
 }
 trap cleanup EXIT
 
-echo "===== mypeople Verify ($(date -u +%FT%TZ)) node=$HOST ====="
+echo "===== MyPlow Verify ($(date -u +%FT%TZ)) node=$HOST ====="
 BACKEND="${DEFAULT_BACKEND:-claude}"
 
 # ---------- J1 install one-shot ----------

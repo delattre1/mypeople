@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mypeople todo-server (:9933): board API + board->Boss ping.
+"""MyPlow todo-server (:9933): board API + board->Boss ping.
 Serves todos.html at / and /todos, and reverse-proxies the HUD routes so the
 cross-nav works from either front door. Python 3 stdlib only.
 MODULE-LEVEL imports of every stdlib a handler uses (§5.3b UnboundLocalError guard)."""
@@ -637,7 +637,7 @@ class Handler(BaseHTTPRequestHandler):
             with open(path, "r", encoding="utf-8") as f:
                 html = C.render_page(f.read())
         except Exception:
-            html = C.render_page("<h1>mypeople</h1>")
+            html = C.render_page("<h1>MyPlow</h1>")
         self._send(200, raw=html, ctype="text/html; charset=utf-8", extra=self._page_extra())
 
     def do_HEAD(self):
