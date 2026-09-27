@@ -58,7 +58,7 @@ class MobileModalTest(unittest.TestCase):
     def test_phone_type_scale_is_smaller_than_desktop(self):
         # 302dae6fb9: a long thread is unreadable at desktop sizes on a 390px screen.
         mobile = self._mobile_block(self.todos)
-        for selector, size in (("h1", 26), (".task-text", 17), (".m-title", 19), (".ev-text", 15)):
+        for selector, size in ((".task-text", 17), (".m-title", 19), (".ev-text", 15)):
             with self.subTest(selector=selector):
                 self.assertRegex(mobile, re.escape(selector) + r"\{font-size:%dpx" % size)
 

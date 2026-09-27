@@ -21,13 +21,14 @@ body{margin:0;background:var(--dark-bg);color:var(--text-dark);font-family:var(-
 body.modal-open{overflow:hidden;}
 .grain{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0.035;
   background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");}
-.wrap{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:34px 22px 80px;}
-.brand{display:flex;align-items:center;gap:18px;}
-h1{font-family:var(--serif);font-size:34px;font-weight:400;margin:0;color:var(--text-dark);}
+/* No title row (CEO c6a13ce248): the add bar starts just under the fixed Board/Graph nav, and on
+   screens wide enough for the nav to sit in the side gutter it starts at the very top. */
+.wrap{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:62px 22px 80px;}
+@media (min-width:1420px){.wrap{padding-top:22px;}}
 .subt{font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-dark);margin-top:4px;}
 .navlink{color:var(--volt);text-decoration:none;text-transform:uppercase;}
 .navlink:focus-visible{outline:2px solid var(--volt);outline-offset:3px;border-radius:2px;}
-.addbar{display:flex;gap:10px;margin:20px 0 16px;}
+.addbar{display:flex;gap:10px;margin:0 0 16px;}
 #addInput{flex:1;font-family:var(--sans);font-size:18px;background:var(--surface);border:1px solid var(--dark-border);border-radius:14px;padding:16px 20px;color:var(--text-dark);}
 #addInput::placeholder{color:var(--muted-dark);}
 .searchbar{display:none;gap:12px;align-items:center;margin:0 0 14px;}
@@ -116,7 +117,6 @@ body.modal-open #modalbg{display:flex;}
   .thread{min-height:0;padding:14px 16px;}   /* min-height:0 lets the thread shrink so the composer stays pinned above the keyboard; tighter sides = wider text column */
   .m-head{padding:56px 16px 14px;}   /* 56px top clears the fixed Board/Graph nav floating over the full-screen modal; tighter sides */
   /* smaller, denser type so long comment threads read comfortably on a phone (CEO 302dae6fb9) */
-  h1{font-size:26px;}
   .task-text{font-size:17px;}
   .m-title{font-size:19px;}
   .m-row{padding:10px 16px;}
@@ -130,9 +130,6 @@ body.modal-open #modalbg{display:flex;}
 <body>
 <div class="grain"></div>
 <div class="wrap">
-  <div class="brand">
-    <h1>MyPlow</h1>
-  </div>
   <div class="addbar">
     <input id="addInput" placeholder="Add a priority and hit Enter…" autocomplete="off">
     <button class="btn-volt" id="addBtn">Add</button>
