@@ -123,15 +123,16 @@ class PageRenderTests(unittest.TestCase):
                 src = open(os.path.join(self.install, "bin", name), encoding="utf-8").read()
                 out = self.C.render_page(src)
                 self.assertIn('id="mp-nav"', out, "%s has no nav" % name)
-                for href in ('href="/"', 'href="/terminal-graph"', 'href="/dashboard"'):
+                for href in ('href="/"', 'href="/terminal-graph"'):
                     self.assertIn(href, out, "%s cannot reach %s" % (name, href))
 
-    def test_nav_offers_exactly_the_three_surfaces(self):
-        """Board, Graph, HUD -- and nothing else. Terminals are reached through the HUD, and the
-        wall is not a product surface at all."""
+    def test_nav_offers_exactly_the_two_surfaces(self):
+        """Board and Graph -- and nothing else. Terminals are reached through the Graph; the HUD
+        and the wall are not on the bar."""
         out = self.C.render_page("<h1>mypeople</h1>")
         nav = out.split('id="mp-nav"', 1)[1].split("</nav>", 1)[0]
-        self.assertEqual(nav.count("<a "), 3, "the nav is Board / Graph / HUD only")
+        self.assertEqual(nav.count("<a "), 2, "the nav is Board / Graph only")
+        self.assertNotIn("/dashboard", nav)
         self.assertNotIn("/wall", out)
         self.assertNotIn("Terminals", out)
 

@@ -114,9 +114,10 @@ _VERSION_BADGE = """
 
 # Every first-class surface, reachable from every other one. Injected at this seam for the same
 # reason as the badge: a page added later is linked by construction, and no page can drift into
-# being a dead end you can only reach by typing a URL. There are exactly three surfaces -- Board
-# (the priorities), Graph, HUD -- and the bar sits at the TOP of every page. Individual terminals
-# are not a surface: the HUD is how you reach a terminal.
+# being a dead end you can only reach by typing a URL. There are exactly two surfaces -- Board
+# (the priorities) and Graph -- and the bar sits at the TOP of every page. Individual terminals
+# are not a surface: the Graph is how you reach a terminal. The HUD page (/dashboard) still
+# serves by URL but is off the bar: the CEO never used it.
 _NAV = """
 <style>
 /* Brand tokens, read off the page itself. todos/dashboard and the graph name them differently
@@ -142,7 +143,6 @@ _NAV = """
 <nav id="mp-nav" aria-label="MyPlow surfaces">
  <a href="/" data-mp-path="/">Board</a>
  <a href="/terminal-graph" data-mp-path="/terminal-graph">Graph</a>
- <a href="/dashboard" data-mp-path="/dashboard">HUD</a>
 </nav>
 <script>
 (function(){
