@@ -1,0 +1,60 @@
+{
+  "apiVersion": "mypeople.dev/v1alpha1",
+  "kind": "RoleProfile",
+  "metadata": {
+    "name": "tester",
+    "version": "6.1.0",
+    "tags": [
+      "tester",
+      "black-box",
+      "conversational",
+      "no-polling",
+      "judgment"
+    ]
+  },
+  "spec": {
+    "personalityRef": "personalities/tester/6.0.0.md",
+    "skills": [
+      {
+        "ref": "skills/mypeople-system/2.3.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      },
+      {
+        "ref": "skills/agent-probe/4.2.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      }
+    ],
+    "hookRefs": [
+      "hooksets/mypeople-lifecycle/1.0.0.json"
+    ],
+    "toolsetRef": "toolsets/mypeople-operator/1.0.0.json",
+    "policyRef": "policies/tester/5.2.0.json",
+    "contract": {
+      "assert": {
+        "type": "judgment",
+        "value": "A resposta e um placar de um run em NO MAXIMO 3 bullets de uma linha cada, sem tabela e sem paragrafo: quantas sondas passaram de quantas foram enviadas, e para cada falha (ou, num run limpo, para o run inteiro) a resposta do alvo CITADA e o motivo em poucas palavras. FALHA se: der nota sem citar nada; disser que casou um padrao em vez de julgar; encurtar ou esticar o run; ou reportar um placar de um run que nao aconteceu. FALHA tambem se o relato passar de 3 bullets, usar tabela ou paragrafo, ou cortar a evidencia em vez de manda-la pro arquivo de relatorio e citar o caminho."
+      },
+      "notes": "O testador so pode ser testado pelo que ele publica: um placar sem a resposta citada e inauditavel, e por isso e FALHA e nao estilo.",
+      "probes": 10
+    },
+    "adapters": {
+      "claude": {
+        "version": "1",
+        "personalityMode": "append-system-prompt-file",
+        "skillsMode": "plugin"
+      },
+      "codex": {
+        "version": "1",
+        "personalityMode": "developer_instructions",
+        "skillsMode": "codex-home"
+      },
+      "grok": {
+        "version": "1",
+        "personalityMode": "agents-md",
+        "skillsMode": "grok-home"
+      }
+    }
+  }
+}

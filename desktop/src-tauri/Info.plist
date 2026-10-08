@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The whole product is served over plain HTTP on loopback: the board on 9933, the HUD on
+       9900, and the Terminal Graph's ttyd tiles on 7681/7682. App Transport Security blocks
+       plain HTTP in WKWebView by default, so without this key the window loads nothing and
+       every terminal tile stays blank. Electron never needed it; WKWebView does.
+       NSAllowsLocalNetworking permits exactly loopback and local-network hosts — it does not
+       weaken TLS for anything on the internet, which NSAllowsArbitraryLoads would. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+</dict>
+</plist>

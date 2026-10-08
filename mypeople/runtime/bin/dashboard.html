@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MyPlow - HUD</title>
+<style>
+:root{
+  --midnight:#01000A; --volt:#D5EF8A; --grove:#5e7a5e; --iris:#C4BFFF;
+  --dark-bg:#111110; --text-dark:#F0F0E8; --muted-dark:rgba(240,240,232,0.45);
+  --surface:rgba(255,255,255,0.05); --surface2:rgba(255,255,255,0.08);
+  --dark-border:rgba(255,255,255,0.09); --border2:rgba(255,255,255,0.15);
+  --volt-dim:rgba(213,239,138,0.15); --volt-glow:rgba(213,239,138,0.25);
+  --success:#34c759; --danger:#ff3b30; --warning:#febc2e; --info:#5ac8fa;
+  --serif:'Instrument Serif',Georgia,serif;
+  --sans:'DM Sans',system-ui,sans-serif;
+  --mono:'DM Mono','SF Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--dark-bg);color:var(--text-dark);font-family:var(--sans);}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0.035;
+  background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");}
+.wrap{position:relative;z-index:1;padding:32px 22px 80px;}   /* fills the window: no fixed column width */
+h1{font-family:var(--serif);font-size:40px;font-weight:400;margin:0;}
+.meta{font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted-dark);margin:6px 0 20px;}
+.navlink{color:var(--volt);text-decoration:none;text-transform:uppercase;margin-left:10px;}
+h2{font-family:var(--serif);font-size:24px;font-weight:400;margin:28px 0 10px;}
+table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--dark-border);border-radius:14px;overflow:hidden;}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--dark-border);font-size:13px;vertical-align:top;}
+th{font-family:var(--mono);font-size:10px;text-transform:uppercase;color:var(--muted-dark);letter-spacing:.06em;}
+.aid{font-family:var(--mono);font-size:12px;}
+.alive{color:var(--volt);font-family:var(--mono);text-transform:uppercase;font-size:11px;}
+.dead{color:var(--muted-dark);font-family:var(--mono);text-transform:uppercase;font-size:11px;}
+/* not dead and not usable: the process is up but its credential was refused (card 8a6ebe4e48).
+   Reads as a problem to fix, not as a tombstone. */
+.unauth{color:var(--danger);font-family:var(--mono);text-transform:uppercase;font-size:11px;}
+.badge{font-family:var(--mono);font-size:10px;border-radius:100px;padding:3px 9px;text-transform:uppercase;display:inline-flex;align-items:center;gap:5px;}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;}
+.b-working{color:var(--warning);background:rgba(254,188,46,0.16);}
+.b-working .dot{background:var(--warning);}
+.b-idle{color:var(--muted-dark);background:rgba(255,255,255,0.05);}
+.b-idle .dot{background:var(--muted-dark);}
+.b-blocked{color:var(--danger);background:rgba(255,59,48,0.16);}
+.b-blocked .dot{background:var(--danger);}
+.b-ready{color:var(--volt);background:var(--volt-dim);}
+.b-ready .dot{background:var(--volt);}
+code{font-family:var(--mono);font-size:11px;background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:6px;display:inline-block;max-width:25vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;}
+.spawncell{display:flex;flex-direction:column;gap:4px;}
+a.attach{color:var(--volt);text-decoration:none;font-family:var(--mono);font-size:11px;}
+.btn-volt{background:var(--volt);color:var(--midnight);border:none;border-radius:9px;font-family:var(--mono);font-size:11px;font-weight:700;padding:5px 12px;cursor:pointer;text-transform:uppercase;}
+.btn-volt:hover{box-shadow:0 0 0 3px var(--volt-glow);}
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div class="wrap">
+  <h1>MyPlow - HUD</h1>
+  <div class="meta" id="meta">refreshing…</div>
+  <h2>Engineers</h2>
+  <table>
+    <thead><tr><th>Agent ID</th><th>State</th><th>Status</th><th>Backend</th><th>Boss</th><th>Summary</th><th>Spawn Cmd</th><th>Attach</th></tr></thead>
+    <tbody id="agents"></tbody>
+  </table>
+  <h2>Retired engineers</h2>
+  <table>
+    <thead><tr><th>Agent ID</th><th>Boss</th><th>Spawn Cmd</th><th>Revive</th></tr></thead>
+    <tbody id="retired"></tbody>
+  </table>
+</div>
+<script>
+"use strict";
+const TTYD_PORT=Number("__TTYD_PORT__");
+const LOCAL_HOST="__HOST_ID__";
+const $=s=>document.querySelector(s);
+async function api(p){ return fetch(p,{credentials:"same-origin"}); }
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+// §5.2 CLIENT-HOST derivation: attach href built from window.location.hostname (never 127.0.0.1)
+function attachHref(agent){
+  if(agent.host && agent.host!==LOCAL_HOST && agent.attach_url) return agent.attach_url;
+  return location.protocol+"//"+location.hostname+":"+TTYD_PORT+"/?arg=-t&arg="+encodeURIComponent(agent.tmux_target);
+}
+function badge(status){
+  const cls={working:"b-working",idle:"b-idle",blocked:"b-blocked",ready:"b-ready"}[status]||"b-ready";
+  return '<span class="badge '+cls+'"><span class="dot"></span>'+esc(status)+'</span>';
+}
+async function refresh(){
+  try{
+    const [ra,rr]=await Promise.all([api("/agents"),api("/roster")]);
+    const agents=ra.ok?await ra.json():[];
+    const roster=rr.ok?await rr.json():[];
+    const tb=$("#agents"); tb.innerHTML="";
+    agents.forEach(a=>{
+      const tr=document.createElement("tr");
+      const href=attachHref(a);
+      const spawn=esc(a.spawn_cmd||"");
+      const revive=esc(a.revive_cmd||("mp revive "+a.agent_id));
+      tr.innerHTML=
+        '<td class="aid">'+esc(a.agent_id)+'</td>'+
+        '<td><span class="'+(a.state==="alive"?"alive":a.state==="unauthenticated"?"unauth":"dead")+'">'+esc(a.state)+'</span></td>'+
+        '<td>'+badge(a.status)+'</td>'+
+        '<td>'+esc(a.backend)+'</td>'+
+        '<td class="aid">'+esc(a.boss_id||"—")+'</td>'+
+        '<td>'+esc((a.summary||"").slice(0,90))+'</td>'+
+        '<td><div class="spawncell"><code class="spawncmd" title="'+spawn+'">'+(spawn||"—")+'</code>'+
+          '<code class="revivecmd" title="'+revive+'">'+revive+'</code></div></td>'+
+        '<td><a class="attach" href="'+href+'" target="_blank" data-target="'+esc(a.tmux_target)+'">ATTACH ↗</a></td>';
+      tb.appendChild(tr);
+    });
+    const rt=$("#retired"); rt.innerHTML="";
+    roster.filter(r=>r.retired).forEach(r=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML='<td class="aid">'+esc(r.agent_id)+'</td><td class="aid">'+esc(r.boss_id||"—")+'</td>'+
+        '<td><div class="spawncell"><code title="'+esc(r.spawn_cmd)+'">'+esc(r.spawn_cmd||"—")+'</code>'+
+        '<code>'+esc(r.revive_cmd||("mp revive "+r.agent_id))+'</code></div></td>'+
+        '<td><button class="btn-volt" data-aid="'+esc(r.agent_id)+'">Revive</button></td>';
+      rt.appendChild(tr);
+    });
+    rt.querySelectorAll("button[data-aid]").forEach(b=>b.onclick=async()=>{
+      b.disabled=true; b.textContent="Resuming…";
+      const response=await fetch("/revive",{method:"POST",credentials:"same-origin",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({agent_id:b.dataset.aid})});
+      const submitted=await response.json();
+      if(!response.ok || !submitted.task_id){ b.textContent="Error"; b.title=submitted.error||"resume failed"; return; }
+      for(let i=0;i<120;i++){
+        await new Promise(r=>setTimeout(r,500));
+        const tr=await api("/task/"+submitted.task_id); if(!tr.ok) continue;
+        const task=await tr.json();
+        if(task.ok===true){ await refresh(); return; }
+        if(task.ok===false){ b.textContent="Error"; b.title=task.result||"resume failed"; return; }
+      }
+      b.textContent="Timed out"; b.title="resume task timed out";
+    });
+    $("#meta").innerHTML="refreshed "+new Date().toLocaleTimeString()+" · "+agents.length+" agents "+
+      '';
+    document.querySelectorAll("code").forEach(c=>c.onclick=()=>{
+      try{ navigator.clipboard&&navigator.clipboard.writeText(c.title||c.textContent);}catch(e){} });
+  }catch(e){}
+}
+document.addEventListener("DOMContentLoaded",()=>{ refresh(); setInterval(refresh,3000); });
+</script>
+</body>
+</html>

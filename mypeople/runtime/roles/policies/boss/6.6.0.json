@@ -1,0 +1,21 @@
+{
+  "name": "boss",
+  "version": "6.6.0",
+  "role": "boss",
+  "allow": [
+    "delegate",
+    "assign-owner",
+    "route-followup",
+    "inspect-team",
+    "spawn",
+    "send",
+    "answer",
+    "retire-closed-owner"
+  ],
+  "deny": [
+    "impersonate-ceo",
+    "weaken-lifecycle",
+    "publish-secret",
+    "claim-unobserved-proof"
+  ]
+}

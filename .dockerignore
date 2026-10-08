@@ -1,0 +1,7 @@
+.git
+.venv
+build
+dist/*
+mypeople/**/__pycache__
+mypeople/runtime/verify/node_modules
+mypeople/runtime/verify/videos

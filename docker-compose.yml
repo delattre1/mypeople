@@ -1,0 +1,28 @@
+services:
+  mypeople:
+    image: ghcr.io/delattre1/mypeople:latest
+    pull_policy: always
+    init: true
+    ports:
+      - "${MYPEOPLE_TODO_PORT:-9933}:9933"
+      - "${MYPEOPLE_HUD_PORT:-9900}:9900"
+      - "${MYPEOPLE_TTYD_PORT:-7681}:7681"
+    environment:
+      MYPEOPLE_HOME: /var/lib/mypeople
+      MYPEOPLE_CONFIG_PATH: /var/lib/mypeople/config/queue.env
+      BIND_ADDR: 0.0.0.0
+      HUD_PORT: "9900"
+      TODO_PORT: "9933"
+      TTYD_PORT: "7681"
+      TTYD_BROWSER_PORT: "${MYPEOPLE_TTYD_PORT:-7681}"
+      DEFAULT_BACKEND: "${MYPEOPLE_BACKEND:-claude}"
+      DEFAULT_CODEX_MODEL: "${MYPEOPLE_CODEX_MODEL:-}"
+    volumes:
+      - mypeople-state:/var/lib/mypeople
+      # This is this container node's own agent home/login. Never copy it to another node.
+      - mypeople-claude-home:/home/mypeople
+    restart: unless-stopped
+
+volumes:
+  mypeople-state:
+  mypeople-claude-home:

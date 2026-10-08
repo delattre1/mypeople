@@ -1,0 +1,76 @@
+name: Desktop release (signed DMG)
+
+# Builds MyPlow.app, signs it with the Plow Developer ID, notarizes it and uploads the DMG.
+#
+# The certificate and notary login are the SAME ones Plow Latch ships with (1Password item
+# "Domo signing (mirrored from terraform)"), stored as this repo's own secrets: APPLE_CERTIFICATE,
+# APPLE_CERTIFICATE_PASSWORD, APPLE_ID, APPLE_PASSWORD. Not a 1Password service-account token: the
+# only one agents hold reads every agent credential, and CI needs just these four.
+#
+# Tauri signs and notarizes the .app itself from APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY /
+# APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID. bundle-runtime.sh signs the carried binaries
+# with the same identity first, because notarization rejects the DMG over any unsigned
+# Mach-O nested in Resources.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    runs-on: macos-14   # arm64: the carried binaries are built for the runner's arch
+    timeout-minutes: 60
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: 3559PD337Z
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build-machine only: the binaries are copied out of Homebrew and vendored into the app.
+      # Nothing here is needed on the machine that installs the DMG.
+      - name: Tools to vendor
+        run: |
+          brew install ttyd tmux asciinema
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          ~/.local/bin/uv python install 3.13
+          cargo install tauri-cli --version "^2" --locked
+
+      - name: Import the certificate so bundle-runtime.sh can sign with it
+        run: |
+          KEYCHAIN=$RUNNER_TEMP/signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          rm "$RUNNER_TEMP/cert.p12"
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"')
+          [ -n "$IDENTITY" ] || { echo "no Developer ID Application identity in the certificate" >&2; exit 1; }
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Bundle the runtime
+        run: PYTHON_SRC="$(~/.local/bin/uv python find 3.13 | xargs dirname | xargs dirname)" desktop/scripts/bundle-runtime.sh
+
+      - name: Build, sign and notarize
+        working-directory: desktop
+        env:
+          CI: "true"   # skips the Finder-layout AppleScript, which a runner cannot authorize
+        run: |
+          V=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' ../mypeople/__init__.py)
+          cargo tauri build --config "{\"version\":\"$V\"}"
+
+      - name: Smoke test the built app
+        run: desktop/scripts/smoke-test.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyPlow-dmg
+          path: desktop/src-tauri/target/release/bundle/dmg/*.dmg

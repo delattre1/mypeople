@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "The cloud MyPlow's own headless browser (MCP 'browser'). Pinned to the Playwright the base image installs browsers for (1.55); run.sh points it at that Chromium.",
+  "dependencies": {
+    "@playwright/mcp": "0.0.35"
+  }
+}

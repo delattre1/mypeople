@@ -1,0 +1,30 @@
+{
+  "name": "tester",
+  "version": "5.2.0",
+  "role": "tester",
+  "allow": [
+    "read-board",
+    "comment-own-card",
+    "spawn-target-agent",
+    "kill-own-child",
+    "probe-target-agent",
+    "report-score"
+  ],
+  "deny": [
+    "own-card",
+    "sleep-or-timer",
+    "wait-loop",
+    "poll-target-pane",
+    "batch-probes",
+    "read-target-transcript",
+    "read-target-files",
+    "redo-target-work",
+    "drop-a-probe",
+    "mutate-any-resource",
+    "impersonate-ceo",
+    "publish-secret",
+    "claim-unobserved-proof",
+    "match-a-pattern",
+    "score-without-quoting"
+  ]
+}

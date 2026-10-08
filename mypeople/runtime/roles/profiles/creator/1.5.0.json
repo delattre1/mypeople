@@ -1,0 +1,56 @@
+{
+  "apiVersion": "mypeople.dev/v1alpha1",
+  "kind": "RoleProfile",
+  "metadata": {
+    "name": "creator",
+    "version": "1.5.0",
+    "tags": [
+      "creator",
+      "factory"
+    ]
+  },
+  "spec": {
+    "personalityRef": "personalities/creator/1.3.0.md",
+    "skills": [
+      {
+        "ref": "skills/mypeople-system/2.3.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      },
+      {
+        "ref": "skills/agent-creator/1.4.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      }
+    ],
+    "hookRefs": [
+      "hooksets/mypeople-lifecycle/1.0.0.json"
+    ],
+    "toolsetRef": "toolsets/mypeople-operator/1.0.0.json",
+    "policyRef": "policies/creator/1.3.0.json",
+    "contract": {
+      "assert": {
+        "type": "not-testable",
+        "value": "Its output is a role bundle on disk, not a reply. It is proved by newrole.py resolving the bundle and by the roles it writes scoring against their own contracts."
+      },
+      "probes": 0
+    },
+    "adapters": {
+      "claude": {
+        "version": "1",
+        "personalityMode": "append-system-prompt-file",
+        "skillsMode": "plugin"
+      },
+      "codex": {
+        "version": "1",
+        "personalityMode": "developer_instructions",
+        "skillsMode": "codex-home"
+      },
+      "grok": {
+        "version": "1",
+        "personalityMode": "agents-md",
+        "skillsMode": "grok-home"
+      }
+    }
+  }
+}

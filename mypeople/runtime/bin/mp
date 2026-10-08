@@ -1,0 +1,1523 @@
+#!/usr/bin/env python3
+"""mp - MyPlow CLI. verbs: status spawn send peek kill answer revive.
+Implements the §4 agent_id<->tmux mapping and the §5 spawn contracts."""
+import os, sys, json, time, shlex, subprocess, shutil, urllib.parse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mpcommon as C
+import mprole
+
+CFG = C.CFG
+INSTALL_DIR = CFG["INSTALL_DIR"]
+HOST_ID = CFG["HOST_ID"]
+QUEUE_URL = CFG["QUEUE_URL"]
+SECRET = CFG.get("QUEUE_SECRET", "")
+TTYD_PORT = CFG["TTYD_PORT"]
+DEFAULT_BACKEND = CFG.get("DEFAULT_BACKEND", "claude")
+# Backend for NEW agents spawned without --backend (what the Boss does when it hires). Split from
+# DEFAULT_BACKEND on purpose: ensure-boss counts the Boss alive only if its window runs
+# DEFAULT_BACKEND, so moving that knob to change new agents would make the supervisor "recover" a
+# healthy Boss within one tick. Unset means the same as DEFAULT_BACKEND, as before.
+DEFAULT_AGENT_BACKEND = (CFG.get("DEFAULT_AGENT_BACKEND", "") or DEFAULT_BACKEND).strip().lower()
+DEFAULT_CLAUDE_MODEL = CFG.get("DEFAULT_CLAUDE_MODEL", CFG["DEFAULT_ENG_MODEL"])
+DEFAULT_CODEX_MODEL = CFG.get("DEFAULT_CODEX_MODEL", "")
+DEFAULT_GROK_MODEL = CFG.get("DEFAULT_GROK_MODEL", "")
+VALID_BACKENDS = ("claude", "codex", "grok")
+# A retirement is ACCIDENTAL only when the system itself observed the window/server vanish. Any
+# other reason is a deliberate stop and is never auto-restarted -- not by reconcile, and (since
+# card 0cc0bde980) not by ensure-boss either. roster.json is the single durable store of that
+# intent: no second flag file exists that could disagree with it.
+ACCIDENTAL_REASONS = frozenset({"died-no-window", "tmux-server-crash", "window-missing",
+                                "boss-window-missing", "zombie-no-session"})
+ROSTER_PATH = os.path.join(INSTALL_DIR, "run", "roster.json")
+STATUS_DIR = os.path.join(INSTALL_DIR, "status")
+HOOK = os.path.join(INSTALL_DIR, "plugins", "tmux-boss-hooks", "emit-event.sh")
+BOSS_DOC = os.path.join(INSTALL_DIR, "mp-boss-doctrine.md")
+ROLE_DIR = os.path.join(INSTALL_DIR, "roles")            # canonical read-only role store
+ROLE_BUNDLE_DIR = os.path.join(INSTALL_DIR, "run", "role-bundles")  # derived per-agent views
+HDR = {"X-Queue-Secret": SECRET}
+TODO_URL = "http://127.0.0.1:%s" % CFG.get("TODO_PORT", "9933")  # board/todo-server origin
+DOCTRINE_SUMMARY = ("Boss onboarded: plan-gate before engineering, drive the team autonomously "
+                    "off the board via the mp queue (fire-and-forget), verify every result.")
+# Spawn readiness: SessionStart hook writes session_id. Under memory pressure Claude can take
+# much longer than a few seconds; default 45s balances false zombies vs blocking Boss.
+SPAWN_READY_SEC = float(os.environ.get("MYPEOPLE_SPAWN_READY_SEC")
+                        or CFG.get("MYPEOPLE_SPAWN_READY_SEC") or 45)
+# Birth-zombie: window+PID exist, status stuck at starting, session_id never written.
+ZOMBIE_STARTING_SEC = float(os.environ.get("MYPEOPLE_ZOMBIE_STARTING_SEC")
+                            or CFG.get("MYPEOPLE_ZOMBIE_STARTING_SEC") or 90)
+ZOMBIE_REAP_MAX = int(os.environ.get("MYPEOPLE_ZOMBIE_REAP_MAX")
+                      or CFG.get("MYPEOPLE_ZOMBIE_REAP_MAX") or 3)
+
+
+def resolve_role(role, backend, locked_role_ref=None):
+    """Resolve + fail-closed-validate a role tag against the canonical store (reads mp.ROLE_DIR)."""
+    return mprole.resolve_role(role, backend, ROLE_DIR, BOSS_DOC, locked_role_ref=locked_role_ref)
+
+
+def materialize_role(item, aid, backend):
+    """Materialize the derived per-agent bundle view (reads mp.ROLE_BUNDLE_DIR)."""
+    return mprole.materialize_role(item, aid, backend, ROLE_BUNDLE_DIR)
+
+
+def full_aid(aid):
+    return aid if "/" in aid else "%s/%s" % (HOST_ID, aid)
+
+
+def is_local(aid):
+    host, _, _ = C.parse_agent_id(aid)
+    return not host or host == HOST_ID
+
+
+def remote_task(typ, aid, payload=None, timeout=150):
+    """Submit a cross-host command through the queue and wait for its result."""
+    code, out = C.http_json("POST", QUEUE_URL + "/task/submit",
+                            {"type": typ, "target_agent": aid, "payload": payload or {}},
+                            HDR, timeout=8)
+    if code != 200 or not isinstance(out, dict) or not out.get("task_id"):
+        return False, "queue submit failed (HTTP %s)" % code
+    tid = out["task_id"]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        code, state = C.http_json("GET", QUEUE_URL + "/task/" + tid, None, HDR, timeout=8)
+        if code == 200 and isinstance(state, dict) and state.get("ok") is not None:
+            return bool(state.get("ok")), state.get("result", "")
+        time.sleep(0.5)
+    return False, "queue task timed out: %s" % tid
+
+
+def envq(**kw):
+    return " ".join("%s=%s" % (k, shlex.quote(str(v))) for k, v in kw.items())
+
+
+def load_roster():
+    # Tracked read: pairs with save_roster's locked merge so a concurrent writer cannot
+    # erase what we change (card e949527956).
+    return C.read_json_tracked(ROSTER_PATH, {}) or {}
+
+
+def save_roster(r):
+    C.write_json_merged(ROSTER_PATH, r)
+
+
+def pretrust(cwd):
+    """Merge projects[cwd].hasTrustDialogAccepted=true into ~/.claude.json (§5.5c)."""
+    p = os.path.expanduser("~/.claude.json")
+    d = C.read_json(p, {}) or {}
+    if not isinstance(d, dict):
+        d = {}
+    proj = d.setdefault("projects", {})
+    for path in {cwd, os.path.abspath(cwd)}:
+        rec = proj.get(path, {})
+        rec["hasTrustDialogAccepted"] = True
+        proj[path] = rec
+    C.write_json(p, d)
+
+
+def claude_consent_settings():
+    """Path to a settings file that declares the bypass-permissions consent, written on demand.
+
+    A role-mounted spawn carries the consent in its own bundle overlay, but a BUNDLE-LESS claude
+    spawn gets no --settings at all -- so it would fall back to whatever ~/.claude happens to hold
+    and, on a node that was never seeded, block on the Bypass Permissions modal whose default
+    button is "No, exit" (card 293fc81898). Every claude launch must be self-sufficient, so hand
+    the bundle-less ones this file instead. Returns None if it cannot be written; the launch then
+    degrades to the ~/.claude path rather than failing outright.
+    """
+    path = os.path.join(INSTALL_DIR, "run", "claude-consent.settings.json")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        C.write_json(path, {"skipDangerousModePermissionPrompt": True})
+        return path
+    except OSError:
+        return None
+
+
+def codex_trust_override(cwd):
+    """Trust only an exact cwd inside MyPlow's managed agent run roots for this launch."""
+    resolved = os.path.realpath(os.path.abspath(os.path.expanduser(cwd)))
+    managed_roots = (
+        os.path.realpath(os.path.join(INSTALL_DIR, "run", "eng")),
+        os.path.realpath(os.path.join(INSTALL_DIR, "run", "boss")),
+    )
+    for root in managed_roots:
+        try:
+            if os.path.commonpath((resolved, root)) == root:
+                # A single `projects` inline table is accepted by Codex's --config parser. It
+                # applies only to this process, so unrelated user trust entries are untouched.
+                return 'projects={%s={trust_level="trusted"}}' % json.dumps(resolved)
+        except ValueError:
+            continue
+    return ""
+
+
+def grok_pretrust():
+    """Disable Grok's project-directory picker (§5.5c analogue for grok).
+
+    With a non-git cwd (run/eng is not a repo) and prior sessions on record, Grok's TUI
+    answers the first message with a "Run Grok Build in a project directory?" modal that
+    swallows it. This is the key Grok's own "Don't ask me again" writes.
+
+    Only the bundle-less path needs this: a --role grok agent gets the hint baked into its
+    per-agent GROK_HOME config by mprole._grok_config_toml.
+    """
+    import re
+    root = os.environ.get("GROK_HOME") or os.path.expanduser("~/.grok")
+    p = os.path.join(root, "config.toml")
+    s = ""
+    if os.path.exists(p):
+        try:
+            with open(p) as f:
+                s = f.read()
+        except Exception:
+            return
+    m = re.search(r'^hints\s*=\s*\{([^}]*)\}[ \t]*$', s, re.M)
+    if m:
+        inner = m.group(1)
+        if re.search(r'project_picker_disabled\s*=\s*true', inner):
+            return
+        if "project_picker_disabled" in inner:
+            inner = re.sub(r'project_picker_disabled\s*=\s*\w+',
+                           'project_picker_disabled = true', inner)
+        else:
+            head = inner.strip().rstrip(",")
+            inner = (head + ", " if head else " ") + "project_picker_disabled = true "
+        out = s[:m.start()] + "hints = {%s}" % inner + s[m.end():]
+    elif re.search(r'^[ \t]*\[hints\][ \t]*$', s, re.M):
+        if re.search(r'^[ \t]*project_picker_disabled\s*=', s, re.M):
+            return
+        out = re.sub(r'^([ \t]*\[hints\][ \t]*\n)', r'\1project_picker_disabled = true\n',
+                     s, count=1, flags=re.M)
+    else:
+        # a bare key must precede the first [section] header
+        out = "hints = { project_picker_disabled = true }\n" + s
+    try:
+        import tomllib
+        parsed = tomllib.loads(out)
+        if not parsed.get("hints", {}).get("project_picker_disabled"):
+            return
+    except Exception:
+        return  # never leave the user's grok config unparseable
+    try:
+        os.makedirs(root, exist_ok=True)
+        C.atomic_write(p, out.encode("utf-8"))
+    except Exception:
+        pass
+
+
+def write_status(aid, status, backend, summary=None, locked=False, drop_session=False):
+    _, sess, tab = C.parse_agent_id(aid)
+    d = os.path.join(STATUS_DIR, "mc-%s" % sess)
+    p = os.path.join(d, "%s.json" % tab)
+    cur = C.read_json(p, {}) or {}
+    if drop_session:
+        cur.pop("session_id", None)
+    cur.update({"status": status, "timestamp": time.time(),
+                "backend": backend, "state": "alive"})
+    if summary is not None:
+        cur["summary"] = summary
+    if locked:
+        cur["summary_locked"] = True
+    C.write_json(p, cur)
+
+
+def status_path(aid):
+    _, sess, tab = C.parse_agent_id(aid)
+    return os.path.join(STATUS_DIR, "mc-%s" % sess, "%s.json" % tab)
+
+
+def read_agent_status(aid):
+    return C.read_json(status_path(aid), {}) or {}
+
+
+def pane_looks_ready(aid):
+    """True when the backend TUI has painted a usable composer (session_id may still be empty).
+
+    Claude 2.1.x often paints the welcome screen before any lifecycle hook writes session_id;
+    session_id is frequently first persisted on UserPromptSubmit (first successful mp send).
+    """
+    try:
+        pane = C.tmux_capture(C.tmux_target(aid), lines=80)
+    except Exception:
+        return False
+    if not (pane or "").strip():
+        return False
+    low = pane.lower()
+    markers = ("welcome back", "bypass permissions", "claude code",
+               "esc to interrupt", "ctrl+c:cancel", "codex", "grok build",
+               "shift+tab")
+    # bare composer prompt alone is weak (shell too); require a product marker
+    return any(m in low for m in markers)
+
+
+def pane_looks_working(aid):
+    """True when the pane shows an in-flight turn (do not reap as zombie)."""
+    try:
+        pane = C.tmux_capture(C.tmux_target(aid), lines=80)
+    except Exception:
+        return False
+    low = (pane or "").lower()
+    return ("waiting for response" in low or "esc to interrupt" in low
+            or "ctrl+c:cancel" in low or "tokens" in low)
+
+
+def wait_for_backend_ready(aid, timeout=None, interval=0.5):
+    """Wait until session_id is written OR the TUI is visibly up.
+
+    Returns (session_id_or_empty, reason) where reason is 'session' | 'pane' | ''.
+    """
+    timeout = SPAWN_READY_SEC if timeout is None else timeout
+    deadline = time.time() + max(0.0, float(timeout))
+    p = status_path(aid)
+    while time.time() < deadline:
+        st = C.read_json(p, {}) or {}
+        sid = (st.get("session_id") or "").strip()
+        if sid:
+            return sid, "session"
+        if pane_looks_ready(aid):
+            return "", "pane"
+        time.sleep(interval)
+    st = C.read_json(p, {}) or {}
+    sid = (st.get("session_id") or "").strip()
+    if sid:
+        return sid, "session"
+    if pane_looks_ready(aid):
+        return "", "pane"
+    return "", ""
+
+
+def is_birth_zombie(aid, rr, now=None):
+    """True when a live window never became a working agent (eng-170 class).
+
+    Signal triad (card 157dcb7c75):
+      1) roster/status session_id empty  (no UserPromptSubmit ever succeeded)
+      2) status stuck at 'starting' (or missing)
+      3) status timestamp older than ZOMBIE_STARTING_SEC
+    Plus pane is blank OR idle-welcome (not actively working). Window must exist.
+    """
+    now = time.time() if now is None else now
+    if not rr or rr.get("retired") or rr.get("is_master"):
+        return False
+    _, sess, tab = C.parse_agent_id(aid)
+    if not sess or not tab or not window_exists(sess, tab):
+        return False
+    st = read_agent_status(aid)
+    sid = (st.get("session_id") or rr.get("session_id") or "").strip()
+    if sid:
+        return False
+    status = (st.get("status") or "starting").strip().lower()
+    if status not in ("starting", ""):
+        return False
+    ts = float(st.get("timestamp") or 0) or 0.0
+    if ts <= 0:
+        return False
+    if (now - ts) < ZOMBIE_STARTING_SEC:
+        return False
+    if pane_looks_working(aid):
+        return False
+    # blank pane, idle welcome, or any non-working stuck starting without session_id
+    return True
+
+
+def window_exists(sess, tab):
+    r = subprocess.run(["tmux", "list-windows", "-t", "mc-%s" % sess, "-F", "#{window_name}"],
+                       capture_output=True, text=True)
+    return r.returncode == 0 and tab in r.stdout.split()
+
+
+# The permission-bypass flag each backend MUST be launched with. An agent without it stops on the
+# first tool prompt and looks hung to whoever installed MyPlow -- the exact symptom reported for
+# a first-run Boss (card 5211716904, items 6+7).
+BYPASS_MARKERS = {
+    "claude": ["--dangerously-skip-permissions"],
+    "codex": ["--dangerously-bypass-approvals-and-sandbox"],
+    "grok": ["--permission-mode", "bypassPermissions"],
+}
+
+
+def _pane_process_tree(sess, tab):
+    """Command lines of every process under an agent window's panes, or None if undeterminable.
+
+    None is NOT "nothing running": it means tmux or ps could not answer, and callers must not
+    destroy a pane on that basis.
+    """
+    r = subprocess.run(["tmux", "list-panes", "-t", "mc-%s:%s" % (sess, tab), "-F", "#{pane_pid}"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    roots = [p for p in r.stdout.split() if p.isdigit()]
+    if not roots:
+        return None
+    ps = subprocess.run(["ps", "-eo", "pid=,ppid=,command="], capture_output=True, text=True)
+    if ps.returncode != 0:
+        return None
+    children, cmd = {}, {}
+    for line in ps.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid, ppid, command = parts
+        if not (pid.isdigit() and ppid.isdigit()):
+            continue
+        cmd[pid] = command
+        children.setdefault(ppid, []).append(pid)
+    seen, out, stack = set(), [], list(roots)
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        if pid in cmd:
+            out.append(cmd[pid])
+        stack.extend(children.get(pid, []))
+    return out
+
+
+def window_runs_launched_agent(sess, tab, backend):
+    """True/False/None: is this window running a correctly launched `backend` agent?
+
+    A window existing is NOT proof an agent is in it. An interactive `claude auth login`, a
+    leftover shell, or a dead pane all leave the window standing. do_spawn used to treat the mere
+    window as success -- printing "reusing", writing the roster and returning 0 without ever
+    running `launch` -- which is how a Boss came up without its bypass flag and why the Spawn
+    buttons looked dead while Revive worked (Revive is only reachable once the window is gone, so
+    it takes the branch that actually launches).
+
+    None means "could not tell"; callers must treat it as leave-alone, never as a reason to kill.
+    """
+    tree = _pane_process_tree(sess, tab)
+    if tree is None:
+        return None
+    markers = BYPASS_MARKERS.get(backend)
+    if not markers:
+        return None
+    for command in tree:
+        if backend in command and all(m in command for m in markers):
+            return True
+    return False
+
+
+def session_exists(sess):
+    return subprocess.run(["tmux", "has-session", "-t", "mc-%s" % sess],
+                          capture_output=True).returncode == 0
+
+
+def tmux_env():
+    e = dict(os.environ)
+    e.pop("TMUX", None)
+    return e
+
+
+def recording_enabled_global():
+    """Host-wide opt-in. Default OFF. Truthy: 1/true/yes/on."""
+    v = (os.environ.get("MYPEOPLE_RECORD")
+         or CFG.get("MYPEOPLE_RECORD")
+         or "0").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def want_recorder(record_flag, prior):
+    """Record only if --record, MYPEOPLE_RECORD=1, or roster already opted this agent in."""
+    if record_flag:
+        return True
+    if recording_enabled_global():
+        return True
+    if isinstance(prior, dict) and prior.get("record"):
+        return True
+    return False
+
+
+def start_recorder(tab, sess, previous=None):
+    """Start a read-only asciinema recorder on the pane (opt-in only; §spawn-recording).
+    Best-effort. Callers must gate on want_recorder(): the recorder attaches a READ-ONLY tmux
+    client, and when it is the only client attached, tmux refuses send-keys with "client is
+    read-only" -- i.e. an unconditional recorder makes a headless agent unable to be spoken to."""
+    rec_sess = "rec-%s" % tab
+    e = tmux_env()
+    current = C.current_recorder(sess, tab, HOST_ID)
+    previous_pid = previous.get("pid") if isinstance(previous, dict) else None
+    if previous_pid and (not current or previous_pid != current.get("pid")):
+        # A recorder from an older tmux socket generation is not reachable by session name.
+        C.stop_recorder(sess, tab, previous, HOST_ID, include_current=False)
+    if current:
+        return current
+    if subprocess.run(["tmux", "has-session", "-t", rec_sess], env=e, capture_output=True).returncode == 0:
+        return None
+    cast = C.recorder_identity(sess, tab, HOST_ID)["cast"]
+    os.makedirs(os.path.dirname(cast), exist_ok=True)
+    if not shutil.which("asciinema"):
+        return
+    inner = "TMUX= tmux attach -rt mc-%s:%s" % (sess, tab)
+    cmd = "asciinema rec --quiet --append -c %s %s" % (shlex.quote(inner), shlex.quote(cast))
+    try:
+        r = subprocess.run(["tmux", "new-session", "-d", "-s", rec_sess, cmd], env=e,
+                           capture_output=True, timeout=10)
+        if r.returncode != 0:
+            return None
+        for _ in range(20):
+            current = C.current_recorder(sess, tab, HOST_ID)
+            if current:
+                return current
+            time.sleep(0.05)
+    except Exception:
+        return None
+    return None
+
+
+def build_launch(aid, cwd, boss_id, is_master, model, backend, resume_session=None,
+                 role_bundle=None):
+    exports = {
+        "PATH": "%s/.local/bin:%s/bin:%s" % (os.path.expanduser("~"), INSTALL_DIR, os.environ.get("PATH", "/usr/bin")),
+        "AGENT_ID": aid,
+        "QUEUE_URL": QUEUE_URL,
+        "QUEUE_SECRET": SECRET,
+        "HOST_ID": HOST_ID,
+        "INSTALL_DIR": INSTALL_DIR,
+        "MYPEOPLE_BACKEND": backend,
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+    }
+    # non-secret role identity env (MYPEOPLE_ROLE*, plus CODEX_HOME / GROK_HOME for the adapters
+    # that mount through a home dir instead of flags). Absent role_bundle, the launch is byte-for-
+    # byte the legacy one -- a bundle-less agent keeps working exactly as before.
+    role_flags = []
+    if role_bundle:
+        exports.update(mprole.role_env(role_bundle))
+        # dispatch explicitly: an else-branch here silently hands one adapter's flags to another
+        # backend, which rejects them -- the agent would die at launch with the role "mounted".
+        role_flags = {"claude": mprole.claude_flags, "codex": mprole.codex_flags,
+                      "grok": mprole.grok_flags}[backend](role_bundle)
+    prefix = "env"
+    if is_master:
+        prefix += " -u BOSS_ID"  # top-level agent must not inherit a leaked boss
+    else:
+        exports["BOSS_ID"] = boss_id
+    envstr = envq(**exports)
+    if backend == "claude":
+        agent = "claude --dangerously-skip-permissions"
+        if role_flags:
+            agent += " " + " ".join(shlex.quote(f) for f in role_flags)
+        if "--settings" not in role_flags:
+            # bundle-less spawn: nothing else would carry the consent (card 293fc81898)
+            consent = claude_consent_settings()
+            if consent:
+                agent += " --settings %s" % shlex.quote(consent)
+        if model:
+            agent += " --model %s" % shlex.quote(model)
+        if resume_session:
+            agent += " --resume %s" % shlex.quote(resume_session)
+    elif backend == "codex":
+        agent = "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust"
+        trust_override = codex_trust_override(cwd)
+        if trust_override:
+            agent += " --config %s" % shlex.quote(trust_override)
+        if role_flags:
+            agent += " " + " ".join(shlex.quote(f) for f in role_flags)
+        if model:
+            agent += " --model %s" % shlex.quote(model)
+        if resume_session:
+            agent += " resume %s" % shlex.quote(resume_session)
+    elif backend == "grok":
+        agent = "grok --permission-mode bypassPermissions"
+        if role_flags:
+            agent += " " + " ".join(shlex.quote(f) for f in role_flags)
+        if model:
+            agent += " --model %s" % shlex.quote(model)
+        if resume_session:
+            agent += " --resume %s" % shlex.quote(resume_session)
+    else:
+        raise ValueError("unsupported backend: %s" % backend)
+    return "%s %s %s" % (prefix, envstr, agent)
+
+
+def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_digest=None):
+    if not argv:
+        print("usage: mp spawn <agent_id> [--backend claude|codex|grok] [--cwd PATH] [--boss <id>] "
+              "[--master] [--model <id>] [--role boss|engineer] "
+              "[--owner-task <todo_id>|--temporary] [--record]",
+              file=sys.stderr)
+        return 2
+    aid = full_aid(argv[0])
+    backend = None  # resolved after the flags: the Boss and new agents default differently
+    cwd = None
+    boss = None
+    boss_given = False
+    is_master = False
+    model = None
+    role = None
+    recorded_role_ref = None  # revive pins the exact recorded name@semver
+    owner_task_id = ""
+    temporary = False
+    record_flag = False
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        if a == "--backend":
+            i += 1; backend = argv[i]
+        elif a == "--cwd":
+            i += 1; cwd = argv[i]
+        elif a == "--boss":
+            boss_given = True
+            i += 1; boss = argv[i] if i < len(argv) else ""
+        elif a == "--master":
+            is_master = True
+        elif a == "--model":
+            i += 1; model = argv[i]
+        elif a == "--role":
+            i += 1; role = argv[i] if i < len(argv) else ""
+        elif a == "--role-ref":
+            i += 1; recorded_role_ref = argv[i] if i < len(argv) else ""
+        elif a == "--owner-task":
+            i += 1; owner_task_id = argv[i] if i < len(argv) else ""
+        elif a == "--temporary":
+            temporary = True
+        elif a == "--record":
+            record_flag = True
+        i += 1
+    if temporary and owner_task_id:
+        print("ERROR: --owner-task and --temporary are mutually exclusive", file=sys.stderr); return 2
+    # revive/lock pins the exact recorded ref via kwarg OR --role-ref flag
+    if locked_role_ref is None:
+        locked_role_ref = recorded_role_ref
+    # --- role/master coupling (§role spec) enforced BEFORE any tmux/roster ---
+    role = (role or "").strip().lower() or None
+    if role == "boss" and not is_master:
+        print("ERROR: --role boss requires --master", file=sys.stderr); return 2
+    if role == "engineer" and is_master:
+        print("ERROR: --role engineer and --master cannot be combined", file=sys.stderr); return 2
+    # NO BUNDLE-LESS BOSS, BY ANY PATH. --master IS what makes an agent a Boss, so the gate keys on
+    # is_master -- NOT on the window being named "Boss". Keying on the name would let
+    # `mp spawn <anything> --master` mint a second, bundle-less Boss with the doctrine missing.
+    if is_master and role != "boss":
+        print("ERROR: %s is a Boss (--master) and must be spawned with --role boss; refusing a "
+              "bundle-less Boss." % aid, file=sys.stderr)
+        return 2
+    # empty --boss is a HARD ERROR (§5 spawn env-export contract)
+    if boss_given and (boss is None or boss.strip() == ""):
+        print("ERROR: --boss given with an empty/whitespace value (unset $AGENT_ID bug); refusing to "
+              "create an agent whose boss resolves to '<host>/'.", file=sys.stderr)
+        return 3
+    if backend is None:
+        backend = DEFAULT_BACKEND if is_master else DEFAULT_AGENT_BACKEND
+    backend = (backend or "").strip().lower()
+    if backend not in VALID_BACKENDS:
+        print("ERROR: unsupported backend %r; choose claude, codex or grok" % backend, file=sys.stderr)
+        return 2
+    boss_id = full_aid(boss) if (boss_given and boss.strip()) else ""
+    if not is_master and model is None:
+        # queue.env as it is NOW beats this process's env: the Boss spawns with the env it was
+        # launched with, so an edited default model reached new agents only after a Boss restart.
+        # (This fix once lived only on a live install, 09-23, and the next sync erased it.)
+        pinned = C.read_config_file()
+        model = {"claude": pinned.get("DEFAULT_CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
+                 "codex": pinned.get("DEFAULT_CODEX_MODEL") or DEFAULT_CODEX_MODEL,
+                 "grok": pinned.get("DEFAULT_GROK_MODEL") or DEFAULT_GROK_MODEL}.get(backend) or None
+    if not is_local(aid):
+        ok, result = remote_task("spawn", aid, {
+            "backend": backend, "cwd": cwd or "", "boss": boss_id,
+            "is_master": is_master, "model": model or "",
+        })
+        print(result)
+        return 0 if ok else 1
+    if not shutil.which(backend):
+        print("ERROR: %s CLI is not installed on this node" % backend, file=sys.stderr)
+        return 2
+    _, sess, tab = C.parse_agent_id(aid)
+    if cwd is None:
+        cwd = os.path.join(INSTALL_DIR, "run", "boss" if is_master else "eng")
+    os.makedirs(cwd, exist_ok=True)
+    if backend == "claude":
+        pretrust(cwd)
+    elif backend == "grok":
+        grok_pretrust()
+
+    # --- FAIL-CLOSED ROLE PREFLIGHT + MOUNT (before any tmux pane / roster row) ---
+    # Resolving and materializing here means a bad role leaves NO side effects: no window, no
+    # roster entry, no half-born agent for the supervisor to find.
+    role_bundle = None
+    role_meta = {}
+    if role:
+        try:
+            item = resolve_role(role, backend, locked_role_ref=locked_role_ref)
+        except mprole.RoleError as ex:
+            print("ERROR: role preflight failed (no tmux/roster created): %s" % ex, file=sys.stderr)
+            return 2
+        if expected_role_digest and item["digest"] != expected_role_digest:
+            print("ERROR: locked role drift for %s: expected digest %s, store now resolves %s. "
+                  "Refusing to revive under a different doctrine."
+                  % (aid, expected_role_digest[:12], item["digest"][:12]), file=sys.stderr)
+            return 5
+        role_bundle = materialize_role(item, aid, backend)
+        role_meta = {
+            "role": role_bundle["role"], "role_ref": role_bundle["role_ref"],
+            "role_digest": role_bundle["digest"],
+            "personality_digest": role_bundle["personality_digest"],
+            "skill_digests": {s["name"]: s["sha256"] for s in role_bundle["skills"]},
+            "adapter_version": role_bundle["adapter_version"],
+            "role_bundle": role_bundle["bundle_path"],
+        }
+        print("role %s mounted: %s  digest=%s  bundle=%s"
+              % (role, role_bundle["role_ref"], role_bundle["digest"][:12],
+                 role_bundle["bundle_path"]))
+
+    launch = build_launch(aid, cwd, boss_id, is_master, model, backend,
+                          resume_session=resume_session, role_bundle=role_bundle)
+    # audit spawn_cmd string (model pinned so /agents shows exact per-engineer model)
+    parts = ["mp", "spawn", aid, "--backend", backend]
+    if boss_id:
+        parts += ["--boss", boss_id]
+    if cwd:
+        parts += ["--cwd", cwd]
+    if is_master:
+        parts += ["--master"]
+    if (not is_master and model) or (is_master and model):
+        parts += ["--model", model]
+    if role:
+        parts += ["--role", role]
+    if owner_task_id:
+        parts += ["--owner-task", owner_task_id]
+    elif temporary:
+        parts += ["--temporary"]
+    if record_flag or recording_enabled_global():
+        parts += ["--record"]
+    spawn_cmd = " ".join(shlex.quote(x) for x in parts)
+
+    e = tmux_env()
+    reused = window_exists(sess, tab)
+    if reused:
+        # A standing window is not a running agent. Reusing one that holds anything else -- a bare
+        # `claude` from the interactive auth step, a leftover shell -- is what shipped a Boss with
+        # no bypass flag and made the Spawn buttons no-ops: the old code returned 0 here having
+        # never run `launch`. Relaunch in place instead, and only ever stay hands-off when the
+        # agent is genuinely there (True) or undeterminable (None).
+        launched = window_runs_launched_agent(sess, tab, backend)
+        tgt = "mc-%s:%s" % (sess, tab)
+        if launched is False:
+            print("mp spawn: %s exists but holds no correctly launched %s agent; relaunching"
+                  % (aid, backend))
+            rw = subprocess.run(["tmux", "respawn-window", "-k", "-t", tgt, "-c", cwd, launch],
+                                env=e, capture_output=True, text=True)
+            if rw.returncode != 0:
+                print("ERROR: could not relaunch %s: %s"
+                      % (aid, (rw.stderr or "").strip() or "tmux respawn-window failed"),
+                      file=sys.stderr)
+                return 1
+            subprocess.run(["tmux", "set-option", "-t", tgt, "-w", "automatic-rename", "off"],
+                           env=e, capture_output=True)
+            subprocess.run(["tmux", "set-option", "-t", tgt, "-w", "allow-rename", "off"],
+                           env=e, capture_output=True)
+        elif launched is None:
+            print("mp spawn: %s already exists and its pane could not be inspected; reusing"
+                  % aid)
+        else:
+            print("mp spawn: %s already running a launched %s agent, reusing" % (aid, backend))
+    else:
+        if not session_exists(sess):
+            subprocess.run(["tmux", "new-session", "-d", "-s", "mc-%s" % sess, "-n", tab,
+                            "-c", cwd, launch], env=e, capture_output=True)
+            subprocess.run(["tmux", "set-option", "-g", "-t", "mc-%s" % sess, "automatic-rename", "off"],
+                           env=e, capture_output=True)
+        else:
+            subprocess.run(["tmux", "new-window", "-d", "-t", "mc-%s" % sess, "-n", tab,
+                            "-c", cwd, launch], env=e, capture_output=True)
+        tgt = "mc-%s:%s" % (sess, tab)
+        # disable auto-rename so mc-<sess>:<tab> keeps resolving by name (§5 window naming)
+        subprocess.run(["tmux", "set-option", "-t", tgt, "-w", "automatic-rename", "off"], env=e, capture_output=True)
+        subprocess.run(["tmux", "set-option", "-t", tgt, "-w", "allow-rename", "off"], env=e, capture_output=True)
+        subprocess.run(["tmux", "rename-window", "-t", tgt, tab], env=e, capture_output=True)
+        # load the CEO tmux conf into this (possibly new) server
+        conf = os.path.expanduser("~/.tmux.conf")
+        if os.path.exists(conf):
+            subprocess.run(["tmux", "source-file", conf], env=e, capture_output=True)
+
+    # durable roster
+    roster = load_roster()
+    prior = roster.get(aid, {})
+    # An agent born for a card is bound to it for life: /todo/owner refuses to hand a card to an
+    # agent whose roster row does not say it was born for THAT card, so this is the durable half
+    # of the ownership contract. A legacy row keeps whatever it already had.
+    lifecycle = "owner" if owner_task_id else ("temporary" if temporary else prior.get("lifecycle", "legacy"))
+    # A fresh spawn onto a DIFFERENT backend must not inherit the previous backend's session id.
+    # It is not resumable by the new backend, and carrying it means the next accidental death sends
+    # do_revive() hunting for a <new backend> transcript under a <old backend> id, finding nothing,
+    # and refusing to restore an agent that should have recovered. A resume (resume_session set) is
+    # the only case that legitimately carries a session id across, and reuse of a live window must
+    # never touch the running agent's id.
+    session_id = resume_session or prior.get("session_id", "")
+    if session_id and not resume_session and not reused and prior.get("backend") not in ("", backend):
+        print("mp spawn: backend %s -> %s; dropping unusable %s session id %s" %
+              (prior.get("backend"), backend, prior.get("backend"), session_id))
+        session_id = ""
+    do_record = want_recorder(record_flag, prior)
+    roster[aid] = {"agent_id": aid, "host": HOST_ID, "session": sess, "tab": tab,
+                   "backend": backend, "boss_id": boss_id, "cwd": cwd, "spawn_cmd": spawn_cmd,
+                   "model": (model or ""), "is_master": is_master, "retired": False,
+                   "lifecycle": lifecycle, "owner_task_id": owner_task_id,
+                   "session_id": session_id,
+                   "record": do_record,
+                   "summary": prior.get("summary", ""),
+                   # durable role/revive contract (§role spec). These are also what makes the
+                   # mounted personality VISIBLE: mp status and the board read them from here
+                   # rather than re-deriving anything.
+                   "role": role_meta.get("role", ""), "role_ref": role_meta.get("role_ref", ""),
+                   "role_digest": role_meta.get("role_digest", ""),
+                   "personality_digest": role_meta.get("personality_digest", ""),
+                   "skill_digests": role_meta.get("skill_digests", {}),
+                   "adapter_version": role_meta.get("adapter_version", ""),
+                   "role_bundle": role_meta.get("role_bundle", "")}
+    # preserve reap counters so a flapping host cannot infinite-loop respawns
+    if prior.get("zombie_reaps") is not None:
+        roster[aid]["zombie_reaps"] = prior.get("zombie_reaps")
+    if not do_record:
+        roster[aid].pop("recorder", None)
+    save_roster(roster)
+
+    # initial status; master gets a keyword-bearing, locked doctrine summary (J2c)
+    # drop_session mirrors the roster: do_revive falls back to the status file, so a stale id left
+    # here would resurrect the exact trap the roster just dropped.
+    drop_session = (session_id == "" and not resume_session and not reused)
+    if is_master:
+        write_status(aid, "starting", backend, summary=DOCTRINE_SUMMARY, locked=True,
+                     drop_session=drop_session)
+    else:
+        write_status(aid, "starting", backend, drop_session=drop_session)
+
+    # register with the queue-server
+    C.http_json("POST", QUEUE_URL + "/agents/register",
+                {"agent_id": aid, "host": HOST_ID, "session": sess, "tab": tab,
+                 "backend": backend, "state": "alive", "boss_id": boss_id,
+                 "is_master": is_master,
+                 "summary": (DOCTRINE_SUMMARY if is_master else ""),
+                 "spawn_cmd": spawn_cmd, "model": (model or "")}, HDR, timeout=6)
+
+    if do_record:
+        recorder = start_recorder(tab, sess, prior.get("recorder"))
+        if recorder:
+            roster = load_roster()
+            if aid in roster and not roster[aid].get("retired"):
+                roster[aid]["recorder"] = recorder
+                roster[aid]["record"] = True
+                save_roster(roster)
+    else:
+        # Default-off: record the intent so nothing re-attaches a read-only client to this pane.
+        # Existing rec-* sessions are left alone here; `mp stop-recorders` is the fleet-wide relief.
+        roster = load_roster()
+        if aid in roster and not roster[aid].get("retired"):
+            roster[aid]["record"] = False
+            roster[aid].pop("recorder", None)
+            save_roster(roster)
+
+    # SELF-CHECK window naming
+    r = subprocess.run(["tmux", "list-windows", "-t", "mc-%s" % sess, "-F", "#{window_name}"],
+                       env=e, capture_output=True, text=True)
+    if tab not in r.stdout.split():
+        print("ERROR: window %s not named correctly after spawn" % tab, file=sys.stderr)
+        return 4
+
+    # Readiness gate: fresh windows must show a usable TUI (and pick up session_id if hooks wrote
+    # it) before we claim success. Boss used to send into a blank pane -> eng-170 birth-zombie.
+    # Note: Claude often withholds session_id until the first UserPromptSubmit; pane-ready is
+    # enough for mp send to land. Reuse/resume already has an id.
+    ready_sid = ""
+    ready_how = ""
+    if not reused and not resume_session:
+        ready_sid, ready_how = wait_for_backend_ready(aid, timeout=SPAWN_READY_SEC)
+        if ready_sid:
+            roster = load_roster()
+            if aid in roster and not roster[aid].get("retired"):
+                roster[aid]["session_id"] = ready_sid
+                save_roster(roster)
+        elif not ready_how:
+            print("WARNING: %s window up but TUI/session not ready after %.0fs "
+                  "(birth-zombie risk)" % (aid, SPAWN_READY_SEC),
+                  file=sys.stderr)
+
+    if is_master and not resume_session:
+        # send the onboarding prompt (doctrine internalized) after the TUI comes up
+        doc = ""
+        if os.path.exists(BOSS_DOC):
+            doc = open(BOSS_DOC).read()
+        prompt = ("You are the MyPlow Boss (agent %s). Read your doctrine below and internalize it, "
+                  "then wait for [todo] pings. Reply concisely that you are ready.\n\n%s" % (aid, doc[:6000]))
+        C.send_when_ready("mc-%s:%s" % (sess, tab), prompt, 60)
+    print("spawned %s" % aid)
+    return 0
+
+
+SEND_USAGE = "usage: mp send <agent_id> <msg...>   (message may come from stdin)"
+
+
+def do_send(argv):
+    """mp send <agent_id> <msg...> — deliver a message into an agent's composer.
+
+    The message is ARGV. Two guards below exist because the silent version of getting that
+    wrong cost several agents most of a day (card 5676f76673): `mp send X --by Y <<EOF`
+    delivered the literal string "--by Y", discarded the real body on stdin that nothing
+    read, and printed "sent". The recipient got the same string every time, which is the
+    tell — real truncation varies with the text, operator error repeats verbatim.
+    """
+    if not argv:
+        print(SEND_USAGE, file=sys.stderr); return 2
+    aid = full_aid(argv[0])
+    rest = argv[1:]
+    # mp send has NO options, so a flag standing alone as its own argv token is never part
+    # of a message someone meant to send. Checked at EVERY position, not just the first:
+    # the two habits in the wild were `mp send X --by Y <<EOF` (body discarded on unread
+    # stdin) and `mp send X "body" --by Y` (body delivered with a literal " --by Y" glued
+    # on) -- a leading-token check would have caught only the first and left the commoner
+    # one silently corrupting. A real message that merely mentions --by is a single quoted
+    # argument, so it never appears as a standalone token and is not caught.
+    stray = [a for a in rest if a.startswith("--")]
+    if stray:
+        print("ERROR: mp send takes the message as ARGUMENTS, not flags — there is no --by "
+              "flag; reply_to comes from $AGENT_ID.\n"
+              "  got:     mp send %s %s\n"
+              "  correct: mp send %s \"your message here\"   (or pipe the body on stdin)\n"
+              "  if the message really contains %s, quote the whole message as one argument."
+              % (argv[0], " ".join(rest), argv[0], stray[0]), file=sys.stderr)
+        return 2
+    msg = " ".join(rest).strip()
+    # Gated on isatty exactly as do_comment is: an interactive `mp send <agent>` must print
+    # usage, not block forever reading an empty terminal.
+    if not msg and not sys.stdin.isatty():
+        msg = sys.stdin.read().strip()
+    if not msg:
+        print(SEND_USAGE, file=sys.stderr); return 2
+    reply_to = os.environ.get("AGENT_ID", "").strip()
+    if reply_to:
+        reply_to = full_aid(reply_to)
+    if not is_local(aid):
+        payload = {"message": msg}
+        if reply_to and reply_to != aid:
+            payload["reply_to"] = reply_to
+        ok, result = remote_task("send", aid, payload, timeout=30)
+        print(result)
+        return 0 if ok else 1
+    route_token = C.enqueue_notification_route(aid, reply_to, msg)
+    # A Claude session still starting (or behind a dialog) is waited for briefly, then REFUSED
+    # with rc 3: a paste there could vanish while this printed "sent". Retrying senders retry.
+    why = C.send_when_ready(C.tmux_target(aid), msg, float(os.environ.get("MP_SEND_READY_WAIT", "10")))
+    ok = why == "sent"
+    if not ok and route_token:
+        C.cancel_notification_route(aid, route_token)
+    print(why)
+    return 0 if ok else (3 if why == "not_ready" else 1)
+
+
+def classify(pane, backend=None):
+    low = pane.lower()
+    if "do you want" in low or "❯ 1." in pane or "1. yes" in low or "would you like" in low:
+        return "BLOCKED"
+    tail = "\n".join(pane.strip().splitlines()[-6:]).lower()
+    if backend == "grok":
+        # grok's own vocabulary: the footer offers ctrl+c:cancel only while a turn is in flight
+        if "run grok build in a project directory?" in low:
+            return "BLOCKED"
+        if "ctrl+c:cancel" in tail or "waiting for response" in tail or "esc to interrupt" in tail:
+            return "WORKING"
+        return "IDLE"
+    if "esc to interrupt" in tail or "✳" in pane[-400:] or "running" in tail or "tokens" in tail:
+        return "WORKING"
+    return "IDLE"
+
+
+def do_peek(argv):
+    if not argv:
+        print("usage: mp peek <agent_id>", file=sys.stderr); return 2
+    aid = full_aid(argv[0])
+    if not is_local(aid):
+        ok, result = remote_task("peek", aid, {}, timeout=30)
+        print(result)
+        return 0 if ok else 1
+    pane = C.tmux_capture(C.tmux_target(aid))
+    backend = (load_roster().get(aid) or {}).get("backend")
+    print("[state:%s]" % classify(pane, backend))
+    print(pane)
+    return 0
+
+
+def do_kill(argv):
+    if not argv:
+        print("usage: mp kill <agent_id> [--reason ...]", file=sys.stderr); return 2
+    aid = full_aid(argv[0])
+    reason = ""
+    if "--reason" in argv:
+        idx = argv.index("--reason")
+        reason = " ".join(argv[idx + 1:])
+    if not is_local(aid):
+        ok, result = remote_task("kill", aid, {"reason": reason}, timeout=60)
+        print(result)
+        return 0 if ok else 1
+    _, sess, tab = C.parse_agent_id(aid)
+    e = tmux_env()
+    roster = load_roster()
+    rr = roster.get(aid, {})
+    recorder_stop = C.stop_recorder(sess, tab, rr.get("recorder"), HOST_ID)
+    if aid in roster:
+        roster[aid]["retired"] = True
+        roster[aid]["retire_reason"] = reason or "killed"
+        roster[aid]["retired_ts"] = time.time()
+        roster[aid]["recorder_stop"] = recorder_stop
+        save_roster(roster)
+    C.http_json("POST", QUEUE_URL + "/agents/unregister", {"agent_id": aid}, HDR, timeout=6)
+    subprocess.run(["tmux", "kill-window", "-t", "mc-%s:%s" % (sess, tab)], env=e, capture_output=True)
+    print("killed %s" % aid)
+    return 0
+
+
+def do_answer(argv):
+    if len(argv) < 2:
+        print("usage: mp answer <agent_id> <N>", file=sys.stderr); return 2
+    aid = full_aid(argv[0])
+    n = argv[1]
+    if not is_local(aid):
+        ok, result = remote_task("answer", aid, {"n": n}, timeout=30)
+        print(result)
+        return 0 if ok else 1
+    tgt = C.tmux_target(aid)
+    e = tmux_env()
+    subprocess.run(["tmux", "send-keys", "-t", tgt, str(n)], env=e, capture_output=True)
+    time.sleep(0.2)
+    subprocess.run(["tmux", "send-keys", "-t", tgt, "Enter"], env=e, capture_output=True)
+    print("answered %s -> %s" % (aid, n))
+    return 0
+
+
+def session_files(backend, session_id):
+    """Return persisted transcript files proving that a backend session can be resumed."""
+    import glob
+    if backend == "claude":
+        pattern = os.path.expanduser("~/.claude/projects/**/%s.jsonl" % session_id)
+    elif backend == "codex":
+        pattern = os.path.expanduser("~/.codex/sessions/**/*%s.jsonl" % session_id)
+    elif backend == "grok":
+        root = os.environ.get("GROK_HOME") or os.path.expanduser("~/.grok")
+        pattern = os.path.join(root, "sessions", "**", session_id, "chat_history.jsonl")
+    else:
+        return []
+    return glob.glob(pattern, recursive=True)
+
+
+def do_revive(argv):
+    if not argv:
+        print("usage: mp revive <agent_id>", file=sys.stderr); return 2
+    aid = full_aid(argv[0])
+    if not is_local(aid):
+        ok, result = remote_task("revive", aid, {}, timeout=150)
+        print(result)
+        return 0 if ok else 1
+    roster = load_roster()
+    rr = roster.get(aid)
+    if not rr:
+        print("unknown agent %s" % aid, file=sys.stderr); return 1
+    if not rr.get("retired"):
+        print("ERROR: %s is not retired" % aid, file=sys.stderr); return 1
+    sid = rr.get("session_id", "")
+    if not sid:
+        _, sess, tab = C.parse_agent_id(aid)
+        status = C.read_json(os.path.join(STATUS_DIR, "mc-%s" % sess, "%s.json" % tab), {}) or {}
+        sid = status.get("session_id", "")
+    backend = rr.get("backend", "claude")
+    transcripts = session_files(backend, sid) if sid else []
+    if not sid or not transcripts:
+        print("ERROR: %s is not resumable: persisted %s session transcript is missing" %
+              (aid, backend),
+              file=sys.stderr)
+        return 1
+    args = [aid, "--backend", backend]
+    if rr.get("boss_id"):
+        args += ["--boss", rr["boss_id"]]
+    if rr.get("cwd"):
+        args += ["--cwd", rr["cwd"]]
+    if rr.get("is_master"):
+        args += ["--master"]
+    role = _record_role(rr)
+    if role:
+        args += ["--role", role]
+    if rr.get("model"):
+        args += ["--model", rr["model"]]
+    # A revived owner must come back bound to the same card (see spawn_args_from_record).
+    if rr.get("lifecycle") == "owner" and rr.get("owner_task_id"):
+        args += ["--owner-task", rr["owner_task_id"]]
+    elif rr.get("lifecycle") == "temporary":
+        args += ["--temporary"]
+    # Pin the exact recorded ref+digest so a restored agent cannot silently come back under a
+    # different doctrine than the one it died with. A node that updates itself in place (the cloud
+    # image sets MP_REVIVE_FOLLOWS_REGISTRY=1) changes doctrine ON PURPOSE: there the revive resumes
+    # the same session under the role the installed release ships, instead of refusing -- which
+    # left the Boss unrevivable after any update that bumped its role.
+    if os.environ.get("MP_REVIVE_FOLLOWS_REGISTRY") == "1":
+        return do_spawn(args, resume_session=sid)
+    return do_spawn(args, resume_session=sid, locked_role_ref=rr.get("role_ref") or None,
+                    expected_role_digest=rr.get("role_digest") or None)
+
+
+def do_ensure_boss(argv):
+    """Keep the singleton Boss alive without ever replacing a resumable session.
+
+    A genuinely new node has no roster entry and may spawn its first Boss. Once an entry exists,
+    recovery is strict: mark a missing window retired and route through do_revive(), which restores
+    the persisted backend session and original structured spawn flags or surfaces an error.
+
+    A DELIBERATELY killed Boss stays dead (card 0cc0bde980). `mp kill` records durable intent in
+    roster.json; this honours it with exactly the gate do_reconcile applies to every other agent.
+    Only a death the system itself observed (ACCIDENTAL_REASONS) is auto-recovered; a deliberate
+    stop is restored only by an on-purpose `mp spawn`, which clears the intent itself.
+    """
+    aid_arg = next((x for x in argv if not x.startswith("--") and x not in VALID_BACKENDS),
+                   "%s/main:Boss" % HOST_ID)
+    backend = DEFAULT_BACKEND
+    if "--backend" in argv:
+        idx = argv.index("--backend")
+        backend = argv[idx + 1] if idx + 1 < len(argv) else ""
+    backend = (backend or "").strip().lower()
+    if backend not in VALID_BACKENDS:
+        print("ERROR: unsupported backend %r; choose claude, codex or grok" % backend, file=sys.stderr)
+        return 2
+    aid = full_aid(aid_arg)
+    _, sess, tab = C.parse_agent_id(aid)
+    # "Window is there" was the whole liveness test, so a Boss window holding a bare `claude` from
+    # the interactive auth step was adopted as-is and never relaunched with its bypass flag. Only a
+    # window that actually runs a launched agent counts as alive; an undeterminable pane is left
+    # alone rather than churned.
+    if window_exists(sess, tab) and window_runs_launched_agent(sess, tab, backend) is not False:
+        print("Boss already alive: %s" % aid)
+        return 0
+    roster = load_roster()
+    rr = roster.get(aid)
+    # Intent gate FIRST: a kill tombstone carries the intent but not is_master, and must stay dead
+    # quietly rather than fall through to the not-a-Boss error the supervisor would log every 15s.
+    if rr is not None and rr.get("retired"):
+        reason = rr.get("retire_reason", "")
+        if reason not in ACCIDENTAL_REASONS:
+            print("%s was deliberately retired (%s); not respawning" % (aid, reason))
+            return 0
+    if rr is None:
+        # A new node's FIRST Boss is born mounted -- this is the path the supervisor takes, so it
+        # is the one that must never yield a bundle-less Boss.
+        return do_spawn([aid, "--master", "--role", "boss", "--backend", backend])
+    if not rr.get("is_master"):
+        print("ERROR: %s exists but is not recorded as the Boss" % aid, file=sys.stderr)
+        return 1
+    if not rr.get("retired"):
+        rr["retired"] = True
+        rr["retire_reason"] = "boss-window-missing"
+        rr["retired_ts"] = time.time()
+        save_roster(roster)
+    return do_revive([aid])
+
+
+def _record_role(rr):
+    """The role a restored agent must be reborn with.
+
+    A legacy record has no role. A legacy Boss is UPGRADED to the mounted boss role rather than
+    restored bundle-less (a bundle-less Boss is the bug this closes, and refusing to revive the
+    Boss at all would be worse). A legacy engineer stays legacy -- it renders as "-" in mp status,
+    so an unmounted agent stays visible rather than being silently rewritten.
+    """
+    return rr.get("role") or ("boss" if rr.get("is_master") else "")
+
+
+def spawn_args_from_record(aid, rr):
+    """Rebuild the structured spawn arguments from a durable roster record."""
+    args = [aid, "--backend", rr.get("backend", "claude")]
+    if rr.get("boss_id"):
+        args += ["--boss", rr["boss_id"]]
+    if rr.get("cwd"):
+        args += ["--cwd", rr["cwd"]]
+    if rr.get("is_master"):
+        args += ["--master"]
+    role = _record_role(rr)
+    if role:
+        args += ["--role", role]
+    # A recovered owner must come back still bound to its card, or /todo/owner will refuse to
+    # recognise it and the card is left ownerless with a live agent sitting on it.
+    if rr.get("owner_task_id"):
+        args += ["--owner-task", rr["owner_task_id"]]
+    elif rr.get("lifecycle") == "temporary":
+        args += ["--temporary"]
+    if rr.get("model"):
+        args += ["--model", rr["model"]]
+    return args
+
+
+def reap_birth_zombie(aid, rr):
+    """Kill a birth-zombie window and respawn the same roster identity (fresh backend session).
+
+    Returns (ok: bool, detail: str). Capped per agent by ZOMBIE_REAP_MAX so a host that simply
+    cannot boot the backend loops a bounded number of times instead of forever.
+
+    The respawn re-resolves the role from spawn_args_from_record rather than pinning the recorded
+    digest the way do_revive does: a birth-zombie never ran a turn, so this is a retry of the BIRTH,
+    not the restoration of an agent that died holding a doctrine.
+    """
+    reaps = int(rr.get("zombie_reaps", 0) or 0)
+    if reaps >= ZOMBIE_REAP_MAX:
+        return False, "zombie-reap-cap (%d)" % reaps
+    _, sess, tab = C.parse_agent_id(aid)
+    e = tmux_env()
+    roster = load_roster()
+    cur = roster.get(aid, rr)
+    cur["retired"] = True
+    cur["retire_reason"] = "zombie-no-session"
+    cur["retired_ts"] = time.time()
+    cur["zombie_reaps"] = reaps + 1
+    cur["session_id"] = ""  # never resume a session that never started
+    cur.pop("recorder", None)
+    roster[aid] = cur
+    save_roster(roster)
+    C.http_json("POST", QUEUE_URL + "/agents/unregister", {"agent_id": aid}, HDR, timeout=6)
+    subprocess.run(["tmux", "kill-window", "-t", "mc-%s:%s" % (sess, tab)], env=e, capture_output=True)
+    # drop stale starting status so the next spawn's readiness wait is honest
+    write_status(aid, "starting", cur.get("backend", "claude"), drop_session=True)
+    latest = load_roster().get(aid, cur)
+    rc = do_spawn(spawn_args_from_record(aid, latest))
+    if rc != 0:
+        return False, "respawn-failed rc=%s" % rc
+    st = read_agent_status(aid)
+    sid = (st.get("session_id") or "").strip()
+    # Accept TUI-ready even without session_id (Claude often writes sid on first prompt).
+    if not sid and not pane_looks_ready(aid):
+        return False, "respawned-still-not-ready"
+    if latest.get("owner_task_id"):
+        C.send_when_ready(
+            C.tmux_target(aid),
+            "Recovered after birth-zombie (empty session_id / stuck starting). "
+            "Read owner task %s on the TODO board, post a concise recovery status, "
+            "and continue from the card context." % latest["owner_task_id"], 60)
+    return True, "respawned session_id=%s reaps=%d" % (sid or "(pending-prompt)", reaps + 1)
+
+
+def do_stop_recorders(argv):
+    """Stop live asciinema recorders for local agents; clear roster.recorder. Agents stay up.
+
+    The relief valve for a fleet already recording: each recorder holds a read-only tmux client,
+    and a pane whose only client is read-only cannot be sent keys.
+    """
+    roster = load_roster()
+    stopped = 0
+    for aid, rr in sorted(roster.items()):
+        if not is_local(aid):
+            continue
+        _, sess, tab = C.parse_agent_id(aid)
+        if not sess or not tab:
+            continue
+        meta = rr.get("recorder")
+        cur = C.current_recorder(sess, tab, HOST_ID)
+        if not meta and not cur:
+            if not C.recorder_identity(sess, tab, HOST_ID):
+                continue
+        info = C.stop_recorder(sess, tab, meta or cur, HOST_ID)
+        if info or cur or meta:
+            stopped += 1
+        rr["recorder_stop"] = info
+        rr.pop("recorder", None)
+        # Also clear the intent, so the next spawn does not re-attach. --keep-intent stops the
+        # running processes but leaves the agent opted in.
+        if "--keep-intent" not in argv:
+            rr["record"] = False
+    save_roster(roster)
+    print("stopped recorders on %d local agent(s); agents left running" % stopped)
+    return 0
+
+
+def do_reconcile(argv):
+    """Restore agents whose windows disappeared without an intentional mp kill.
+
+    Intent is durable: any retirement reason other than an observed window/server failure is a
+    deliberate stop and is never restarted here. Accidentally lost agents resume their persisted
+    backend session; if the session was never persisted, respawn the same roster identity.
+
+    Also reaps birth-zombies (card 157dcb7c75): live window, empty session_id, status stuck at
+    starting longer than ZOMBIE_STARTING_SEC -- kill + fresh spawn + owner-task brief.
+    """
+    roster = load_roster()
+    recovered, failed, zombies = [], [], []
+    now = time.time()
+    for aid, rr in sorted(roster.items()):
+        if not is_local(aid):
+            continue
+        if rr.get("is_master"):
+            continue
+        _, sess, tab = C.parse_agent_id(aid)
+        if not sess or not tab:
+            continue
+
+        # --- birth-zombie path (window present, backend never bootstrapped) ---
+        if not rr.get("retired") and is_birth_zombie(aid, rr, now=now):
+            last_attempt = float(rr.get("recovery_attempt_ts", 0) or 0)
+            if now - last_attempt < 30:
+                continue
+            roster = load_roster()
+            rr = roster.get(aid, rr)
+            rr["recovery_attempt_ts"] = now
+            rr["recovery_attempts"] = int(rr.get("recovery_attempts", 0) or 0) + 1
+            save_roster(roster)
+            ok, detail = reap_birth_zombie(aid, rr)
+            if ok:
+                recovered.append(aid)
+                zombies.append("%s (%s)" % (aid, detail))
+            else:
+                failed.append(aid)
+                zombies.append("%s FAILED %s" % (aid, detail))
+            roster = load_roster()
+            continue
+
+        if window_exists(sess, tab):
+            continue
+        reason = rr.get("retire_reason", "")
+        if rr.get("retired") and reason not in ACCIDENTAL_REASONS:
+            continue
+        last_attempt = float(rr.get("recovery_attempt_ts", 0) or 0)
+        if now - last_attempt < 30:
+            continue
+        rr["recovery_attempt_ts"] = now
+        rr["recovery_attempts"] = int(rr.get("recovery_attempts", 0) or 0) + 1
+        if not rr.get("retired"):
+            rr["retired"] = True
+            rr["retire_reason"] = "window-missing"
+            rr["retired_ts"] = now
+        save_roster(roster)
+
+        rc = do_revive([aid])
+        fresh = False
+        if rc != 0:
+            latest = load_roster().get(aid, rr)
+            rc = do_spawn(spawn_args_from_record(aid, latest))
+            fresh = (rc == 0)
+        if rc == 0:
+            recovered.append(aid)
+            if fresh and rr.get("owner_task_id"):
+                # A resumed agent still has its context; a FRESH one lost it, so only that one
+                # needs pointing back at its card. readiness is already gated inside do_spawn.
+                C.send_when_ready(C.tmux_target(aid),
+                    "Recovered after a tmux crash. Read owner task %s on the TODO board, post a "
+                    "concise recovery status, and continue from the card context." %
+                    rr["owner_task_id"], 60)
+        else:
+            failed.append(aid)
+        roster = load_roster()
+    print("reconciled recovered=%d failed=%d zombies=%d" %
+          (len(recovered), len(failed), len(zombies)))
+    for aid in recovered:
+        print("recovered %s" % aid)
+    for z in zombies:
+        print("zombie %s" % z)
+    for aid in failed:
+        print("FAILED %s" % aid, file=sys.stderr)
+    return 1 if failed else 0
+
+
+def role_tag(aid, a, roster):
+    """The personality an agent was actually born with -- read from the durable roster.
+
+    A legacy, bundle-less agent renders as "-" rather than blank: an unmounted agent must be
+    VISIBLY unmounted, never silently indistinguishable from a mounted one.
+    """
+    rr = roster.get(aid) or {}
+    return rr.get("role_ref") or a.get("role_ref") or "-"
+
+
+def do_status(argv):
+    code, agents = C.http_json("GET", QUEUE_URL + "/agents", None, HDR, timeout=6)
+    code2, clients = C.http_json("GET", QUEUE_URL + "/clients", None, HDR, timeout=6)
+    roster = load_roster()
+    drift = C.live_drift()
+    if drift:
+        print("!! live install is NOT VERSION %s: %d file(s) changed by hand since it was stamped: %s"
+              " -- release through `make live`, never cp/patch into the install"
+              % (C.version(), len(drift), ", ".join(drift[:6]) + (" ..." if len(drift) > 6 else "")))
+    print("== agents ==")
+    print("%-45s %-8s %-22s %s" % ("agent", "state", "role", "status"))
+    for a in (agents or []):
+        print("%-45s [%-6s] %-22s %s boss=%s" % (
+            a["agent_id"], a.get("state", "?"), role_tag(a.get("agent_id", ""), a, roster),
+            a.get("status", ""), a.get("boss_id", "")))
+    print("== clients ==")
+    for c in (clients or []):
+        print("%-25s %s state=%s" % (c["hostname"], c.get("attach_base", ""), c.get("state", "")))
+    return 0
+
+
+def _fetch_board():
+    """GET /todo/board with the machine credential. Returns (board_dict, err_str)."""
+    code, board = C.http_json("GET", TODO_URL + "/todo/board", None, HDR, timeout=12)
+    if code != 200 or not isinstance(board, dict):
+        return None, "board fetch failed (HTTP %s): %s" % (code, str(board)[:200])
+    return board, None
+
+
+def do_board(argv):
+    """mp board [--compact] — print the whole board as JSON (no curl/secret/jq needed)."""
+    board, err = _fetch_board()
+    if err:
+        print("ERROR: " + err, file=sys.stderr); return 1
+    if "--compact" in argv:
+        print(json.dumps(board, ensure_ascii=False, separators=(",", ":")))
+    else:
+        print(json.dumps(board, ensure_ascii=False, indent=2))
+    return 0
+
+
+def do_card(argv):
+    """mp card <task_id> [--compact] — print a single card (exact id or unique prefix)."""
+    ids = [a for a in argv if not a.startswith("--")]
+    if not ids:
+        print("usage: mp card <task_id> [--compact]", file=sys.stderr); return 2
+    tid = ids[0]
+    board, err = _fetch_board()
+    if err:
+        print("ERROR: " + err, file=sys.stderr); return 1
+    tasks = board.get("tasks", {}) or {}
+    t = tasks.get(tid)
+    if t is None:
+        matches = [k for k in tasks if k.startswith(tid)]
+        if len(matches) == 1:
+            t = tasks[matches[0]]
+        elif len(matches) > 1:
+            print("ERROR: %r is ambiguous (%d cards match)" % (tid, len(matches)), file=sys.stderr); return 1
+    if t is None:
+        print("ERROR: no card matching %r" % tid, file=sys.stderr); return 1
+    if "--compact" in argv:
+        print(json.dumps(t, ensure_ascii=False, separators=(",", ":")))
+    else:
+        print(json.dumps(t, ensure_ascii=False, indent=2))
+    return 0
+
+
+def do_comment(argv):
+    """mp comment <task_id> <body...> [--by <id>] — post a card comment as $AGENT_ID.
+
+    Body comes from the remaining args, or from stdin when no body args are given."""
+    if not argv:
+        print("usage: mp comment <task_id> <body...> [--by <id>]   (body may come from stdin)",
+              file=sys.stderr)
+        return 2
+    tid = argv[0]
+    rest = argv[1:]
+    by = os.environ.get("AGENT_ID", "").strip()
+    if "--by" in rest:
+        i = rest.index("--by")
+        by = (rest[i + 1] if i + 1 < len(rest) else by)
+        rest = rest[:i] + rest[i + 2:]
+    by = full_aid(by) if by else "CEO"
+    # --by is the ONLY flag and it was just consumed. Anything flag-shaped left over is a
+    # command someone expected mp to parse, and it used to be POSTED as the comment instead
+    # (card e949527956): a bare "-" went up as a one-character comment, and `--stdin` with a
+    # heredoc posted the literal string "--stdin" while the real deliverable stayed on unread
+    # stdin. There is no --stdin and no --file. A genuine body is ONE quoted argument, so it
+    # is never a bare flag-shaped token; "- item one" has whitespace and passes.
+    stray = [a for a in rest if a.startswith("-") and not any(c.isspace() for c in a)]
+    if stray:
+        print("ERROR: mp comment takes the body as ONE quoted argument, or on stdin with no "
+              "body arguments — there is no --stdin and no --file flag, and a flag-looking "
+              "token is POSTED as the comment.\n"
+              "  got:     mp comment %s %s\n"
+              "  correct: mp comment %s \"your comment text\"\n"
+              "           mp comment %s < body.md     (or a heredoc, with no body arguments)\n"
+              "           add --by <agent_id> to attribute it\n"
+              "  if the body really begins with %s, quote the whole body as one argument."
+              % (tid, " ".join(rest), tid, tid, stray[0]), file=sys.stderr)
+        return 2
+    body = " ".join(rest).strip()
+    if not body and not sys.stdin.isatty():
+        body = sys.stdin.read().strip()
+    if not body:
+        print("ERROR: empty comment body (pass as args or pipe via stdin)", file=sys.stderr); return 2
+    code, res = C.http_json("POST", TODO_URL + "/todo/comment",
+                            {"task_id": tid, "by": by, "body": body}, HDR, timeout=12)
+    if code != 200 or not (isinstance(res, dict) and res.get("ok")):
+        print("ERROR: comment failed (HTTP %s): %s" % (code, str(res)[:200]), file=sys.stderr); return 1
+    print("commented on %s as %s (id %s)" % (tid, by, res.get("id")))
+    return 0
+
+
+def do_owner(argv):
+    """mp owner <assign|replace|reopen> <task_id> <agent_id> — set a card's owner.
+
+    `--owner-task` only records ownership in the ROSTER; the card's assignee is settable solely
+    through /todo/owner. Without this wrapper the Boss had no command for the second half and read
+    mp's own source to find the endpoint -- engineer work its doctrine forbids. The server still
+    owns every eligibility rule; this only carries the request.
+    """
+    if len(argv) < 3:
+        print("usage: mp owner <assign|replace|reopen> <task_id> <agent_id>", file=sys.stderr)
+        return 2
+    action, tid, agent_id = argv[0], argv[1], full_aid(argv[2])
+    by = os.environ.get("AGENT_ID", "").strip()
+    code, res = C.http_json("POST", TODO_URL + "/todo/owner",
+                            {"action": action, "task_id": tid, "agent_id": agent_id,
+                             "by": full_aid(by) if by else by}, HDR, timeout=12)
+    if code != 200 or not (isinstance(res, dict) and res.get("ok")):
+        err = res.get("error") if isinstance(res, dict) else str(res)[:200]
+        # ineligible_owner is the common one and its cause is never obvious from the word alone.
+        hint = ("\nHINT: the agent must be alive, report to you, and have been spawned FOR this "
+                "card (`mp spawn <id> --boss <you> --owner-task %s`)." % tid
+                if err == "ineligible_owner" else "")
+        print("ERROR: owner %s failed (HTTP %s): %s%s" % (action, code, err, hint), file=sys.stderr)
+        return 1
+    print("owner of %s is now %s" % (tid, res.get("assignee", agent_id)))
+    return 0
+
+
+def _local_proof_path(target):
+    """Return a local filesystem path if target names one, else None.
+
+    A screenshot on disk is the common case, and it reaches us either as a plain path or as
+    the file:// URL a browser/tool handed back. Both must be uploaded — a file:// URL stored
+    as-is renders as a broken image on the board, because the page is served over http.
+    """
+    if target.startswith("file://"):
+        return urllib.parse.unquote(urllib.parse.urlparse(target).path)
+    if target.startswith(("http://", "https://", "/todo/")):
+        return None
+    if os.path.sep in target or target.startswith("~") or os.path.exists(target):
+        return os.path.abspath(os.path.expanduser(target))
+    return None
+
+
+def do_proof(argv):
+    """mp proof <task_id> <path-or-url> [body...] — attach durable proof.
+
+    A local file is uploaded and served by the board; an http(s) link is stored as a link.
+    """
+    if len(argv) < 2:
+        print("usage: mp proof <task_id> <path-or-url> [body...]", file=sys.stderr); return 2
+    tid, target = argv[0], argv[1]
+    body = " ".join(argv[2:]).strip()
+    local = _local_proof_path(target)
+    if local is not None:
+        if not os.path.isfile(local):
+            print("ERROR: no such file: %s" % local, file=sys.stderr)
+            print("       pass a readable file path, or an http(s) URL for a link proof",
+                  file=sys.stderr)
+            return 2
+        code, res = C.http_upload(TODO_URL + "/todo/proof", {"task_id": tid, "body": body},
+                                  local, HDR, timeout=120)
+    else:
+        code, res = C.http_json("POST", TODO_URL + "/todo/proof",
+                                {"task_id": tid, "url": target, "body": body}, HDR, timeout=12)
+    if code != 200 or not (isinstance(res, dict) and res.get("ok")):
+        print("ERROR: proof failed (HTTP %s): %s" % (code, str(res)[:200]), file=sys.stderr); return 1
+    print("proof attached to %s -> %s" % (tid, (res.get("proof") or {}).get("url", "")))
+    return 0
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("usage: mp {status|spawn|send|peek|kill|answer|revive|ensure-boss|reconcile|"
+              "stop-recorders|board|card|comment|proof|owner} ...", file=sys.stderr)
+        return 2
+    verb = sys.argv[1]
+    rest = sys.argv[2:]
+    return {"status": do_status, "spawn": do_spawn, "send": do_send, "peek": do_peek,
+            "kill": do_kill, "answer": do_answer, "revive": do_revive,
+            "ensure-boss": do_ensure_boss, "reconcile": do_reconcile,
+            "stop-recorders": do_stop_recorders,
+            "board": do_board, "card": do_card, "comment": do_comment, "proof": do_proof,
+            "owner": do_owner}.get(
+        verb, lambda a: (print("unknown verb %s" % verb, file=sys.stderr) or 2))(rest)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

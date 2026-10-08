@@ -1,0 +1,8 @@
+{
+  "name": "mypeople-lifecycle",
+  "version": "1.0.0",
+  "required": true,
+  "events": ["SessionStart", "UserPromptSubmit", "Stop"],
+  "handler": "plugins/tmux-boss-hooks/emit-event.sh",
+  "collisionPolicy": "exactly-once"
+}

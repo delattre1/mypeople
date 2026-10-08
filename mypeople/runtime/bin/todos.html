@@ -1,0 +1,1136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MyPlow - Priorities</title>
+<style>
+/* Plow design system (Desktop/plow-branding/DESIGN.md), dark-mode product UI. The faces are served
+   from /fonts by the board server; until 5.22 they were named here and never loaded, so every title
+   fell back to Georgia. Instrument Serif only at 26px and up, DM Sans for UI, DM Mono for handles. */
+:root{
+  --midnight:#01000A; --volt:#D5EF8A; --grove:#5e7a5e; --iris:#C4BFFF;
+  --dark-bg:#111110; --text-dark:#F0F0E8; --muted-dark:rgba(240,240,232,0.45);
+  --surface:rgba(255,255,255,0.05); --surface2:rgba(255,255,255,0.08);
+  --dark-border:rgba(255,255,255,0.09); --border2:rgba(255,255,255,0.15);
+  --volt-dim:rgba(213,239,138,0.15); --volt-glow:rgba(213,239,138,0.25);
+  --success:#34c759; --danger:#ff3b30; --warning:#febc2e; --info:#5ac8fa;
+  --serif:'Instrument Serif',Georgia,serif;
+  --sans:'DM Sans',system-ui,-apple-system,sans-serif;
+  --mono:'DM Mono','SF Mono',ui-monospace,monospace;
+  --dark-card:#1A1A18; --sheet:#151514; --ink-2:rgba(240,240,232,0.74); --faint:rgba(240,240,232,0.36);
+  --line:rgba(255,255,255,0.06); --ease:cubic-bezier(.2,.8,.2,1);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--dark-bg);color:var(--text-dark);font:400 15px/1.5 var(--sans);
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
+body.modal-open{overflow:hidden;}
+::selection{background:rgba(213,239,138,.28)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid rgba(213,239,138,.75);outline-offset:2px}
+[hidden]{display:none!important}
+.i{display:block;flex:0 0 auto}
+kbd{font:500 10.5px/1 var(--mono);color:var(--faint);border:1px solid var(--dark-border);border-bottom-width:2px;border-radius:5px;padding:2px 5px 1px;background:rgba(255,255,255,.03)}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:0.035;
+  background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");}
+/* No title row (CEO c6a13ce248): the add bar shares the top row with the fixed Board/Graph nav and
+   stops short of it, so the page spends no height on chrome. */
+.wrap{position:relative;z-index:1;padding:18px 24px 120px;}   /* fills the window: no fixed column width */
+.subt{font:400 12px/1.4 var(--mono);color:var(--faint);}
+.eyebrow{margin:0;font:500 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+
+/* ---- add ---- */
+.addbar{display:flex;gap:8px;align-items:center;height:44px;margin:0 190px 28px 0;   /* clears the fixed Board/Graph nav, which reaches 190px into the wrap's content */
+  padding:0 6px 0 14px;
+  background:var(--dark-card);border:1px solid var(--dark-border);border-radius:12px;transition:border-color .15s,box-shadow .15s}
+.addbar:focus-within{border-color:rgba(213,239,138,.45);box-shadow:0 0 0 4px rgba(213,239,138,.07)}
+.addbar>.i{color:var(--faint)}
+#addInput{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;font-size:15px;color:var(--text-dark)}
+#addInput::placeholder{color:var(--faint)}
+.btn-volt{background:var(--volt);color:var(--midnight);border:0;border-radius:10px;font:700 13.5px/1 var(--sans);height:32px;padding:0 14px;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:box-shadow .15s,filter .15s,opacity .15s}
+.btn-volt:hover:not(:disabled){box-shadow:0 4px 20px var(--volt-glow);filter:brightness(1.04)}
+.btn-volt:disabled{opacity:.3;cursor:default}
+.addbar #addBtn{transition:opacity .15s,transform .15s var(--ease)}
+.addbar #addBtn:disabled{opacity:0;transform:scale(.94);pointer-events:none}
+
+/* ---- buttons ---- */
+.btn{height:30px;padding:0 11px;border-radius:9px;border:1px solid var(--dark-border);background:rgba(255,255,255,.04);color:var(--ink-2);
+  font:500 13px/1 var(--sans);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+.btn:hover{background:var(--surface2);color:var(--text-dark);border-color:var(--border2)}
+.btn.primary{background:var(--volt);color:var(--midnight);border-color:transparent;font-weight:700}
+.btn.primary:hover{box-shadow:0 4px 20px var(--volt-glow)}
+.btn.quiet:hover{color:#ff7a70;border-color:rgba(255,59,48,.45);background:rgba(255,59,48,.10)}
+.btn.danger-solid{background:var(--danger);color:#fff;border-color:transparent;font-weight:600}
+.btn.danger-solid:hover{filter:brightness(1.08)}
+
+/* ---- the Boss: one quiet bar. Presence is the dot; it speaks up only when it has news or is down ---- */
+.boss{position:relative;display:flex;align-items:center;gap:12px;height:56px;padding:0 12px 0 10px;margin:0 0 40px;cursor:pointer;border-radius:14px;
+  background:var(--dark-card);border:1px solid var(--dark-border);transition:border-color .2s,background .2s}
+.boss:hover{border-color:var(--border2)}
+.boss-av{position:relative;width:34px;height:34px;border-radius:10px;background:var(--volt);color:var(--grove);display:grid;place-items:center;
+  flex:0 0 auto;transition:background .2s,color .2s}
+.boss-av svg{display:block;width:100%;height:100%;padding:3px;box-sizing:border-box}   /* the Plow icon, Grove on Volt (brand logo variant); inset so the status dot clears the mark */
+.boss-av::after{content:"";position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;border-radius:50%;background:#55554f;border:2.5px solid var(--dark-card)}
+[data-state="up"]>.boss-av::after{background:var(--success)}
+[data-state="down"]>.boss-av::after{background:var(--danger)}
+[data-state="busy"]>.boss-av::after{background:var(--warning)}
+.boss-main{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px}
+.boss-name{font:600 15px/1 var(--sans)}
+.boss-state{font:500 13px/1 var(--sans);color:var(--faint);white-space:nowrap}
+.boss[data-state="up"] .boss-state{display:none}
+.boss-state.down{color:#ff7a70}
+.boss-down{display:none;min-width:0;font-size:13.5px;color:#ffb4ae;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.boss[data-state="down"]{height:auto;min-height:56px;padding:10px 12px 10px 10px;background:rgba(255,59,48,.06);border-color:rgba(255,59,48,.35)}
+.boss[data-state="down"] .boss-av{background:#2a2a27;color:var(--muted-dark)}
+.boss[data-state="down"] .boss-down{display:block}
+.boss-side{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.boss-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.boss-actions button[disabled]{display:none}
+.boss[data-state="up"] #bossKill{opacity:0;transition:opacity .15s,background .15s,border-color .15s,color .15s}
+.boss:hover #bossKill,.boss #bossKill:focus-visible{opacity:1}
+@media (hover:none){.boss[data-state="up"] #bossKill{opacity:1}}
+.boss-msg{position:absolute;right:14px;bottom:-22px;font:400 12px/1 var(--mono);color:var(--faint);white-space:nowrap}
+.boss-msg:empty{display:none}
+.newpill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:100px;background:rgba(213,239,138,.12);color:var(--volt);font:600 12.5px/1 var(--sans);white-space:nowrap}
+.newpill::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--volt)}
+
+/* ---- list head: a name and two quiet icons; the view options live in a menu ---- */
+.listhead{position:relative;display:flex;align-items:center;gap:2px;height:32px;margin:0 0 4px;padding:0 4px 0 12px}
+.lh-title{margin:0 auto 0 0;font:600 13px/1 var(--sans);color:var(--muted-dark)}
+.ibtn{position:relative;width:32px;height:32px;display:grid;place-items:center;border-radius:9px;border:0;background:none;color:var(--faint);transition:background .15s,color .15s}
+.ibtn:hover,.ibtn[aria-expanded="true"]{background:var(--surface);color:var(--text-dark)}
+.ibtn.active{color:var(--volt)}
+.ibtn.active::after{content:"";position:absolute;right:6px;top:6px;width:6px;height:6px;border-radius:50%;background:var(--volt)}
+.menu{position:absolute;right:4px;top:38px;z-index:30;min-width:220px;padding:5px;border-radius:12px;background:#1F1F1D;border:1px solid var(--border2);
+  box-shadow:0 18px 50px rgba(0,0,0,.5);transform-origin:top right;transition:opacity .14s,transform .14s var(--ease)}
+.menu{visibility:visible}
+.menu.closed{opacity:0;transform:scale(.97) translateY(-4px);pointer-events:none;visibility:hidden;transition:opacity .14s,transform .14s var(--ease),visibility 0s linear .14s}
+.vbtn{width:100%;height:34px;display:flex;align-items:center;gap:10px;padding:0 10px;border:0;background:none;border-radius:8px;color:var(--ink-2);font:500 13.5px/1 var(--sans);text-align:left;transition:background .12s,color .12s}
+.vbtn:hover{background:var(--surface2);color:var(--text-dark)}
+.vbtn .tick{width:14px;color:var(--volt);opacity:0}
+.vbtn.active{color:var(--text-dark)}
+.vbtn.active .tick{opacity:1}
+.vbtn .n{margin-left:auto;font:400 12px/1 var(--mono);color:var(--faint)}
+.searchbar{display:none;align-items:center;gap:10px;height:40px;margin:0 0 10px;padding:0 12px;background:var(--dark-card);border:1px solid rgba(213,239,138,.35);border-radius:11px}
+.searchbar.on{display:flex;}
+.searchbar>.i{color:var(--faint)}
+#search{flex:1;min-width:0;background:none;border:0;outline:0;font-size:15px;color:var(--text-dark)}
+#search::placeholder{color:var(--faint)}
+#search::-webkit-search-cancel-button{display:none}
+#searchN{white-space:nowrap;}
+
+/* ---- rows: a row answers "does this need me?" The ring and the title are the row; detail is in the card ---- */
+ul#list{list-style:none;margin:0;padding:0;}
+li.sec{list-style:none;padding:22px 12px 8px;font:600 13px/1 var(--sans);color:var(--muted-dark)}
+li.sec:first-child{padding-top:6px}
+li.sec.you{color:#8fdcff}
+li.task{position:relative;border-radius:10px;cursor:pointer;transition:background .15s,opacity .22s var(--ease),transform .22s var(--ease)}
+li.task+li.task::before{content:"";position:absolute;left:52px;right:12px;top:0;height:1px;background:var(--line);transition:opacity .15s}
+li.task:hover{background:rgba(255,255,255,.035)}
+li.task:hover::before,li.task:hover+li.task::before{opacity:0}
+li.task.enter{opacity:0;transform:translateY(8px)}
+li.task.completing{opacity:.45}
+li.task.done .task-text,li.task.cancelled .task-text{color:var(--muted-dark)}
+li.task.done .task-text,li.task.cancelled .task-text{text-decoration:line-through;text-decoration-color:rgba(240,240,232,.25)}
+.task-top{display:flex;gap:12px;align-items:center;min-height:54px;padding:8px 8px 8px 10px}
+.check{width:32px;height:32px;display:grid;place-items:center;border-radius:9px;flex:0 0 auto;transition:background .15s}
+.check:hover{background:rgba(255,255,255,.06)}
+.check.disabled{opacity:.3;cursor:not-allowed;}
+.si .ck{stroke:var(--success);opacity:0;transition:opacity .15s}
+.si .fill{transition:opacity .15s}
+.check:hover .si .ck{opacity:1}
+.check:hover .si .fill{opacity:0}
+.task-main{flex:1;min-width:0;display:flex;align-items:center;gap:10px}
+/* one line: the full title is in the card */
+.task-text{min-width:0;font:500 15.5px/1.35 var(--sans);letter-spacing:-.005em;color:var(--text-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.task-text.editing,.m-title.editing{white-space:normal;display:block;-webkit-line-clamp:unset;max-height:none;outline:0;border-radius:6px;box-shadow:0 0 0 2px rgba(213,239,138,.5);background:rgba(255,255,255,.04);padding:0 4px;margin:0 -4px;cursor:text}
+.badge{flex:0 0 auto;font:600 12px/1 var(--sans);border-radius:100px;padding:5px 9px}
+.st-review{color:#8fdcff;background:rgba(90,200,250,0.13);}
+.st-blocked{color:#ff8a82;background:rgba(255,59,48,0.14);}
+.st-done{color:rgb(98,222,128);background:rgba(52,199,89,0.14);}
+.st-cancelled{color:var(--muted-dark);background:rgba(142,142,147,0.16);}
+.st-recurring{color:var(--iris);background:rgba(196,191,255,0.12);}
+.ver{flex:0 0 auto;color:var(--success);display:inline-flex}
+.dotnew{flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--volt)}
+.task-aside{display:flex;align-items:center;gap:2px;flex:0 0 auto}
+span.row-ago{min-width:34px;text-align:right;font:400 12px/1 var(--mono);color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap;opacity:0;transition:opacity .15s}
+li.task:hover span.row-ago{opacity:1}
+.star{width:28px;height:28px;display:grid;place-items:center;border:0;background:none;border-radius:8px;color:var(--faint);opacity:0;transition:opacity .15s,color .15s,background .15s}
+li.task:hover .star,.star:focus-visible,.star.on{opacity:1}
+.star:hover{color:var(--text-dark);background:var(--surface2)}
+.star.on{color:var(--volt)}
+.star.on svg{fill:currentColor}
+@media (hover:none){.star{opacity:.5}}
+li.skel{display:flex;gap:14px;align-items:center;height:54px;padding:0 12px}
+li.skel i{display:block;border-radius:6px;background:rgba(255,255,255,.045)}
+li.empty{padding:64px 12px 24px}
+li.empty h3{margin:0;font:400 34px/1.1 var(--serif);letter-spacing:-.015em}
+li.empty h3 em{color:rgba(240,240,232,.5)}
+.no-match{list-style:none;padding:28px 12px;color:var(--ink-2);font-size:14.5px}
+.no-match small{display:block;margin-top:4px;color:var(--faint);font-size:13px}
+.net{position:fixed;left:50%;bottom:22px;z-index:40;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:100px;
+  background:#2a2418;border:1px solid rgba(254,188,46,.35);color:#ffd98a;font:500 13px/1 var(--sans);box-shadow:0 12px 40px rgba(0,0,0,.45)}
+.net::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--warning)}
+/* an agent, by its short name (card owner, owner history) */
+.handle{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;max-width:220px;font:500 12px/1 var(--mono);color:var(--ink-2);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.handle .dot{width:7px;height:7px;border-radius:50%;background:var(--c,#A5B2A7);flex:0 0 auto}
+a.handle:hover{color:var(--text-dark)}
+.handle.none{color:var(--faint);font:400 13px var(--sans)}
+/* the agent avatar (thread and card owner) */
+.own{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;flex:0 0 auto;font:500 10px/1 var(--mono);text-decoration:none;
+  color:var(--c,#A5B2A7);background:rgba(255,255,255,.06);background:color-mix(in srgb,var(--c,#A5B2A7) 17%,transparent)}
+.own.none{background:none;border:1px dashed var(--border2)}
+
+/* ---- card ---- */
+#modalbg{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:rgba(1,0,10,.6);
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);opacity:0;transition:opacity .18s var(--ease)}
+body.modal-open #modalbg{display:flex;}
+body.modal-shown #modalbg{opacity:1}
+#modal{position:relative;width:min(1080px,92vw);height:88vh;background:var(--sheet);border:1px solid var(--dark-border);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 40px 120px rgba(0,0,0,.55);transform:translateY(10px) scale(.985);transition:transform .22s var(--ease)}
+body.modal-shown #modal{transform:none}
+.m-head{padding:22px 24px 14px 28px;display:flex;align-items:flex-start;gap:16px;}
+.m-title-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:9px;}
+.m-cat{font:500 13px/1 var(--sans);color:var(--faint)}
+.m-actions{display:flex;gap:6px;flex:0 0 auto}
+.m-close.on{color:var(--text-dark);background:var(--surface2)}
+.m-details{margin:0;padding:2px 24px 16px 28px;display:grid;grid-template-columns:max-content 1fr;gap:9px 22px;font-size:13px;color:var(--ink-2);border-bottom:1px solid var(--dark-border)}
+.m-details dt{color:var(--faint)}
+.m-details dd{margin:0;min-width:0}
+.m-details code{font:400 12.5px var(--mono);color:var(--text-dark);user-select:all}
+.m-title{font:400 32px/1.12 var(--serif);letter-spacing:-.015em;word-break:break-word;overflow-wrap:anywhere;}
+/* clamp a giant multi-paragraph title so it can never push the comment thread off-screen */
+.m-title.clamped{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;max-height:3.4em;}
+.m-title.expanded{max-height:40vh;overflow-y:auto;overscroll-behavior:contain;}
+.m-title-more{align-self:flex-start;background:none;border:none;color:var(--iris);cursor:pointer;font:500 12.5px var(--sans);padding:0;}
+.m-close{width:34px;height:34px;flex:0 0 auto;display:grid;place-items:center;border-radius:10px;border:1px solid var(--dark-border);background:rgba(255,255,255,.03);color:var(--ink-2);transition:background .15s,color .15s}
+.m-close:hover{background:var(--surface2);color:var(--text-dark)}
+.m-head.bare{border-bottom:1px solid var(--dark-border);padding-bottom:18px}
+.m-boss{display:flex;align-items:center;gap:14px}
+.m-boss .m-cat{color:#ff7a70}
+.m-boss .boss-av{width:44px;height:44px}
+.m-row{padding:0 24px 16px 28px;border-bottom:1px solid var(--dark-border);display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.prop{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--dark-border);border-radius:9px;background:rgba(255,255,255,.03);font-size:13px;color:var(--ink-2);transition:border-color .15s}
+.prop:focus-within{border-color:rgba(213,239,138,.45)}
+.prop.grow{flex:1;min-width:220px}
+.prop>.i{color:var(--faint)}
+.prop select{-webkit-appearance:none;appearance:none;background:transparent url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f0f0e8' stroke-opacity='.5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>") no-repeat right center;
+  border:0;outline:0;padding:0 18px 0 0;font:500 13px var(--sans);color:var(--text-dark);cursor:pointer}
+.prop .handle{padding:3px 7px}
+.inline-field{flex:1;min-width:120px;background:none;border:0;outline:0;font:400 13.5px var(--sans);color:var(--text-dark)}
+.inline-field::placeholder{color:var(--faint)}
+.btn-del{margin-left:auto;width:34px;height:32px;padding:0;justify-content:center;border-radius:9px;border:1px solid transparent;background:none;color:var(--faint);font:500 13px/1 var(--sans);display:inline-flex;align-items:center;gap:6px;transition:background .15s,color .15s,border-color .15s}
+.btn-del:hover{color:#ff7a70;background:rgba(255,59,48,.10);border-color:rgba(255,59,48,.35)}
+.owner-history{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}
+.owner-history .handle{font-size:10.5px;padding:2px 6px}
+.thread{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 28px 28px;min-height:360px;}
+.thread::-webkit-scrollbar{width:12px}
+.thread::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:8px;border:4px solid transparent;background-clip:padding-box}
+.thread-col{width:100%}
+.day{display:flex;align-items:center;gap:12px;margin:26px 0 4px;font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.day::before,.day::after{content:"";flex:1;height:1px;background:var(--line)}
+.ev{display:flex;gap:12px;padding-top:18px;transition:opacity .22s var(--ease),transform .22s var(--ease)}
+.ev.enter{opacity:0;transform:translateY(8px)}
+.ev.cont{padding-top:6px}
+.ev.cont .av{visibility:hidden;height:0}
+.ev.cont .ev-head{display:none}
+.av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;flex:0 0 auto;font:500 11px/1 var(--mono);color:var(--c,#A5B2A7);
+  background:rgba(255,255,255,.06);background:color-mix(in srgb,var(--c,#A5B2A7) 17%,transparent)}
+.av.av-boss{background:var(--volt);color:var(--grove);border-radius:8px}   /* a square, like the hero: a circle clips the mark */
+.av.av-boss svg{display:block;width:100%;height:100%}
+.av.av-proof{color:var(--faint);background:rgba(255,255,255,.05)}
+.ev-body{flex:1;min-width:0;}
+.ev-head{display:flex;align-items:baseline;gap:8px;margin-bottom:3px;font:600 13.5px/1.3 var(--sans);color:var(--text-dark)}
+.ev-head .asg-link{color:inherit;text-decoration:none}
+.ev-head .asg-link:hover{text-decoration:underline;text-underline-offset:3px}
+.ev-ago{font:400 11px/1 var(--mono);color:var(--faint);font-variant-numeric:tabular-nums}
+.ev-text{font-size:15.5px;line-height:1.62;color:rgba(240,240,232,.9);word-break:break-word;overflow-wrap:anywhere;}
+.ev-text>:first-child{margin-top:0}.ev-text>:last-child{margin-bottom:0}
+.ev-text p{margin:0 0 .7em}
+.ev-text h1,.ev-text h2,.ev-text h3,.ev-text h4,.ev-text h5,.ev-text h6{margin:1em 0 .4em;font:600 15.5px/1.35 var(--sans);color:var(--text-dark)}
+.ev-text h1{font-size:18px}.ev-text h2{font-size:16.5px}
+.ev-text ul,.ev-text ol{margin:0 0 .7em;padding-left:1.3em}
+.ev-text li{margin:.15em 0}
+.ev-text a{color:var(--iris);text-decoration:underline;text-decoration-color:rgba(196,191,255,.35);text-underline-offset:3px}
+.ev-text a:hover{text-decoration-color:var(--iris)}
+.ev-text code{font:400 .86em/1.4 var(--mono);background:rgba(255,255,255,.07);border-radius:5px;padding:1px 5px}
+.ev-text pre{margin:0 0 .8em;padding:12px 14px;background:#0c0c0b;border:1px solid var(--dark-border);border-radius:10px;overflow:auto}
+.ev-text pre code{background:none;padding:0;font-size:12.5px;line-height:1.6;white-space:pre}
+.ev-text blockquote{margin:0 0 .7em;padding:2px 0 2px 14px;border-left:2px solid var(--border2);color:var(--ink-2)}
+.ev-text table{border-collapse:collapse;margin:0 0 .8em;font-size:13.5px;display:block;overflow-x:auto}
+.ev-text th,.ev-text td{border-bottom:1px solid var(--dark-border);padding:6px 12px 6px 0;text-align:left;vertical-align:top}
+.ev-text th{font-weight:600;color:var(--text-dark)}
+.ev-text img,.ev-text video{display:block;max-width:100%;max-height:360px;border-radius:12px;border:1px solid var(--dark-border);background:#0b0b0a;margin-top:4px}
+.ev-text .plain{white-space:pre-wrap}
+.ev-me{justify-content:flex-end}
+.ev-me .av{display:none}
+.ev-me .ev-body{flex:0 1 auto;max-width:78%;display:flex;flex-direction:column;align-items:flex-end}
+.ev-me .ev-head{font-weight:500;color:var(--faint)}
+.ev-me .ev-text{background:rgba(213,239,138,.09);border:1px solid rgba(213,239,138,.16);border-radius:16px 16px 6px 16px;padding:9px 14px;color:var(--text-dark)}
+.ev-me.cont .ev-text{border-radius:16px 6px 6px 16px}
+.ev-me.pending .ev-text{opacity:.55}
+.ev-me.failed .ev-text{border-color:rgba(255,59,48,.45);background:rgba(255,59,48,.08)}
+.sending{font:400 11px/1 var(--mono);color:var(--faint);margin-top:5px}
+.ev-me.failed .sending{color:#ff8a82;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.ev.sys{justify-content:center;padding-top:14px}
+.sys-line{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--faint)}
+.sys-line b{font-weight:500;color:var(--ink-2)}
+.proof-note{margin-bottom:6px;color:var(--ink-2);font-size:14px}
+.thread-empty{padding:72px 0 24px;text-align:center}
+.thread-empty h3{margin:0;font:400 30px/1.15 var(--serif);letter-spacing:-.015em}
+.thread-empty p{margin:8px auto 0;max-width:420px;color:var(--faint);font-size:14px}
+.composer{position:relative;padding:12px 28px 16px;border-top:1px solid var(--dark-border);background:var(--sheet)}
+.composer-col{width:100%}
+.composer-box{display:flex;align-items:flex-end;gap:8px;padding:7px 7px 7px 14px;background:var(--dark-card);border:1px solid var(--dark-border);border-radius:14px;transition:border-color .15s,box-shadow .15s}
+.composer-box:focus-within{border-color:rgba(213,239,138,.42);box-shadow:0 0 0 4px rgba(213,239,138,.06)}
+#composer{flex:1;font-size:16px;font-family:var(--sans);line-height:1.5;background:none;border:0;outline:0;padding:5px 0;color:var(--text-dark);resize:none;min-height:34px;max-height:220px;}
+#composer::placeholder{color:var(--faint)}
+.composer .btn-volt{width:34px;height:34px;padding:0;flex:0 0 auto}
+.jump{position:absolute;right:28px;top:-50px;z-index:5;height:34px;padding:0 13px 0 10px;border-radius:17px;border:1px solid var(--border2);background:#262624;color:var(--text-dark);
+  display:flex;align-items:center;gap:6px;font:500 12.5px/1 var(--sans);box-shadow:0 10px 30px rgba(0,0,0,.45);opacity:0;transform:translateY(6px);pointer-events:none;transition:opacity .16s,transform .16s var(--ease)}
+.jump.show{opacity:1;transform:none;pointer-events:auto}
+.jump:hover{background:#2f2f2c}
+.proofregion{}
+.proof-broken{border:1px solid rgba(255,59,48,.3);border-radius:10px;padding:12px 14px;background:rgba(255,59,48,.07);font-family:var(--sans);font-size:13px;line-height:1.5;color:#ffb4ae}
+.proof-broken b{display:block;margin-bottom:4px;color:#ffd0cc}
+.proof-broken code{font-family:var(--mono,monospace);font-size:12px;word-break:break-all;opacity:.85;}
+
+/* ---- question sheet (replaces the browser's confirm(), which titled itself "localhost") ---- */
+#askbg{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;background:rgba(1,0,10,.5);opacity:0;transition:opacity .16s var(--ease)}
+body.asking #askbg{display:flex}
+body.ask-shown #askbg{opacity:1}
+#ask{width:min(420px,92vw);background:#1D1D1B;border:1px solid var(--border2);border-radius:16px;padding:22px 22px 18px;box-shadow:0 30px 90px rgba(0,0,0,.6);transform:scale(.97);transition:transform .2s var(--ease)}
+body.ask-shown #ask{transform:none}
+#ask h3{margin:0 0 6px;font:600 17px/1.3 var(--sans)}
+#ask p{margin:0 0 20px;color:var(--ink-2);font-size:14px;line-height:1.55}
+.ask-actions{display:flex;justify-content:flex-end;gap:8px}
+.ask-actions .btn{height:34px;padding:0 14px}
+
+/* an open card owns the window: the Board/Graph bar steps back until it closes (on a phone it stays, the card is full-screen under it) */
+@media (min-width:641px){#mp-nav{transition:opacity .15s}body.modal-shown #mp-nav{opacity:0;pointer-events:none}}
+body.modal-open #mp-version-badge{display:none}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:0s!important}}
+.boss-msg:empty{display:none}
+@media (max-width:860px){.boss[data-state="down"]{flex-wrap:wrap}.boss[data-state="down"] .boss-side{width:100%;justify-content:flex-end}.boss-msg{position:static}}
+/* mobile: fill the screen and track the visual viewport (--vvh) so the on-screen keyboard never hides the composer */
+@media (max-width:640px){
+  .wrap{padding:62px 14px 80px;}   /* the fixed Board/Graph nav floats over the first 56px */
+  .addbar{margin-right:0;}
+  .boss-down{display:none!important}
+  #modalbg{align-items:flex-start;justify-content:flex-start;}
+  #modal{position:fixed;left:0;top:var(--vvtop,0);width:100vw;height:var(--vvh,100dvh);max-height:none;border-radius:0;border:0;transform:none;}
+  .thread{min-height:0;padding:4px 16px 20px;}   /* min-height:0 lets the thread shrink so the composer stays pinned above the keyboard */
+  .m-head{padding:56px 16px 12px;}   /* 56px top clears the fixed Board/Graph nav floating over the full-screen modal */
+  /* smaller, denser type so long comment threads read comfortably on a phone (CEO 302dae6fb9) */
+  .task-text{font-size:15px;white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;}
+  span.row-ago{display:none}
+  .star:not(.on){opacity:.3}
+  .m-title{font-size:19px;font-family:var(--sans);font-weight:600;letter-spacing:0;line-height:1.3}   /* below 26px the brand serif gives way to DM Sans */
+  .m-title.clamped{max-height:3.9em}
+  .m-row{padding:0 16px 12px;}
+  .m-details{padding:2px 16px 12px}
+  .ev{gap:10px;}
+  .av{width:26px;height:26px;font-size:10px;}
+  .ev-text{font-size:15px;line-height:1.5;}
+  .ev-me .ev-body{max-width:88%}
+  .composer{padding:10px 12px 12px;}   /* #composer stays 16px so iOS never tap-zooms */
+  .jump{right:14px}
+  li.empty h3{font-size:28px}
+}
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div class="wrap">
+  <div class="addbar">
+    <svg class="i" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+    <input id="addInput" placeholder="Add a priority" autocomplete="off" aria-label="Add a priority">
+    <button class="btn-volt" id="addBtn" disabled>Add</button>
+  </div>
+
+  <section class="boss" id="bossHero" data-state="loading" tabindex="0" aria-label="Open the conversation with the Boss">
+    <div class="boss-av" aria-hidden="true"><svg viewBox="0 0 500 500"><path fill="currentColor" d="M114.289 56.0371C153.801 47.6678 190.954 65.1695 202.051 106.978L202.059 106.97C213.194 148.965 196.53 207.831 143.554 217.898C132.387 220.024 117.326 221.371 103.146 220.258V446L54 445.953V134.874C54.5763 97.1219 77.1828 63.9005 114.289 56.0371ZM185.946 244.908V382.057C186.211 390.27 192.121 394.786 199.122 396.499L199.13 396.491C200.843 396.912 203.701 397.192 205.469 397.192H214.098V445.945H203.709C170.777 446.934 141.746 421.249 137.198 388.986C137.167 388.41 137.128 387.826 137.089 387.25C136.513 378.826 136.303 370.378 136.303 361.938V244.908H185.946ZM446.003 378.515C446.003 394.125 441.035 405.421 437.889 411.229C417.751 448.382 369.82 456.58 336.584 431.44C311.104 451.223 274.177 450.904 250.13 429.385C240.162 420.462 227.688 404.424 227.688 382.929V244.908H276.459C276.459 281.446 276.451 343.23 276.459 373.866C276.49 379.324 276.747 384.556 280.049 389.142C287.026 398.936 301.137 399.636 308.714 389.943C312.833 383.949 311.868 379.254 312.062 370.036V244.908H361.612C361.612 278.503 361.597 348.182 361.612 374.567C361.628 377.222 361.714 379.908 362.212 382.376C364.462 394.599 380.216 399.722 389.95 391.758C394.038 388.799 397.169 383.84 397.185 379.114C397.27 337.189 397.192 91.3997 397.216 54.0674H446.003V378.515ZM247.996 72.5185C286.8 40.0843 347.01 51.7862 371.571 95.6806C390.884 128.933 382.536 173.256 353.389 198.068H353.381L353.271 198.162C319 228.479 264.395 224.851 235.785 188.711C207.51 153.902 213.055 100.733 247.996 72.5185ZM133.118 101.668C118.011 101.536 108.627 110.684 104.796 124.542C103.643 128.684 103.161 132.989 103.153 137.295V173.249C111.112 174.759 119.779 175.506 127.014 174.673V174.681C145.983 172.781 157.617 157.662 157.695 135.723C157.765 116.438 148.88 101.8 133.118 101.668ZM334.582 145.174C341.972 120.79 319.958 96.6467 295.335 99.7451L295.202 99.7607C267.55 103.459 252.98 138.571 272.16 160.052C292.142 182.894 326.125 173.49 334.582 145.174Z"/></svg></div>
+    <div class="boss-main">
+      <span class="boss-name">Boss</span>
+      <span class="boss-state" id="bossState">Checking</span>
+      <span class="boss-down">Revive it to resume its memory, or start a new one.</span>
+    </div>
+    <div class="boss-side">
+      <span class="newpill" id="bossUnread" hidden></span>
+      <div class="boss-actions">
+        <button class="btn quiet" id="bossKill" title="Stop the Boss. It stays down until you bring one back from here." disabled>Kill</button>
+        <button class="btn primary" id="bossRevive" title="Bring the SAME Boss back, resuming its session and memory" disabled>Revive</button>
+        <button class="btn" id="bossSpawnClaude" title="Start a new Boss on Claude" disabled>New Claude</button>
+        <button class="btn" id="bossSpawnCodex" title="Start a new Boss on Codex" disabled>New Codex</button>
+        <button class="btn" id="bossSpawnGrok" title="Start a new Boss on Grok" disabled>New Grok</button>
+      </div>
+    </div>
+    <span class="boss-msg" id="bossMsg"></span>
+  </section>
+
+  <div class="listhead">
+    <h2 class="lh-title" id="listLabel">Priorities</h2>
+    <button class="ibtn" id="searchBtn" title="Search (⌘F)" aria-label="Search">
+      <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    </button>
+    <button class="ibtn" id="viewBtn" title="View" aria-label="View options" aria-haspopup="true" aria-expanded="false">
+      <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+    </button>
+    <div class="menu closed" id="viewbar" role="menu">
+      <button class="vbtn" data-toggle="done" aria-pressed="false"><svg class="i tick" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Show done</button>
+      <button class="vbtn" data-toggle="cancelled" aria-pressed="false"><svg class="i tick" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Show cancelled</button>
+      <button class="vbtn" data-lens="recurring" aria-pressed="false"><svg class="i tick" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Recurring only <span class="n" id="recurN">0</span></button>
+    </div>
+  </div>
+  <div class="searchbar" id="searchbar">
+    <svg class="i" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="search" type="search" placeholder="Filter by title, owner or id" autocomplete="off" spellcheck="false" aria-label="Filter tasks">
+    <span class="subt" id="searchN"></span>
+    <kbd>esc</kbd>
+  </div>
+  <ul id="list" aria-busy="true">
+    <li class="skel"><i style="width:20px;height:20px;border-radius:50%;margin-left:6px"></i><i style="width:58%;height:13px"></i></li>
+    <li class="skel"><i style="width:20px;height:20px;border-radius:50%;margin-left:6px"></i><i style="width:44%;height:13px"></i></li>
+    <li class="skel"><i style="width:20px;height:20px;border-radius:50%;margin-left:6px"></i><i style="width:66%;height:13px"></i></li>
+    <li class="skel"><i style="width:20px;height:20px;border-radius:50%;margin-left:6px"></i><i style="width:51%;height:13px"></i></li>
+  </ul>
+</div>
+
+<div id="modalbg"><div id="modal" role="dialog" aria-modal="true"></div></div>
+<div id="askbg"><div id="ask" role="alertdialog" aria-modal="true" aria-labelledby="askTitle" aria-describedby="askBody">
+  <h3 id="askTitle"></h3><p id="askBody"></p>
+  <div class="ask-actions"><button class="btn" id="askCancel">Cancel</button><button class="btn primary" id="askOk">OK</button></div>
+</div></div>
+<div class="net" id="net" role="status" hidden>Reconnecting to the board server</div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+let BOARD = {tasks:{},order:[],pinSeq:0};
+let AGENTS = {};      // agent_id -> attach_url
+let openTaskId = null;
+let boardSig = "";
+let boardReq = 0;     // monotonic id: a late-arriving stale /todo/board response must not clobber a newer one
+let boardFetchInFlight = null; // the 10 MB board can take >3s; never supersede every response with overlapping polls
+let BUILD = null;
+let stickBottom = true;
+let lastProg = 0;
+let loaded = false;   // the skeleton rows stay until the first board arrives
+let drawn = null;     // ids the last render drew: a row that was not there slides in
+let netFails = 0;
+const PENDING = [];   // comments the CEO sent that the board has not returned yet
+const READ_KEY="mp_read_tasks";
+let readTasks=JSON.parse(localStorage.getItem(READ_KEY)||"{}");
+
+// filters (persisted)
+// working/review/blocked are always on — that IS the board. Done and cancelled are opt-in.
+let showDone = localStorage.getItem("mp_show_done")==="1";
+let showCancelled = localStorage.getItem("mp_show_cancelled")==="1";
+let lens = localStorage.getItem("mp_lens") || "";   // "" | "recurring"
+
+function saveFilters(){ localStorage.setItem("mp_show_done", showDone?"1":"0");
+  localStorage.setItem("mp_show_cancelled", showCancelled?"1":"0");
+  localStorage.setItem("mp_lens", lens); }
+
+async function api(path, opts){ opts=opts||{}; opts.credentials="same-origin";
+  opts.headers=Object.assign({"Content-Type":"application/json"}, opts.headers||{});
+  // A write outlives the page: a comment shows as "Sending" at once, and WebKit cancels in-flight
+  // requests when you leave for the Graph. keepalive lets the write finish anyway (body <= 64 KB).
+  if(opts.method && opts.method!=="GET" && String(opts.body||"").length<60000) opts.keepalive=true;
+  return fetch(path, opts); }
+
+// Lucide (ISC) paths, 24px canvas, 1.5 stroke: the brand's icon set. No emoji as UI.
+const ICONS={
+  star:'<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
+  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  up:'<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  down:'<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+  terminal:'<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>',
+  trash:'<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+  bot:'<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  image:'<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+  info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  flag:'<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+  link:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+};
+function icon(name,size,w){ size=size||16; return '<svg class="i" width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="'+(w||1.5)+'" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICONS[name]+'</svg>'; }
+function iconEl(name,size,cls){ const s=document.createElement("span"); if(cls) s.className=cls; s.innerHTML=icon(name,size); return s; }
+// The state lives in the ring, so a row needs no WORKING chip: working is half full, review waits
+// on you, blocked says so, done is filled. Hovering an open ring shows the check it will become.
+function statusIcon(s,size){
+  size=size||20;
+  const ck='<path class="ck" d="M6.6 10.2l2.3 2.3 4.6-4.9" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>';
+  const ring=(c,x)=>'<svg class="si si-'+s+'" width="'+size+'" height="'+size+'" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.6" fill="none" stroke="'+c+'" stroke-width="1.6"'+(x||"")+'/>';
+  if(s==="done") return '<svg class="si si-done" width="'+size+'" height="'+size+'" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.4" fill="#34c759"/><path d="M6.6 10.2l2.3 2.3 4.6-4.9" fill="none" stroke="#0b1a0f" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  if(s==="review") return ring("#5ac8fa")+'<circle class="fill" cx="10" cy="10" r="3.3" fill="#5ac8fa"/>'+ck+'</svg>';
+  if(s==="blocked") return ring("#ff3b30")+'<g class="fill"><path d="M10 6.3v4.4" stroke="#ff3b30" stroke-width="1.8" stroke-linecap="round"/><circle cx="10" cy="13.5" r="1.05" fill="#ff3b30"/></g>'+ck+'</svg>';
+  if(s==="cancelled") return '<svg class="si si-cancelled" width="'+size+'" height="'+size+'" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.4" fill="rgba(240,240,232,.3)"/><path d="M7.4 7.4l5.2 5.2M12.6 7.4l-5.2 5.2" fill="none" stroke="#111110" stroke-width="1.9" stroke-linecap="round"/></svg>';
+  if(s==="recurring") return ring("#C4BFFF",' stroke-dasharray="2.6 2.4"')+ck+'</svg>';
+  return ring("rgba(240,240,232,.42)")+'<path class="fill" d="M10 5.5a4.5 4.5 0 0 1 0 9z" fill="rgba(240,240,232,.42)"/>'+ck+'</svg>';
+}
+
+// Who said it, in words a person reads: "eng-968", "Boss", "You". The full agent id stays one
+// hover away and is what the terminal link opens.
+const AGENT_COLORS=["#C07355","#74A7F6","#D6A3F8","#FBA464","#A5B2A7","#C4BFFF"];
+function hue(name){ let h=0; for(const c of String(name)) h=(h*31+c.charCodeAt(0))>>>0; return AGENT_COLORS[h%AGENT_COLORS.length]; }
+function shortAgent(id){ const tail=String(id||"").split("/").pop(); const [sess,name]=tail.includes(":")?tail.split(":"):["main",tail]; return sess==="main"?name:tail; }
+function who(by){
+  by=String(by||"");
+  if(by==="CEO") return {kind:"me", name:"You"};
+  if(by==="proof") return {kind:"proof", name:"Proof"};
+  const name=shortAgent(by);
+  if(/(^|:)Boss$/.test(by.split("/").pop())) return {kind:"boss", name:"Boss", id:by};
+  return {kind:"agent", name:name||by, id:by};
+}
+function avatar(w, it){
+  const a=document.createElement("div"); a.className="av av-"+w.kind; a.setAttribute("aria-hidden","true");
+  if(w.kind==="boss") a.innerHTML=$("#bossHero .boss-av").innerHTML;
+  else if(w.kind==="proof") a.innerHTML=icon(it && (it.pkind==="image"||it.pkind==="video")?"image":"link",14);
+  else { const m=/(\d+)$/.exec(w.name); a.textContent=m?m[1].slice(-2):w.name.slice(0,2).toUpperCase(); a.style.setProperty("--c",hue(w.name)); }
+  return a;
+}
+function handleEl(agent){
+  const linked=!!agent && agent.includes(":");
+  const h=document.createElement(linked?"a":"span");
+  if(!agent){ h.className="handle none"; h.textContent="unassigned"; return h; }
+  h.className="handle"+(linked?" asg-link":""); h.title=agent;
+  const d=document.createElement("span"); d.className="dot"; d.style.setProperty("--c",hue(shortAgent(agent)));
+  h.appendChild(d); h.appendChild(document.createTextNode(shortAgent(agent)));
+  if(linked){ h.href="#"; h.target="_blank"; h.title="Open "+agent+"'s terminal"; h.addEventListener("click",e=>openAgent(agent,e)); }
+  return h;
+}
+
+async function openAgent(agent, ev){
+  if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+  try{
+    const r=await api("/todo/attach?agent="+encodeURIComponent(agent));
+    if(!r.ok) return;
+    const d=await r.json();
+    let base=d.base||"";
+    let host="";
+    try{ host=new URL(base).hostname; }catch(e){}
+    if(!base || ["0.0.0.0","127.0.0.1","localhost","::"].includes(host)){
+      base=location.protocol+"//"+location.hostname+":"+(d.port||Number("__TTYD_PORT__"));
+    }
+    window.open(base.replace(/\/$/,"")+"/?arg=-t&arg="+encodeURIComponent(d.target),"_blank");
+  }catch(e){}
+}
+function appendAgentLink(parent,agent){ parent.appendChild(handleEl(agent)); }
+
+// Replace a media proof that failed to load with a visible reason, so a broken proof is
+// never mistaken for a missing one. file:// is the usual culprit: the board is served over
+// http and the browser refuses to reach the filesystem.
+function failedProof(el,url){
+  const box=document.createElement("div"); box.className="proof-broken";
+  const t=document.createElement("b");
+  t.textContent=(url||"").startsWith("file://")
+    ? "Proof cannot load: file:// is not reachable from the board"
+    : "Proof cannot load";
+  const c=document.createElement("code"); c.textContent=url||"(no url)";
+  const h=document.createElement("div");
+  h.textContent="Re-attach by uploading the file: mp proof <task_id> <path> [note]";
+  box.appendChild(t); box.appendChild(c); box.appendChild(h);
+  if(el.parentNode) el.parentNode.replaceChild(box,el);
+}
+
+function relTime(ts){
+  if(ts==null) return "";
+  let ms = Number(ts); if(!isFinite(ms)) return "";
+  if(ms < 1e12) ms = ms*1000;         // seconds -> ms
+  let d = (Date.now()-ms)/1000;
+  if(d<0) d=0;
+  if(d<45) return "just now";
+  if(d<3600) return Math.round(d/60)+"m ago";
+  if(d<86400) return Math.round(d/3600)+"h ago";
+  return Math.round(d/86400)+"d ago";
+}
+// "14m ago" is computed once, when a comment is drawn, and the board only redraws when the data
+// changes -- so a thread left open kept its old labels until a new message or a reopen. Every label
+// carries its timestamp; this refreshes them in place, without redrawing anything.
+function refreshRelTimes(){ for(const e of document.querySelectorAll(".ev-ago[data-ts]")){ const t=relTime(e.dataset.ts); if(e.textContent!==t) e.textContent=t; } }
+const tsMs=v=>{ let n=Number(v)||0; return n<1e12 ? n*1000 : n; };
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+const STATE_NAMES={working:"Working",review:"Needs your review",blocked:"Blocked",done:"Done",cancelled:"Cancelled",recurring:"Recurring"};
+function stateLabel(s){ return s==="review"?"review (CEO)":(s||"").replace(/_/g," "); }
+function latestAgentComment(task){
+  return Math.max(0,...(task.comments||[]).filter(c=>c.by!=="CEO").map(c=>{let n=Number(c.ts)||0;return n<1e12?n*1000:n;}));
+}
+function hasUnread(task){ return Number(task.unread||0)>0 && latestAgentComment(task)>Number(readTasks[task.id]||0); }
+async function patchTask(id, fields){
+  await api("/todo/update",{method:"POST",body:JSON.stringify(Object.assign({op:"set",id:id},fields))});
+  fetchBoard(true);
+}
+
+// "🤖 [ Growth ] Find apps..." is how the team titles cards. The bracket becomes a handle and the
+// robot a quiet mark; the stored title never changes, and editing always edits the raw text.
+function splitTitle(raw){
+  raw=String(raw||"");
+  const bot=/^\s*🤖/u.test(raw); const rest=raw.replace(/^\s*🤖\s*/u,"");
+  const m=/^\[\s*([^\]\n]{1,32}?)\s*\]\s*(\S[\s\S]*)$/.exec(rest);
+  return m?{bot,cat:m[1],title:m[2]}:{bot,cat:"",title:rest};
+}
+function paintTitle(el,task,withCat){
+  const t=splitTitle(task.text); el.replaceChildren();
+  if(withCat!==false){
+    if(t.bot) el.appendChild(iconEl("bot",14,"bot"));
+    if(t.cat){ const c=document.createElement("span"); c.className="cat"; c.textContent=t.cat; el.appendChild(c); }
+  }
+  el.appendChild(document.createTextNode(t.title||"(untitled)"));
+}
+function wireInlineText(el, task, paint){
+  el.title="Double-click to edit";
+  el.addEventListener("dblclick",e=>{ e.preventDefault(); e.stopPropagation();
+    el.textContent=task.text||"";   // edit the stored title, category and all
+    el.classList.add("editing"); el.contentEditable="true"; el.focus(); document.execCommand&&document.execCommand("selectAll",false,null); });
+  el.addEventListener("click",e=>{ if(el.isContentEditable) e.stopPropagation(); });
+  el.addEventListener("keydown",e=>{ if(e.key==="Enter"){ e.preventDefault(); el.blur(); }
+    if(e.key==="Escape"){ e.stopPropagation(); el.textContent=task.text; el.blur(); } });
+  el.addEventListener("blur",()=>{ if(el.contentEditable==="true"){
+    el.contentEditable="false"; el.classList.remove("editing"); const v=el.textContent.trim();
+    if(v && v!==task.text) patchTask(task.id,{text:v}); else paint();
+  }});
+}
+
+function orderedTasks(){
+  const t=BOARD.tasks||{};
+  // The Boss chat card (card 3303b00b4c) sits above everything, pins included.
+  const boss = Object.values(t).find(x=>x.bossChat);
+  const pins = Object.values(t).filter(x=>x.pinned && !x.bossChat).sort((a,b)=>(a.pinRank||0)-(b.pinRank||0));
+  const normal = (BOARD.order||[]).map(id=>t[id]).filter(x=>x && !x.pinned && !x.bossChat);
+  return {boss, pins, normal};
+}
+// Cmd/Ctrl+F filter. Every word must appear (AND), matched against the same fields the Graph's
+// search uses: id, title and owner.
+let query="";
+function matches(task){
+  const hay=(task.id+" "+(task.text||"")+" "+(task.assignee||"")).toLowerCase();
+  return query.split(/\s+/).filter(Boolean).every(w=>hay.includes(w));
+}
+// Active cards always sit above done and cancelled ones -- in a search, and with "show done" or
+// "show cancelled" on. The sort is stable, so each group keeps its own pins-first, board order.
+function activeFirst(tasks){
+  const finished=t=>t.state==="done"||t.state==="cancelled";
+  return tasks.slice().sort((a,b)=>finished(a)-finished(b));
+}
+function visible(task){
+  if(query) return matches(task);
+  if(lens==="recurring") return task.state==="recurring";
+  if(task.state==="recurring") return false;           // recurring never on working board
+  if(task.state==="done" && !showDone) return false;
+  if(task.state==="cancelled" && !showCancelled) return false;
+  return true;
+}
+
+// The newest thing said on a card, as one plain line: what the row and the Boss show under the title.
+function lastSaid(task){
+  let best=null;
+  for(const c of task.comments||[]) if(!best||tsMs(c.ts)>=tsMs(best.ts)) best={by:c.by,body:c.body,ts:c.ts};
+  for(const p of task.proofs||[]) if(!best||tsMs(p.ts)>tsMs(best.ts)) best={by:"proof",body:p.note||p.body||("Proof: "+(p.kind||"file")),ts:p.ts};
+  return best;
+}
+function lastActivity(task){ const s=lastSaid(task); return Math.max(tsMs(task.updated), s?tsMs(s.ts):0) || null; }
+
+function relShort(ts){ const t=relTime(ts); return t==="just now"?"now":t.replace(" ago",""); }
+function refreshRowTimes(){ for(const e of document.querySelectorAll(".row-ago[data-ts]")){ const t=relShort(e.dataset.ts); if(e.textContent!==t) e.textContent=t; } }
+const needsYou=t=>t.state==="review"||t.state==="blocked";
+// A row answers one question at a glance: does this need me? The ring and the title are the row.
+// It speaks up only for news (needs you, blocked, new activity); owner, category, time and the
+// thread are one level down, in the card.
+function cardEl(task){
+  const li=document.createElement("li"); li.className="task"+(task.state==="done"?" done":"")+(task.state==="cancelled"?" cancelled":"");
+  li.dataset.id=task.id;
+  const check=document.createElement("div");
+  check.className="check"+(task.state==="done"?" on":"");
+  check.setAttribute("role","button"); check.tabIndex=0;
+  check.title = task.state==="done"?"mark not-done":"mark done";
+  check.setAttribute("aria-label",(STATE_NAMES[task.state]||task.state)+". "+check.title);
+  check.innerHTML=statusIcon(task.state);
+  const toggle=async e=>{ e.stopPropagation(); e.preventDefault();
+    const done = task.state==="done";
+    li.classList.add("completing"); check.innerHTML=statusIcon(done?"working":"done");   // answer the click now; the board catches up
+    await api("/todo/status",{method:"POST",body:JSON.stringify(
+      {task_id:task.id, state: done?"working":"done", verified: !done, by:"CEO"})});
+    fetchBoard(true);
+  };
+  check.addEventListener("click", toggle);
+  check.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" ") toggle(e); });
+  const main=document.createElement("div"); main.className="task-main";
+  const txt=document.createElement("div"); txt.className="task-text";
+  const paint=()=>paintTitle(txt,task,false); paint(); wireInlineText(txt,task,paint);
+  txt.title=task.text||"";
+  main.appendChild(txt);
+  if(needsYou(task)){ const badge=document.createElement("span"); badge.className="badge st-"+task.state; badge.textContent=task.state==="review"?"Needs you":"Blocked"; main.appendChild(badge); }
+  if(task.state==="cancelled"){ const badge=document.createElement("span"); badge.className="badge st-cancelled"; badge.textContent="Cancelled"; main.appendChild(badge); }
+  if(task.verified && task.state==="done"){ const v=document.createElement("span"); v.className="ver"; v.title="Verified"; v.innerHTML=icon("check",14,2.5); main.appendChild(v); }
+  if(hasUnread(task)){ const u=document.createElement("span"); u.className="dotnew"; u.title=task.unread+" new since you last opened it"; main.appendChild(u); }
+  const aside=document.createElement("div"); aside.className="task-aside";
+  const ts=lastActivity(task);
+  const ago=document.createElement("span"); ago.className="row-ago"; if(ts){ ago.dataset.ts=ts; ago.textContent=relShort(ts); ago.title="Last activity "+new Date(ts).toLocaleString("en-US"); }
+  aside.appendChild(ago);
+  const star=document.createElement("button"); star.type="button"; star.className="star"+(task.pinned?" on":"");
+  star.innerHTML=icon("star",15); star.title=task.pinned?"Unpin":"Pin to the top"; star.setAttribute("aria-pressed",task.pinned?"true":"false");
+  star.addEventListener("click", async e=>{ e.stopPropagation(); star.classList.toggle("on");
+    await api("/todo/update",{method:"POST",body:JSON.stringify({op:task.pinned?"unpin":"pin", id:task.id})});
+    fetchBoard(true);
+  });
+  aside.appendChild(star);
+  const top=document.createElement("div"); top.className="task-top";
+  top.appendChild(check); top.appendChild(main); top.appendChild(aside);
+  li.appendChild(top);
+  li.addEventListener("click", ()=>openCard(task.id));
+  return li;
+}
+
+function renderBossChat(task){
+  const hero=$("#bossHero");
+  hero.hidden=!!(query && (!task || !matches(task)));
+  hero.dataset.task=task?task.id:"";
+  const n=task&&hasUnread(task)?Number(task.unread):0, u=$("#bossUnread");
+  u.hidden=!n; u.textContent=(n>99?"99+":n)+" new";
+}
+
+function render(){
+  const list=$("#list");
+  if(!loaded) return;
+  list.removeAttribute("aria-busy");
+  const {boss, pins, normal}=orderedTasks();
+  renderBossChat(boss);
+  const shown=activeFirst([...pins.filter(visible), ...normal.filter(visible)]);
+  // what needs him leads; everything else keeps the Boss's order
+  const yours=query?0:shown.filter(needsYou).length;
+  const ordered=yours?[...shown.filter(needsYou), ...shown.filter(t=>!needsYou(t))]:shown;
+  const before=drawn; drawn=new Set(ordered.map(t=>t.id));
+  const fresh=before?ordered.filter(t=>!before.has(t.id)):[];
+  list.replaceChildren();
+  const sec=(text,cls)=>{ const h=document.createElement("li"); h.className="sec"+(cls?" "+cls:""); h.textContent=text; list.appendChild(h); };
+  ordered.forEach((t,i)=>{
+    if(yours && i===0) sec("Needs you","you");
+    if(yours && i===yours) sec(showDone||showCancelled?"Everything else":"In progress");
+    const li=cardEl(t); if(fresh.length<=3 && fresh.includes(t)) li.classList.add("enter");
+    if(i<yours){ const r=li.querySelector(".badge.st-review"); if(r) r.remove(); }   // the heading already says it
+    list.appendChild(li); });
+  if(fresh.length && fresh.length<=3) requestAnimationFrame(()=>requestAnimationFrame(()=>list.querySelectorAll(".enter").forEach(li=>li.classList.remove("enter"))));
+  const n=ordered.length;
+  $("#searchN").textContent = query ? n+(n===1?" match":" matches") : "";
+  $("#listLabel").textContent = query ? "Search" : lens==="recurring" ? "Recurring" : "Priorities";
+  if(query && !n){ const li=document.createElement("li"); li.className="no-match"; li.textContent="No task matches “"+query+"”";
+    const s=document.createElement("small"); s.textContent="Search covers titles, owners and ids, done and cancelled cards included."; li.appendChild(s); list.appendChild(li); }
+  else if(!n){ const li=document.createElement("li"); li.className="empty"; const h=document.createElement("h3");
+    if(lens==="recurring") h.innerHTML="No recurring work. <em>Nothing repeats on its own yet.</em>";
+    else h.innerHTML="Nothing in progress. <em>Add a priority and the Boss takes it from there.</em>";
+    li.appendChild(h); list.appendChild(li); }
+  $("#recurN").textContent=Object.values(BOARD.tasks).filter(t=>t.state==="recurring").length;
+  for(const [sel,on] of [["[data-toggle='done']",showDone],["[data-toggle='cancelled']",showCancelled],["[data-lens='recurring']",lens==="recurring"]]){
+    const b=$(sel); b.classList.toggle("active",on); b.setAttribute("aria-pressed",on?"true":"false"); }
+  $("#viewBtn").classList.toggle("active", showDone||showCancelled||lens==="recurring");
+}
+// the view menu: three options, out of sight until asked for
+function viewMenu(open){ $("#viewbar").classList.toggle("closed",!open); $("#viewBtn").setAttribute("aria-expanded",open?"true":"false"); }
+$("#viewBtn").addEventListener("click",e=>{ e.stopPropagation(); viewMenu($("#viewbar").classList.contains("closed")); });
+document.addEventListener("click",e=>{ if(!$("#viewbar").contains(e.target)) viewMenu(false); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") viewMenu(false); });
+
+// ---- modal ----
+function timeline(task){
+  const items=[];
+  (task.comments||[]).forEach(c=>items.push({kind:"comment", by:c.by, body:c.body, ts:c.ts}));
+  (task.proofs||[]).forEach(p=>items.push({kind:"proof", pkind:p.kind, url:p.url, body:p.body, score:p.score, keep:p.keep, note:p.note, by:"proof", ts:p.ts}));
+  // ts come in mixed units (server writes seconds, older/agent items are ms); normalize the
+  // SAME way relTime() does (seconds->ms) so a freshly posted comment sorts to the bottom, not
+  // into the middle of the thread. Without this, a new comment "disappears" mid-thread on long cards.
+  items.sort((a,b)=>tsMs(a.ts)-tsMs(b.ts));
+  return items;
+}
+function safeMarkdownHref(value){try{const u=new URL(value,location.href);return u.protocol==="http:"||u.protocol==="https:"?value:""}catch(e){return""}}
+function markdownInline(parent,text){const re=/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^\s)]+\)|https?:\/\/[^\s<>"]+)/g;let at=0,m;while((m=re.exec(text))){parent.appendChild(document.createTextNode(text.slice(at,m.index)));const token=m[0];if(token.startsWith("**")){const e=document.createElement("strong");e.textContent=token.slice(2,-2);parent.appendChild(e)}else if(token.startsWith("*")){const e=document.createElement("em");e.textContent=token.slice(1,-1);parent.appendChild(e)}else if(token.startsWith("`")){const e=document.createElement("code");e.textContent=token.slice(1,-1);parent.appendChild(e)}else if(/^https?:\/\//.test(token)){let url=token,tail="";while(/[.,;:!?'")\]]$/.test(url)&&!(url.endsWith(")")&&(url.match(/\(/g)||[]).length>=(url.match(/\)/g)||[]).length)){tail=url.slice(-1)+tail;url=url.slice(0,-1)}const href=safeMarkdownHref(url);if(href){const a=document.createElement("a");a.href=href;a.target="_blank";a.rel="noopener noreferrer";a.textContent=url;parent.appendChild(a);if(tail)parent.appendChild(document.createTextNode(tail))}else parent.appendChild(document.createTextNode(token))}else{const x=token.match(/^\[([^\]]+)\]\(([^)]+)\)$/),href=x&&safeMarkdownHref(x[2]);if(href){const a=document.createElement("a");a.href=href;a.target="_blank";a.rel="noopener noreferrer";a.textContent=x[1];parent.appendChild(a)}else parent.appendChild(document.createTextNode(token))}at=m.index+token.length}parent.appendChild(document.createTextNode(text.slice(at)))}
+function markdownTable(lines,start,parent){if(start+1>=lines.length||!lines[start].includes("|")||!/^\s*\|?\s*:?-+/.test(lines[start+1]))return 0;const cells=s=>s.trim().replace(/^\||\|$/g,"").split("|").map(x=>x.trim()),heads=cells(lines[start]),rules=cells(lines[start+1]);if(heads.length!==rules.length)return 0;const aligns=rules.map(r=>r.startsWith(":")&&r.endsWith(":")?"center":r.endsWith(":")?"right":r.startsWith(":")?"left":""),table=document.createElement("table"),thead=document.createElement("thead"),tr=document.createElement("tr");heads.forEach((h,i)=>{const th=document.createElement("th");if(aligns[i])th.style.textAlign=aligns[i];markdownInline(th,h);tr.appendChild(th)});thead.appendChild(tr);table.appendChild(thead);const tb=document.createElement("tbody");let i=start+2;for(;i<lines.length&&lines[i].includes("|")&&lines[i].trim();i++){const row=document.createElement("tr");cells(lines[i]).forEach((c,j)=>{const td=document.createElement("td");if(aligns[j])td.style.textAlign=aligns[j];markdownInline(td,c);row.appendChild(td)});tb.appendChild(row)}table.appendChild(tb);parent.appendChild(table);return i-start}
+function renderMarkdown(parent,source){parent.replaceChildren();const lines=String(source||"").split(/\r?\n/);for(let i=0;i<lines.length;){const line=lines[i];if(line.startsWith("```")){const lang=line.slice(3).trim(),code=[];i++;while(i<lines.length&&!lines[i].startsWith("```"))code.push(lines[i++]);if(i<lines.length)i++;const pre=document.createElement("pre"),c=document.createElement("code");if(lang)c.className="language-"+lang.replace(/[^a-z0-9_-]/gi,"");c.textContent=code.join("\n");pre.appendChild(c);parent.appendChild(pre);continue}const used=markdownTable(lines,i,parent);if(used){i+=used;continue}if(!line.trim()){i++;continue}const hm=line.match(/^(#{1,6})\s+(.*)$/);if(hm){const h=document.createElement("h"+hm[1].length);markdownInline(h,hm[2]);parent.appendChild(h);i++;continue}if(/^[-*]\s+/.test(line)){const ul=document.createElement("ul");while(i<lines.length&&/^[-*]\s+/.test(lines[i])){const li=document.createElement("li");markdownInline(li,lines[i].replace(/^[-*]\s+/,""));ul.appendChild(li);i++}parent.appendChild(ul);continue}if(/^\d+\.\s+/.test(line)){const ol=document.createElement("ol");while(i<lines.length&&/^\d+\.\s+/.test(lines[i])){const li=document.createElement("li");markdownInline(li,lines[i].replace(/^\d+\.\s+/,""));ol.appendChild(li);i++}parent.appendChild(ol);continue}if(/^>\s?/.test(line)){const q=document.createElement("blockquote");markdownInline(q,line.replace(/^>\s?/,""));parent.appendChild(q);i++;continue}const p=document.createElement("p");while(i<lines.length&&lines[i].trim()&&!lines[i].startsWith("```")&&!/^(#{1,6})\s+/.test(lines[i])&&!/^[-*]\s+/.test(lines[i])&&!/^\d+\.\s+/.test(lines[i])&&!/^>\s?/.test(lines[i])){if(p.childNodes.length)p.appendChild(document.createElement("br"));markdownInline(p,lines[i++])}parent.appendChild(p)}}
+const STATE_LINE=/^state:\s*([\w ]+?)\s*→\s*([\w ]+)$/;
+function dayLabel(ts){
+  const d=new Date(tsMs(ts)), today=new Date(); const k=x=>x.toDateString();
+  if(k(d)===k(today)) return "Today";
+  if(k(d)===k(new Date(today.getTime()-86400000))) return "Yesterday";
+  return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",year:d.getFullYear()===today.getFullYear()?undefined:"numeric"});
+}
+function evEl(it, prevIt){
+  const w=who(it.by);
+  const ev=document.createElement("div"); ev.className="ev ev-"+w.kind;
+  const sm=it.kind==="comment" && STATE_LINE.exec(String(it.body||"").trim());
+  // consecutive messages from one author within a few minutes read as one turn
+  if(!sm && prevIt && w.kind!=="proof" && prevIt.by===it.by && !STATE_LINE.test(String(prevIt.body||"").trim()) && tsMs(it.ts)-tsMs(prevIt.ts)<8*60000) ev.classList.add("cont");
+  const b=document.createElement("div"); b.className="ev-body";
+  const h=document.createElement("div"); h.className="ev-head";
+  const label=w.name;
+  if(w.id && w.id.includes("/") && w.id.includes(":")){
+    const a=document.createElement("a"); a.className="asg-link"; a.href="#"; a.textContent=label; a.title=w.id;
+    a.addEventListener("click",e=>openAgent(w.id,e)); h.appendChild(a);
+  } else { h.appendChild(document.createTextNode(label||"")); }
+  const ago=document.createElement("span"); ago.className="ev-ago"; ago.dataset.ts=it.ts; ago.textContent=relTime(it.ts); h.appendChild(ago);
+  ago.title=new Date(tsMs(it.ts)).toLocaleString("en-US");
+  if(sm){   // "state: working → done" is an event, not a message
+    ev.className="ev sys";
+    const line=document.createElement("div"); line.className="sys-line";
+    line.innerHTML=statusIcon(sm[2].trim().replace(/ /g,"_"),14);
+    const t=document.createElement("span"); const n=document.createElement("b"); n.textContent=label;
+    t.appendChild(n); t.appendChild(document.createTextNode(" moved this to "+(STATE_NAMES[sm[2].trim()]||sm[2].trim()).toLowerCase()));
+    line.appendChild(t); line.appendChild(ago); ev.appendChild(line); return ev;
+  }
+  const txt=document.createElement("div"); txt.className="ev-text";
+  try{
+    if(it.kind==="proof"){
+      if(it.note){ const n=document.createElement("div"); n.className="proof-note"; n.textContent=it.note; txt.appendChild(n); }
+      // A proof that cannot load must say so. Silently showing nothing reads as "no proof".
+      if(it.pkind==="image"){ const im=document.createElement("img"); im.alt="image proof"; im.loading="lazy"; im.onerror=()=>failedProof(im,it.url); im.src=it.url; txt.appendChild(im); }
+      else if(it.pkind==="video"){ const v=document.createElement("video"); v.controls=true; v.preload="metadata"; v.onerror=()=>failedProof(v,it.url); v.src=it.url; txt.appendChild(v); }
+      else if(it.pkind==="link"){ const a=document.createElement("a"); a.href=it.url; a.textContent=it.url; a.target="_blank"; a.rel="noopener noreferrer"; txt.appendChild(a); }
+      else { const p=document.createElement("div"); p.className="plain"; p.textContent=it.body||it.url||"(proof)"; txt.appendChild(p); }
+    } else { renderMarkdown(txt,it.body||""); }
+  }catch(e){ txt.textContent="(unrenderable)"; }
+  b.appendChild(h); b.appendChild(txt); ev.appendChild(avatar(w,it)); ev.appendChild(b);
+  return ev;
+}
+function pendingEl(p){
+  const ev=document.createElement("div"); ev.className="ev ev-me pending"+(p.failed?" failed":"");
+  const b=document.createElement("div"); b.className="ev-body";
+  const txt=document.createElement("div"); txt.className="ev-text"; renderMarkdown(txt,p.body);
+  const s=document.createElement("div"); s.className="sending"; s.textContent=p.failed?"Not sent. Click to put it back in the box.":"Sending";
+  if(p.failed) s.addEventListener("click",()=>{ PENDING.splice(PENDING.indexOf(p),1); const ta=$("#composer"); if(ta){ ta.value=p.body; ta.dispatchEvent(new Event("input")); ta.focus(); } ev.remove(); });
+  b.appendChild(txt); b.appendChild(s); ev.appendChild(b); return ev;
+}
+function progScroll(el){ lastProg=Date.now(); el.scrollTop=el.scrollHeight; }
+function renderModal(task, forceBottom){
+  const m=$("#modal");
+  const sig = JSON.stringify([task.text,task.doneCondition,task.assignee,task.state,task.verified,task.pingsToBoss,
+    timeline(task).map(i=>[i.ts,i.body,i.url])]);
+  if(m.dataset.sig===sig && !forceBottom) return;   // change-guard: don't rebuild if unchanged
+  // preserve an in-progress composer draft (+caret/focus) across the rebuild so a background poll can't wipe what the CEO is typing
+  const oldTa=m.querySelector("#composer");
+  const draft = oldTa ? oldTa.value : null;
+  const draftFocused = oldTa && document.activeElement===oldTa;
+  const selStart = oldTa ? oldTa.selectionStart : null, selEnd = oldTa ? oldTa.selectionEnd : null;
+  const thread = m.querySelector(".thread");
+  let wasAtBottom=true, prevTop=0;
+  if(thread){ prevTop=thread.scrollTop; wasAtBottom = (thread.scrollHeight-thread.scrollTop-thread.clientHeight) < 24; }
+  const seenCount = m.dataset.task===task.id ? Number(m.dataset.count||0) : -1;   // same card: anything past this just arrived
+  m.dataset.sig=sig; m.dataset.task=task.id;
+  m.innerHTML="";
+  m.setAttribute("aria-label",task.bossChat?"Conversation with the Boss":"Task "+task.id);
+  const head=document.createElement("div"); head.className="m-head"+(task.bossChat?" bare":"");
+  const titleWrap=document.createElement("div"); titleWrap.className="m-title-wrap";
+  const ti=document.createElement("div"); ti.className="m-title clamped";
+  const more=document.createElement("button"); more.className="m-title-more"; more.textContent="Show more"; more.style.display="none";
+  more.onclick=()=>{ const clamped=ti.classList.toggle("clamped"); ti.classList.toggle("expanded", !clamped); more.textContent=clamped?"Show more":"Show less"; };
+  const acts=document.createElement("div"); acts.className="m-actions";
+  if(task.bossChat){
+    const wrapB=document.createElement("div"); wrapB.className="m-boss";
+    wrapB.dataset.state=$("#bossHero").dataset.state;
+    const av=document.createElement("div"); av.className="boss-av"; av.innerHTML=$("#bossHero .boss-av").innerHTML; av.title=$("#bossState").textContent;
+    ti.textContent="Boss"; ti.className="m-title";
+    wrapB.appendChild(av); wrapB.appendChild(ti);
+    if(wrapB.dataset.state!=="up"){ const st=document.createElement("span"); st.className="m-cat"; st.textContent=$("#bossState").textContent; wrapB.appendChild(st); }
+    titleWrap.appendChild(wrapB);
+  } else {
+    const parts=splitTitle(task.text);
+    if(parts.cat){ const c=document.createElement("div"); c.className="m-cat"; c.textContent=parts.cat; titleWrap.appendChild(c); }
+    const paintM=()=>paintTitle(ti,task,false); paintM(); wireInlineText(ti,task,paintM);
+    ti.title=task.text||"";   // full title on hover as a fallback
+    titleWrap.appendChild(ti); titleWrap.appendChild(more);
+    // the facts nobody needs every time (id, age, pings, owner history) sit behind one icon
+    const info=document.createElement("button"); info.className="m-close"+(detailsOpen?" on":""); info.innerHTML=icon("info",16); info.title="Details"; info.setAttribute("aria-label","Details");
+    info.setAttribute("aria-expanded",detailsOpen?"true":"false");
+    info.onclick=()=>{ detailsOpen=!detailsOpen; info.classList.toggle("on",detailsOpen); info.setAttribute("aria-expanded",detailsOpen?"true":"false"); m.querySelector(".m-details").hidden=!detailsOpen; };
+    acts.appendChild(info);
+  }
+  const cl=document.createElement("button"); cl.className="m-close"; cl.innerHTML=icon("x",16); cl.title="Close (esc)"; cl.setAttribute("aria-label","Close"); cl.onclick=closeCard;
+  acts.appendChild(cl);
+  head.appendChild(titleWrap); head.appendChild(acts);
+  // State, owner and finish line as plain controls: each says what it is without a label
+  const row=document.createElement("div"); row.className="m-row";
+  const prop=(tip,cls)=>{ const p=document.createElement("label"); p.className="prop"+(cls?" "+cls:""); p.title=tip; row.appendChild(p); return p; };
+  const stProp=prop("State");
+  stProp.insertAdjacentHTML("afterbegin",statusIcon(task.state,16));
+  const sel=document.createElement("select"); sel.setAttribute("aria-label","State");
+  ["working","review","done","blocked","cancelled","recurring"].forEach(s=>{
+    const o=document.createElement("option"); o.value=s; o.textContent=STATE_NAMES[s]; if(task.state===s)o.selected=true; sel.appendChild(o);});
+  sel.onchange=async ()=>{ await api("/todo/status",{method:"POST",body:JSON.stringify({task_id:task.id,state:sel.value})}); fetchBoard(true); };
+  stProp.appendChild(sel);
+  const owner=prop("Owner"); appendAgentLink(owner,task.assignee);
+  const dcp=prop("Done when","grow");
+  dcp.insertAdjacentHTML("afterbegin",icon("flag",15));
+  const dc=document.createElement("input"); dc.className="inline-field"; dc.value=task.doneCondition||""; dc.placeholder="Done when…"; dc.setAttribute("aria-label","Done when");
+  dc.addEventListener("change",()=>patchTask(task.id,{doneCondition:dc.value})); dcp.appendChild(dc);
+  const del=document.createElement("button"); del.className="btn-del"; del.innerHTML=icon("trash",16); del.title="Delete task"; del.setAttribute("aria-label","Delete task");
+  del.onclick=async ()=>{ if(!await ask("Delete this task?","The card and its whole thread leave the board.","Delete task",true))return;
+    await api("/todo/update",{method:"POST",body:JSON.stringify({op:"del",id:task.id})});
+    closeCard(); fetchBoard(true); };
+  row.appendChild(del);
+  const details=document.createElement("dl"); details.className="m-details"; details.hidden=!detailsOpen;
+  const fact=(k,v)=>{ const dt=document.createElement("dt"); dt.textContent=k; const dd=document.createElement("dd"); if(typeof v==="string") dd.textContent=v; else dd.appendChild(v); details.appendChild(dt); details.appendChild(dd); return dd; };
+  const idc=document.createElement("code"); idc.textContent=task.id; fact("Task",idc);
+  if(task.created) fact("Opened",relTime(task.created)+", "+new Date(tsMs(task.created)).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}));
+  if(task.pingsToBoss>0) fact("Pings to the Boss",String(task.pingsToBoss));
+  if(task.verified) fact("Verified","Yes");
+  if((task.ownerHistory||[]).length){ const oh=document.createElement("span"); oh.className="owner-history";
+    (task.ownerHistory||[]).forEach((it,i)=>{ if(i) oh.appendChild(document.createTextNode(" · "));
+      const txt=document.createElement("span"); txt.style.cssText="display:inline-flex;align-items:center;gap:6px"; txt.appendChild(document.createTextNode((it.action||"owner").replace(/_/g," ")+" "));
+      appendAgentLink(txt,it.agent_id||it.previous); if(it.previous){txt.appendChild(document.createTextNode(" from "));appendAgentLink(txt,it.previous);} oh.appendChild(txt);});
+    fact("Owner history",oh); }
+  const thr=document.createElement("div"); thr.className="thread";
+  const col=document.createElement("div"); col.className="thread-col"; thr.appendChild(col);
+  const items=timeline(task);
+  let prevIt=null, prevDay="";
+  items.forEach((it,i)=>{ const d=dayLabel(it.ts);
+    if(d!==prevDay){ const s=document.createElement("div"); s.className="day"; s.textContent=d; col.appendChild(s); prevDay=d; prevIt=null; }
+    const ev=evEl(it,prevIt); if(seenCount>=0 && i>=seenCount && it.by!=="CEO") ev.classList.add("enter"); col.appendChild(ev); prevIt=it; });   // your own message is already on screen as "Sending"
+  if(!items.length){ const e=document.createElement("div"); e.className="thread-empty"; const h=document.createElement("h3"); const p=document.createElement("p");
+    h.textContent=task.bossChat?"Say what you need.":"No updates yet.";
+    p.textContent=task.bossChat?"The Boss plans it, hands it to the team, and reports back here.":"The owner posts progress, questions and proof in this thread.";
+    e.appendChild(h); e.appendChild(p); col.appendChild(e); }
+  for(const p of PENDING.slice()) if(p.taskId===task.id){
+    if(items.some(it=>it.by==="CEO" && it.body===p.body && tsMs(it.ts)>=p.at-120000)) PENDING.splice(PENDING.indexOf(p),1);
+    else col.appendChild(pendingEl(p)); }
+  m.dataset.count=items.length;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>col.querySelectorAll(".ev.enter").forEach(e=>e.classList.remove("enter"))));
+  const comp=document.createElement("div"); comp.className="composer";
+  const ccol=document.createElement("div"); ccol.className="composer-col";
+  const box=document.createElement("div"); box.className="composer-box";
+  const ta=document.createElement("textarea"); ta.id="composer"; ta.rows=1; ta.placeholder=task.bossChat?"Message the Boss…":"Write a comment…";
+  ta.setAttribute("aria-label",ta.placeholder);
+  if(draft!==null) ta.value=draft;   // restore the draft the CEO was typing before this rebuild
+  const send=document.createElement("button"); send.className="btn-volt"; send.innerHTML=icon("up",18,2); send.title="Send (⌘↵)"; send.setAttribute("aria-label","Send");
+  const grow=()=>{ ta.style.height="auto"; ta.style.height=Math.min(ta.scrollHeight,220)+"px"; send.disabled=!ta.value.trim(); };
+  ta.addEventListener("input",grow);
+  const post=async ()=>{ const v=ta.value.trim(); if(!v)return; ta.value=""; grow();
+    const p={taskId:task.id, body:v, at:Date.now(), failed:false}; PENDING.push(p);
+    const el=pendingEl(p); col.appendChild(el); stickBottom=true; progScroll(thr);
+    try{ const r=await api("/todo/comment",{method:"POST",body:JSON.stringify({task_id:task.id,body:v,by:"CEO"})}); if(!r.ok) throw new Error("http "+r.status); }
+    catch(e){ p.failed=true; el.replaceWith(pendingEl(p)); }
+    stickBottom=true; fetchBoard(true); };
+  send.onclick=post;
+  ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); post(); }});
+  box.appendChild(ta); box.appendChild(send); ccol.appendChild(box);
+  const jump=document.createElement("button"); jump.className="jump"; jump.innerHTML=icon("down",15,2); jump.appendChild(document.createTextNode("Latest"));
+  jump.onclick=()=>{ stickBottom=true; thr.scrollTo({top:thr.scrollHeight,behavior:"smooth"}); };
+  comp.appendChild(jump); comp.appendChild(ccol);
+  m.appendChild(head); if(!task.bossChat){ m.appendChild(row); m.appendChild(details); } m.appendChild(thr); m.appendChild(comp);
+  requestAnimationFrame(grow);
+  if(draftFocused){ ta.focus(); try{ ta.setSelectionRange(selStart,selEnd); }catch(e){} }   // keep the CEO's cursor where it was
+  else if(forceBottom && seenCount<0 && matchMedia("(pointer:fine)").matches) ta.focus({preventScroll:true});   // a conversation opens ready to answer
+  // reveal the show-more toggle only when the clamped title actually overflows its 3-line box
+  requestAnimationFrame(()=>{ if(ti.classList.contains("clamped") && ti.scrollHeight-ti.clientHeight>2){ more.style.display="block"; } });
+
+  thr.addEventListener("scroll",()=>{
+    if(Date.now()-lastProg < 250) return;             // ignore layout-induced scrolls after a prog pin
+    const atBottom=(thr.scrollHeight-thr.scrollTop-thr.clientHeight)<24;
+    stickBottom = atBottom;
+    jump.classList.toggle("show", !atBottom);
+  });
+  // restore / pin scroll — pin to bottom on explicit force OR when the thread is "sticky"
+  // (post() sets stickBottom=true so a freshly-posted comment scrolls into view even from mid-thread;
+  //  the scroll listener clears stickBottom when the user scrolls up, so background polls won't yank them down)
+  if(forceBottom || stickBottom){
+    stickBottom=true;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>progScroll(thr)));
+    [40,150,400,900,1800,3000].forEach(ms=>setTimeout(()=>{ if(stickBottom) progScroll(thr); }, ms));
+    thr.querySelectorAll("img,video").forEach(el=>el.addEventListener("load",()=>{ if(stickBottom) progScroll(thr); }));
+    thr.querySelectorAll("video").forEach(el=>el.addEventListener("loadeddata",()=>{ if(stickBottom) progScroll(thr); }));
+  } else if(wasAtBottom){ progScroll(thr); }
+  else { thr.scrollTop=prevTop; jump.classList.add("show"); }
+}
+let closeT=null, detailsOpen=false;
+function openCard(id, fromHistory){
+  if(openTaskId!==id) detailsOpen=false;
+  openTaskId=id; const task=BOARD.tasks[id]; if(!task)return;
+  readTasks[id]=Date.now(); localStorage.setItem(READ_KEY,JSON.stringify(readTasks));
+  clearTimeout(closeT);
+  const wasOpen=document.body.classList.contains("modal-shown");
+  document.body.classList.add("modal-open");
+  $("#modal").dataset.task="";
+  renderModal(task, true);
+  if(!wasOpen) requestAnimationFrame(()=>requestAnimationFrame(()=>{ if(openTaskId) document.body.classList.add("modal-shown"); }));
+  render();
+  if(!fromHistory){ const u=new URL(location.href); u.searchParams.set("task",id); history.pushState({task:id},"",u); }
+}
+function closeCard(push){ openTaskId=null; document.body.classList.remove("modal-shown"); $("#modal").dataset.sig="";
+  clearTimeout(closeT); closeT=setTimeout(()=>{ if(!openTaskId) document.body.classList.remove("modal-open"); },140);   // exits run faster than entrances
+  if(push!==false){ const u=new URL(location.href); u.searchParams.delete("task"); history.pushState({},"",u); } }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&openTaskId) closeCard(); });
+// The app's web view has no find bar of its own, and the browser's only highlights text: take the
+// shortcut and filter the board instead.
+function openSearch(){ $("#searchbar").classList.add("on"); const s=$("#search"); s.focus(); s.select(); }
+document.addEventListener("keydown",e=>{
+  if((e.metaKey||e.ctrlKey) && !e.altKey && e.key.toLowerCase()==="f"){
+    e.preventDefault(); openSearch();
+  }
+});
+$("#searchBtn").addEventListener("click",openSearch);
+$("#search").addEventListener("input",e=>{ query=e.target.value.trim().toLowerCase(); render(); });
+$("#search").addEventListener("keydown",e=>{
+  if(e.key==="Escape"){ e.preventDefault(); e.stopPropagation(); e.target.value=""; query=""; e.target.blur();
+    $("#searchbar").classList.remove("on"); render(); }
+});
+$("#modalbg").addEventListener("click", e=>{ if(e.target.id==="modalbg") closeCard(); });
+$("#bossHero").addEventListener("click",()=>{ const id=$("#bossHero").dataset.task; if(id) openCard(id); });
+$("#bossHero").addEventListener("keydown",e=>{ if((e.key==="Enter"||e.key===" ")&&e.target===e.currentTarget){ e.preventDefault(); e.currentTarget.click(); }});
+document.querySelectorAll(".boss-actions button").forEach(b=>b.addEventListener("click",e=>e.stopPropagation()));
+
+// ---- questions: a designed sheet instead of window.confirm() ----
+let askResolve=null;
+function ask(title, body, okLabel, danger){
+  return new Promise(res=>{
+    if(askResolve) askResolve(false);
+    askResolve=res;
+    $("#askTitle").textContent=title; $("#askBody").textContent=body;
+    const ok=$("#askOk"); ok.textContent=okLabel||"OK"; ok.className="btn "+(danger?"danger-solid":"primary");
+    document.body.classList.add("asking");
+    requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.classList.add("ask-shown")));
+    (danger?$("#askCancel"):ok).focus();
+  });
+}
+function answer(v){ if(!askResolve) return; const r=askResolve; askResolve=null;
+  document.body.classList.remove("ask-shown"); setTimeout(()=>{ if(!askResolve) document.body.classList.remove("asking"); },120); r(v); }
+$("#askOk").addEventListener("click",()=>answer(true));
+$("#askCancel").addEventListener("click",()=>answer(false));
+$("#askbg").addEventListener("click",e=>{ if(e.target.id==="askbg") answer(false); });
+// capture phase: while a question is up, Escape answers it and goes no further (it would close the card)
+document.addEventListener("keydown",e=>{ if(askResolve && e.key==="Escape"){ e.preventDefault(); e.stopPropagation(); answer(false); } },true);
+
+// ---- data ----
+let agentsSeen=false;
+async function loadAgents(){
+  try{ const r=await api("/agents"); if(r.ok){ const a=await r.json();
+    AGENTS={}; a.forEach(x=>{ if(x.attach_url) AGENTS[x.agent_id]=x.attach_url; });
+    renderBoss(a.find(x=>x.is_master && x.state==="alive")||null); agentsSeen=true;
+    if(Object.keys(BOARD.tasks||{}).length) render();   // refresh assignee links once attach URLs known
+    return;
+  } }catch(e){}
+  // never "Checking" forever: if the fleet roster cannot be read, say so (the board still works)
+  if(!agentsSeen){ const st=$("#bossState"); st.textContent="Status unavailable"; st.className="boss-state"; }
+}
+
+// ---- Boss lifecycle controls (card 0cc0bde980) ----
+// State rides the existing /agents poll; no extra poller. Kill and spawn are mutually exclusive by
+// construction — you can only spawn a Boss that is down, and only kill one that is up.
+const BOSS_ENGINES=[["bossSpawnClaude","claude"],["bossSpawnCodex","codex"],["bossSpawnGrok","grok"]];
+const ENGINE_NAMES={claude:"Claude",codex:"Codex",grok:"Grok"};
+let bossBusy=false;
+function renderBoss(boss){
+  const st=document.getElementById("bossState"); if(!st) return;
+  const up=!!boss;
+  st.textContent = up ? (ENGINE_NAMES[boss.backend]||boss.backend||"Boss")+" · online" : "Down";
+  st.className = "boss-state "+(up?"up":"down");
+  $("#bossHero").dataset.state = bossBusy ? "busy" : (up ? "up" : "down");
+  // Kill only while up; Revive and Spawn only while down. Mutually exclusive by construction,
+  // so the UI can never ask for a second Boss. A disabled control is not drawn at all.
+  document.getElementById("bossKill").disabled = bossBusy || !up;
+  document.getElementById("bossRevive").disabled = bossBusy || up;
+  BOSS_ENGINES.forEach(([id])=>{ document.getElementById(id).disabled = bossBusy || up; });
+}
+function bossMsg(t,bad){
+  const m=document.getElementById("bossMsg"); if(!m) return;
+  m.textContent=t||""; m.style.color = bad ? "#ff7a70" : "";
+}
+const BOSS_CONFIRM={
+  kill:   {title:"Kill the Boss?", body:"It stays down, with no auto-respawn, until you bring one back from here.", ok:"Kill Boss", danger:true},
+  revive: {title:"Revive the Boss?", body:"The same Boss comes back, resuming its session and memory.", ok:"Revive"},
+  spawn:  {title:b=>"Start a new "+(ENGINE_NAMES[b]||b)+" Boss?", body:"It starts fresh. It does not keep the old Boss's memory.", ok:"Start new Boss"},
+};
+const BOSS_PENDING={kill:"killing…", revive:"reviving…", spawn:b=>"spawning "+b+"…"};
+const BOSS_DONE={
+  kill:   "kill queued — Boss will stay down",
+  revive: "revive queued — same Boss coming back",
+  spawn:  b=>"spawn queued — new "+b+" Boss coming up",
+};
+const bossText=(m,a,b)=> typeof m[a]==="function" ? m[a](b) : m[a];
+async function bossOp(action, backend){
+  if(bossBusy) return;
+  const q=BOSS_CONFIRM[action];
+  if(!await ask(typeof q.title==="function"?q.title(backend):q.title, q.body, q.ok, !!q.danger)) return;
+  bossBusy=true; renderBoss(null); bossMsg(bossText(BOSS_PENDING,action,backend));
+  try{
+    const r=await api("/todo/boss",{method:"POST",body:JSON.stringify({action:action,backend:backend})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) bossMsg((d.detail||d.error||("http "+r.status)),true);
+    else bossMsg(bossText(BOSS_DONE,action,backend));
+  }catch(e){ bossMsg(String(e),true); }
+  bossBusy=false;
+  loadAgents();
+}
+function netState(ok){ netFails = ok ? 0 : netFails+1; $("#net").hidden = netFails<2; }   // one dropped poll is noise; two is news
+function fetchBoard(force){
+  if(boardFetchInFlight) return boardFetchInFlight;
+  boardFetchInFlight=(async()=>{
+   const myReq=++boardReq;
+   try{
+    const r=await api("/todo/board"); if(!r.ok){ netState(false); return; } const b=await r.json();
+    netState(true);
+    if(myReq!==boardReq) return;   // a newer fetchBoard was started after us — its snapshot is >= ours; drop this stale one so it can't wipe a just-posted comment
+    const sig=JSON.stringify({o:b.order,p:b.pinSeq,t:Object.entries(b.tasks).map(([k,v])=>[k,v.state,v.pinned,v.pinRank,v.unread,v.verified,v.assignee,v.text,(v.comments||[]).length,(v.proofs||[]).length])});
+    BOARD=b;
+    if(!loaded){ loaded=true; force=true; }
+    if(sig!==boardSig || force){ boardSig=sig; render(); }
+    if(openTaskId && BOARD.tasks[openTaskId]) renderModal(BOARD.tasks[openTaskId], false);
+    const deep=new URL(location.href).searchParams.get("task");
+    if(deep&&!openTaskId&&BOARD.tasks[deep]) openCard(deep,true);
+   }catch(e){ netState(false); }
+  })().finally(()=>{ boardFetchInFlight=null; });
+  return boardFetchInFlight;
+}
+async function addTask(){
+  const inp=$("#addInput"); const v=inp.value.trim(); if(!v)return; inp.value=""; $("#addBtn").disabled=true;
+  await api("/todo/update",{method:"POST",body:JSON.stringify({op:"add",text:v})});
+  fetchBoard(true);
+}
+$("#addBtn").addEventListener("click", addTask);
+$("#addInput").addEventListener("input", e=>{ $("#addBtn").disabled=!e.target.value.trim(); });
+$("#addInput").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); addTask(); }});
+document.querySelectorAll("[data-toggle]").forEach(b=>b.addEventListener("click",()=>{
+  if(b.dataset.toggle==="done") showDone=!showDone; else showCancelled=!showCancelled;
+  saveFilters(); render();
+}));
+document.querySelectorAll("[data-lens]").forEach(b=>b.addEventListener("click",()=>{
+  lens = (lens===b.dataset.lens) ? "" : b.dataset.lens;   // click it again to drop the lens
+  saveFilters(); render();
+}));
+
+
+// track the visual viewport so the mobile task modal (height:var(--vvh)) shrinks when the
+// soft keyboard opens, keeping the composer above it instead of hidden behind it
+if(window.visualViewport){
+  const vv=window.visualViewport, root=document.documentElement.style;
+  const fit=()=>{ root.setProperty("--vvh",vv.height+"px"); root.setProperty("--vvtop",vv.offsetTop+"px"); };
+  vv.addEventListener("resize",fit); vv.addEventListener("scroll",fit); fit();
+}
+
+// live poll + build watcher
+async function healthWatch(){
+  try{ const r=await fetch("/health",{credentials:"same-origin"}); const h=await r.json();
+    if(BUILD===null) BUILD=h.build; else if(h.build!==BUILD){ location.reload(); } }catch(e){}
+}
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) healthWatch(); });
+window.addEventListener("focus", healthWatch);
+window.addEventListener("popstate",()=>{ const id=new URL(location.href).searchParams.get("task");
+  if(id&&BOARD.tasks[id]) openCard(id,true); else closeCard(false); });
+
+document.addEventListener("DOMContentLoaded", ()=>{
+  document.getElementById("bossKill").addEventListener("click",()=>bossOp("kill"));
+  document.getElementById("bossRevive").addEventListener("click",()=>bossOp("revive"));
+  BOSS_ENGINES.forEach(([id,bk])=>document.getElementById(id).addEventListener("click",()=>bossOp("spawn",bk)));
+  // board first, never held up when /agents is slow (loadAgents is fire-and-forget)
+  fetchBoard(true);
+  loadAgents();
+  healthWatch();
+  setInterval(()=>fetchBoard(false), 3000);
+  setInterval(loadAgents, 6000);
+  setInterval(healthWatch, 3000);
+  setInterval(refreshRelTimes, 30000);
+  setInterval(refreshRowTimes, 30000);
+});
+</script>
+</body>
+</html>

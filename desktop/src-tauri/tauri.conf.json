@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MyPlow",
+  "version": "5.14.0",
+  "identifier": "co.plow.mypeople",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": ["icons/icon.icns"],
+    "resources": ["runtime"],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

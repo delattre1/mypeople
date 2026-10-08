@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+build/
+dist/*.whl
+*.egg-info/
+__pycache__/
+*.py[cod]
+mypeople/runtime/verify/node_modules/
+mypeople/runtime/verify/videos/
+mypeople/runtime/verify/browser.out
+desktop/src-tauri/runtime/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/

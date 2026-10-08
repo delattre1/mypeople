@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mypeople"
+# Single source of truth is mypeople/__init__.py (see [tool.hatch.version]). A static version
+# here silently WINS over that block, so bumping __init__ alone would ship the old number.
+dynamic = ["version"]
+description = "Self-hostable runtime that orchestrates Claude Code, Codex and Grok agents as a team"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "plow.co" }]
+keywords = ["agents", "claude", "codex", "grok", "orchestration", "self-hosted"]
+dependencies = []
+
+[project.scripts]
+mypeople = "mypeople.cli:main"
+
+[tool.hatch.version]
+path = "mypeople/__init__.py"
+
+# The runtime/ tree ships as package data (daemons, HTML, doctrine, verify harness,
+# tmux config, hook plugins, skel dirs). hatchling's default package inclusion picks up
+# every file under mypeople/ regardless of extension — including the suffixless scripts
+# (mp, board-restore) and skel/*/.gitkeep that first-run's materialize() expects.
+[tool.hatch.build.targets.wheel]
+packages = ["mypeople"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "mypeople",
+  "LICENSE",
+  "README.md",
+  "pyproject.toml",
+]

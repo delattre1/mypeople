@@ -1,0 +1,62 @@
+{
+  "apiVersion": "mypeople.dev/v1alpha1",
+  "kind": "RoleProfile",
+  "metadata": {
+    "name": "engineer",
+    "version": "1.12.0",
+    "tags": [
+      "engineer",
+      "caveman"
+    ]
+  },
+  "spec": {
+    "personalityRef": "personalities/engineer/1.11.0.md",
+    "skills": [
+      {
+        "ref": "skills/mypeople-system/2.3.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      },
+      {
+        "ref": "skills/engineer-card-owner/1.0.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      },
+      {
+        "ref": "skills/mypeople-memory/1.0.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      }
+    ],
+    "hookRefs": [
+      "hooksets/mypeople-lifecycle/1.0.0.json"
+    ],
+    "toolsetRef": "toolsets/mypeople-operator/1.0.0.json",
+    "policyRef": "policies/engineer/1.6.0.json",
+    "contract": {
+      "assert": {
+        "type": "not-testable",
+        "value": "Delivers code, proof and a card comment; not a one-answer agent, so a probe cannot measure it. It also FAILS if a card answer runs longer than a couple of short lines when the CEO asked a direct question, or if the agent claims a card comment was posted without holding the returned comment id. It also FAILS if the reply points the CEO at a file or document path to read. It also FAILS if the engineer asks the Boss to spawn the agents its own experiment or loop needs."
+      },
+      "probes": 0,
+      "notes": "1.11.0: engineers spawn their own instruments (targets, testers, helpers); the Boss owns card owners only."
+    },
+    "adapters": {
+      "claude": {
+        "version": "1",
+        "personalityMode": "append-system-prompt-file",
+        "skillsMode": "plugin"
+      },
+      "codex": {
+        "version": "1",
+        "personalityMode": "developer_instructions",
+        "skillsMode": "codex-home"
+      },
+      "grok": {
+        "version": "1",
+        "personalityMode": "agents-md",
+        "skillsMode": "grok-home"
+      }
+    }
+  }
+}

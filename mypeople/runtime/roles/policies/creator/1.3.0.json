@@ -1,0 +1,19 @@
+{
+  "name": "creator",
+  "version": "1.3.0",
+  "role": "creator",
+  "allow": [
+    "read-board",
+    "comment-own-card",
+    "author-role",
+    "spawn-agent"
+  ],
+  "deny": [
+    "impersonate-ceo",
+    "replace-card-owner",
+    "retire-boss",
+    "publish-secret",
+    "edit-existing-role-version",
+    "claim-unobserved-proof"
+  ]
+}

@@ -1,0 +1,181 @@
+name: Publish container
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: "Push to GHCR. Off = dry-run build, for validating runners and cache without publishing."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  # One job per architecture, each on its OWN native runner: arm64 under QEMU emulation dominated
+  # the release build. Each job pushes an untagged image by digest; `merge` then stitches the
+  # digests into one multi-arch tag, so the published manifest is equivalent to the single-job
+  # build this replaces.
+  build:
+    name: build ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' || inputs.push_image
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build ${{ matrix.platform }}
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          # Cache scope is per-arch: a single shared scope lets the two jobs evict each other's
+          # layers every run, which caches nothing.
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.arch }},mode=max
+          # Push by digest only -- `merge` owns the human-readable tags. A dry run publishes
+          # nothing; it exists to prove the runners and the cache work before a tag is cut.
+          outputs: >-
+            ${{ (github.event_name == 'push' || inputs.push_image)
+                && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE)
+                || 'type=cacheonly' }}
+
+      - name: Export digest
+        if: github.event_name == 'push' || inputs.push_image
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest='${{ steps.build.outputs.digest }}'
+          test -n "$digest"
+          mkdir -p /tmp/digests
+          echo "$digest" > "/tmp/digests/${{ matrix.arch }}"
+
+      - name: Upload digest
+        if: github.event_name == 'push' || inputs.push_image
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: merge manifest
+    needs: build
+    if: github.event_name == 'push' || inputs.push_image
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            value="${GITHUB_REF_NAME#v}"                # v0.3.3 -> 0.3.3
+          else
+            value="0.0.0-dispatch-${GITHUB_SHA::7}"     # cannot collide with a release tag
+          fi
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      - name: Create multi-arch manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/digests
+          refs=()
+          for f in *; do refs+=("${IMAGE}@$(cat "$f")"); done
+          echo "merging: ${refs[*]}"
+          tags=(-t "${IMAGE}:${{ steps.version.outputs.value }}")
+          # :latest only ever follows a real release tag, never a dispatch build.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tags+=(-t "${IMAGE}:latest")
+          fi
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+
+      - name: Inspect published manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${IMAGE}:${{ steps.version.outputs.value }}"
+
+  # MyPlow as a Plow cloud agent (cloud/Dockerfile), on top of the release just published. Its own
+  # package, whose :latest IS the cloud image: exe.dev boots <repo>:latest whatever digest Plow pins
+  # (proved 2026-10-01: a 5.20.2 digest booted 5.20.3), so inside this repo the pin got the base.
+  # The package was made public by hand once; Plow pulls anonymously. amd64 only -- Plow's VMs are amd64.
+  cloud:
+    name: cloud image
+    needs: merge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: cloud/Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            BASE=${{ env.IMAGE }}:${{ needs.merge.outputs.version }}
+            MYPLOW_RELEASE=${{ needs.merge.outputs.version }}
+          tags: |
+            ${{ env.IMAGE }}:cloud-${{ needs.merge.outputs.version }}
+            ghcr.io/delattre1/myplow-cloud:${{ needs.merge.outputs.version }}
+            ghcr.io/delattre1/myplow-cloud:latest
+          provenance: false
+          push: true
+
+      - name: Plow image reference
+        run: |
+          echo "Plow image: ghcr.io/delattre1/myplow-cloud@${{ steps.build.outputs.digest }}" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,62 @@
+{
+  "apiVersion": "mypeople.dev/v1alpha1",
+  "kind": "RoleProfile",
+  "metadata": {
+    "name": "boss",
+    "version": "6.10.0",
+    "tags": [
+      "boss",
+      "caveman"
+    ]
+  },
+  "spec": {
+    "personalityRef": "personalities/boss/6.9.0.md",
+    "skills": [
+      {
+        "ref": "skills/mypeople-system/2.3.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      },
+      {
+        "ref": "skills/boss-manager/1.0.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      },
+      {
+        "ref": "skills/mypeople-memory/1.0.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      }
+    ],
+    "hookRefs": [
+      "hooksets/mypeople-lifecycle/1.0.0.json"
+    ],
+    "toolsetRef": "toolsets/mypeople-operator/1.0.0.json",
+    "policyRef": "policies/boss/6.6.0.json",
+    "contract": {
+      "assert": {
+        "type": "not-testable",
+        "value": "Routes and delegates; its output is other people's work, not an answer a probe can score. It also FAILS if the Boss appends its own guidance, context, or restatement to a CEO message it is relaying instead of delivering it verbatim and alone."
+      },
+      "probes": 0,
+      "notes": "6.9.0: routing is verbatim and adds nothing; Boss guidance goes in a separate message to the engineer."
+    },
+    "adapters": {
+      "claude": {
+        "version": "1",
+        "personalityMode": "append-system-prompt-file",
+        "skillsMode": "plugin"
+      },
+      "codex": {
+        "version": "1",
+        "personalityMode": "developer_instructions",
+        "skillsMode": "codex-home"
+      },
+      "grok": {
+        "version": "1",
+        "personalityMode": "agents-md",
+        "skillsMode": "grok-home"
+      }
+    }
+  }
+}

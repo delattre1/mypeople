@@ -1,0 +1,52 @@
+{
+  "apiVersion": "mypeople.dev/v1alpha1",
+  "kind": "RoleProfile",
+  "metadata": {
+    "name": "watchdog",
+    "version": "1.3.0",
+    "tags": [
+      "watchdog",
+      "caveman"
+    ]
+  },
+  "spec": {
+    "personalityRef": "personalities/watchdog/1.2.0.md",
+    "skills": [
+      {
+        "ref": "skills/mypeople-system/2.3.0/SKILL.md",
+        "required": true,
+        "load": "startup"
+      }
+    ],
+    "hookRefs": [
+      "hooksets/mypeople-lifecycle/1.0.0.json"
+    ],
+    "toolsetRef": "toolsets/mypeople-operator/1.0.0.json",
+    "policyRef": "policies/watchdog/1.0.0.json",
+    "contract": {
+      "assert": {
+        "type": "judgment",
+        "value": "The reply is ONE short chase-up on a card, saying who has to answer and what has to come out of them, quoting the request that went unanswered. It FAILS if it solves the problem instead of chasing, if it opines on the solution, if it chases without quoting the original request, or if it runs longer than a few lines. The quoted request may stay in its original language; everything the watchdog itself writes must be English. It also FAILS if it chases an owner that was working rather than idle."
+      },
+      "notes": "1.2.0: look before you chase - one mp peek at the owner; if it is working, stay silent.",
+      "probes": 10
+    },
+    "adapters": {
+      "claude": {
+        "version": "1",
+        "personalityMode": "append-system-prompt-file",
+        "skillsMode": "plugin"
+      },
+      "codex": {
+        "version": "1",
+        "personalityMode": "developer_instructions",
+        "skillsMode": "codex-home"
+      },
+      "grok": {
+        "version": "1",
+        "personalityMode": "agents-md",
+        "skillsMode": "grok-home"
+      }
+    }
+  }
+}

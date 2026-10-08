@@ -1,0 +1,6 @@
+{
+  "name": "mypeople-operator",
+  "version": "1.0.0",
+  "knowledge": ["board", "mp-status", "mp-send", "mp-peek", "mp-spawn", "mp-answer", "mp-kill", "mp-revive"],
+  "authority": "defined-by-policy"
+}

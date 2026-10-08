@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- ttyd's libwebsockets dlopens its event-loop plugin (libwebsockets-evlib_uv.dylib) from a
+       directory compiled into the library. Under the hardened runtime, library validation refuses
+       a plugin signed by anyone else, and ttyd dies with "failed to load evlib_uv" before it ever
+       listens. Notarisation accepts this entitlement; it is scoped to ttyd alone. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

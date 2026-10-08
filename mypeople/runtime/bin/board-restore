@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""board-restore (§3): the ONLY writer of the live board on the recovery path — manual, never
+automatic. Reads a snapshot via `git -C <EXPORT_REPO> show <ref>:board.v2.json` (default HEAD),
+refuses an empty/unparseable snapshot, snapshots the current live board to *.bak.prerestore.<epoch>
+FIRST (reversible), then writes the live board atomically. Performs NO git op in the live tree.
+
+Usage: board-restore [<git-ref>]   # default HEAD"""
+import os, sys, json, time, subprocess
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mpcommon as C
+import boardstore as BS
+
+CFG = C.CFG
+INSTALL_DIR = CFG["INSTALL_DIR"]
+BOARD_PATH = os.environ.get("BOARD_PATH", os.path.join(INSTALL_DIR, "todos", "board.v2.json"))
+REPO = C.export_repo_path(CFG)
+BOARD_BACKEND = BS.select_backend(BOARD_PATH, CFG.get("BOARD_BACKEND"))
+
+
+def main():
+    ref = sys.argv[1] if len(sys.argv) > 1 else "HEAD"
+    r = subprocess.run(["git", "-C", REPO, "show", "%s:board.v2.json" % ref],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print("ERROR: cannot read %s:board.v2.json from %s" % (ref, REPO), file=sys.stderr)
+        return 1
+    try:
+        obj = json.loads(r.stdout)
+    except Exception:
+        print("ERROR: snapshot is empty/unparseable — refusing to restore", file=sys.stderr)
+        return 2
+    if not isinstance(obj, dict) or "tasks" not in obj:
+        print("ERROR: snapshot has no tasks — refusing to restore", file=sys.stderr)
+        return 2
+    if BOARD_BACKEND == "sqlite":
+        db = BS.db_path_for(BOARD_PATH)
+        # snapshot the current live SQLite board to JSON first (reversible)
+        if os.path.exists(db):
+            pre = "%s.bak.prerestore.%d.json" % (BOARD_PATH, int(time.time()))
+            C.atomic_write(pre, json.dumps(BS.load_board(db), ensure_ascii=False).encode())
+            print("saved current live board -> %s" % pre)
+        # bypass the shrink guard: a restore is a deliberate operator action
+        BS.save_board(db, obj, shrink_guard=False)
+        print("restored %s:board.v2.json (%d tasks) -> %s [sqlite]" % (ref, len(obj.get("tasks", {})), db))
+        return 0
+    # snapshot current live board first (reversible)
+    if os.path.exists(BOARD_PATH):
+        pre = "%s.bak.prerestore.%d" % (BOARD_PATH, int(time.time()))
+        with open(BOARD_PATH, "rb") as f:
+            data = f.read()
+        C.atomic_write(pre, data)
+        print("saved current live board -> %s" % pre)
+    # write atomically
+    C.atomic_write(BOARD_PATH, json.dumps(obj, ensure_ascii=False).encode())
+    print("restored %s:board.v2.json (%d tasks) -> %s" % (ref, len(obj.get("tasks", {})), BOARD_PATH))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
