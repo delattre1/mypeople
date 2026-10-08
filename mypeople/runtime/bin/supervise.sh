@@ -89,6 +89,9 @@ while true; do
   [ -n "${INSTAGRAM_COMMENTS:-}" ] && ensure "$ID/plugins/instagram-comments/instagram-comments.py" "exec python3 '$ID/plugins/instagram-comments/instagram-comments.py' serve"
   # Plow Chat: the owner texts the Boss over iMessage. Off until queue.env sets PLOW_CHAT (see the plugin's header).
   [ -n "${PLOW_CHAT:-}" ] && ensure "$ID/plugins/plow-chat/plow-chat.py" "exec python3 '$ID/plugins/plow-chat/plow-chat.py' serve"
+  # Voice call: the owner phones the Boss and talks to it live. Off until queue.env sets VOICE_CALL
+  # (see the plugin's header). Needs uv on PATH: it is the one plugin with a dependency (websockets).
+  [ -n "${VOICE_CALL:-}" ] && ensure "$ID/plugins/voice-call/voice-call.py" "exec uv run --script '$ID/plugins/voice-call/voice-call.py' serve"
   # Discord agent: builders' questions in the listed channels, answered by its own agent. Off until
   # queue.env sets DISCORD_AGENT (see the plugin's header).
   [ -n "${DISCORD_AGENT:-}" ] && ensure "$ID/plugins/discord-agent/discord-agent.py" "exec python3 '$ID/plugins/discord-agent/discord-agent.py' serve"
