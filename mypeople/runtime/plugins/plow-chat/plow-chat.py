@@ -11,8 +11,6 @@ Usage:
   plow-chat.py reply cht_x "text"     reply in that chat (groups)
   plow-chat.py reply cht_x --file a.jpg "text"   send photos/files too (up to 4)
   plow-chat.py react cht_x msg_y like tapback a message (love, laugh, an emoji, remove...)
-  plow-chat.py group +15550100 name@example.com "text"   start a group: the owner, them and
-                                      this line; they get the owner's access (owner's ask only)
   plow-chat.py status                 print activation/bridge state
 
 The Boss is told what plain text loses: the message a text replies to, who it
@@ -28,7 +26,6 @@ activate: the VM's own line is the chat, the token comes from the environment
 (or the "proxied" placeholder the exe.dev proxy swaps for the real one), and
 the chats come from GET /v1/agents/cloud/me.
 """
-import hashlib
 import json
 import mimetypes
 import os
@@ -366,35 +363,6 @@ def react(chat_uid: str, message_uid: str, kind: str, creds=None) -> dict:
     return data
 
 
-def own_line(creds: dict) -> str:
-    """The uid of the line this account texts from: the agent seated as `self` in its chats."""
-    status, data = api("GET", "/v1/chats", token=creds["token"])
-    for chat in listing(data) if status < 400 else []:
-        for p in chat.get("participants") or []:
-            if p.get("type") == "agent" and p.get("relationship") == "self" and (p.get("line") or {}).get("uid"):
-                return p["line"]["uid"]
-    raise SystemExit(f"no line to start a group from ({status}): {json.dumps(data)[:200]}")
-
-
-def start_group(members: list, text: str, creds=None) -> dict:
-    """A new group: the owner (Plow seats him), `members` and this line, opened with `text`.
-
-    Trusted, so the members get the owner's access, as in the groups he made by hand. The key is
-    derived from the request, so running the same command twice never texts them twice: Plow
-    answers `created: false` with the thread it already made.
-    """
-    creds = creds or load_creds()
-    if not creds.get("token"):
-        raise SystemExit("no Plow Chat credentials yet: activation is not done")
-    key = hashlib.sha256(json.dumps([sorted(members), text]).encode()).hexdigest()
-    status, data = api("POST", "/v1/chats", {"line_uid": own_line(creds), "members": members, "body": text,
-                                             "trusted": True, "idempotency_key": f"myplow-group-{key}"},
-                       token=creds["token"], timeout=60)
-    if status >= 400:
-        raise SystemExit(f"group not created {status}: {json.dumps(data)[:300]}")
-    return data
-
-
 # --- Activation ---
 
 def mint_activation() -> dict:
@@ -566,14 +534,6 @@ def main():
                              f"usage: {SELF} react cht_x msg_y like|love|...|EMOJI|remove")
         args = args + ["", "", ""]
         print(json.dumps(react(*args[:3])))
-    elif cmd == "group":
-        members, text = args[:-1], (args[-1] if args else "")
-        # Every member is a phone or an iMessage email: an unquoted text would otherwise go to Plow as
-        # members, and a stray option as the opening text.
-        if not (members and text.strip() and not text.startswith("--")
-                and all(m.startswith("+") or "@" in m for m in members)):
-            raise SystemExit(f"nothing sent. usage: {SELF} group +15550100 [name@example.com ...] \"text\"")
-        print(json.dumps(start_group(members, text)))
     elif cmd == "status":
         creds, act = load_creds(), read_json(ACTIVATION, {})
         print(json.dumps({

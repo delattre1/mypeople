@@ -125,40 +125,6 @@ class PlowChatTest(unittest.TestCase):
             {"operation": "add", "type": "custom", "custom_emoji": "👀"},
             {"operation": "remove"})])
 
-    def test_group_opens_a_trusted_thread_from_this_line_and_sends_nothing_on_bad_args(self):
-        """Card 557a167350: the owner asks his agent for a group with his wife; she gets his agent."""
-        calls = []
-        def api(method, path, body=None, token=None, timeout=20):
-            calls.append((method, path, body))
-            if method == "GET":  # the line is read off the agent seated as `self`, never hard-coded
-                return 200, {"data": [{"uid": "cht_a", "participants": [
-                    {"type": "member", "provider_key": "+15550100"},
-                    {"type": "agent", "relationship": "self", "line": {"uid": "ln_x"}}]}]}
-            return 200, {"uid": "cht_g", "created": True}
-        self.pc.api = api
-        self.pc.load_creds = lambda: self.creds
-        def run(*argv):
-            with mock.patch.object(self.pc.sys, "argv", ["plow-chat.py", "group", *argv]), \
-                    mock.patch("builtins.print"):
-                try:
-                    self.pc.main()
-                    return "ok"
-                except SystemExit as e:
-                    return str(e)
-        for argv in ([], ["hi"], ["+15550101"], ["+15550101", "Hi", "there"], ["+15550101", "--dry-run"],
-                     ["Camily", "Hi"]):
-            self.assertIn("nothing sent", run(*argv), argv)
-        self.assertEqual([], calls, "bad arguments must not reach Plow")
-        self.assertEqual("ok", run("+15550101", "wife@example.com", "Hi, I'm Dan's agent"))
-        self.assertEqual("ok", run("wife@example.com", "+15550101", "Hi, I'm Dan's agent"))
-        posts = [c for c in calls if c[0] == "POST"]
-        self.assertEqual(posts[0][1], "/v1/chats")
-        body = dict(posts[0][2])
-        key = body.pop("idempotency_key")
-        self.assertEqual(body, {"line_uid": "ln_x", "members": ["+15550101", "wife@example.com"],
-                                "body": "Hi, I'm Dan's agent", "trusted": True})
-        self.assertEqual(key, posts[1][2]["idempotency_key"], "a rerun must not text them twice")
-
     def test_help_and_unknown_options_never_reach_the_chat(self):
         """Two engineers' `reply --help` landed in the owner's chat as the text '--help' (10-05).
         Help prints usage and sends nothing; any other leading option is refused, on every path."""

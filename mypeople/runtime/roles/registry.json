@@ -1,7 +1,7 @@
 {
  "schema_version": 1,
  "roles": {
-  "boss": "profiles/boss/6.11.0.json",
+  "boss": "profiles/boss/6.10.0.json",
   "engineer": "profiles/engineer/1.14.0.json",
   "tester": "profiles/tester/6.1.0.json",
   "watchdog": "profiles/watchdog/1.3.0.json",
