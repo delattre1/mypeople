@@ -81,6 +81,8 @@ while true; do
   ensure "ttyd -W -a -p $TTYD_PORT"        "exec ttyd -W -a -p $TTYD_PORT $TTYD_CLIENT_OPTS '$BIN/ttyd-attach.sh'"
   ensure "ttyd -a -p $TTYD_RO_PORT"        "exec ttyd -a -p $TTYD_RO_PORT $TTYD_CLIENT_OPTS '$BIN/ttyd-attach.sh'"
   ensure "$BIN/boss-supervisor.sh"         "exec bash '$BIN/boss-supervisor.sh'"
+  # Cron: each schedule is one `mp send` on a timer (mp cron add/ls/rm). Idle when none exist.
+  ensure "$BIN/mp cron serve"              "exec python3 '$BIN/mp' cron serve"
   # GitHub PR watcher: off until queue.env sets GITHUB_PRS (see the plugin's header).
   [ -n "${GITHUB_PRS:-}" ] && ensure "$ID/plugins/github-prs/github-prs.py" "exec python3 '$ID/plugins/github-prs/github-prs.py' serve"
   # Instagram comment watcher: off until queue.env sets INSTAGRAM_COMMENTS (see the plugin's header).
