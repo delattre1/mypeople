@@ -2,7 +2,7 @@
 # images from 0.3.2 source).
 VERSION := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' mypeople/__init__.py)
 
-.PHONY: wheel image verify clean live app released
+.PHONY: wheel image verify clean live app released cloud
 
 wheel:
 	uv build --wheel --out-dir dist
@@ -50,3 +50,18 @@ app: released
 	cd desktop && CI=true CARGO_TARGET_DIR=$(APP_TARGET) cargo tauri build --config '{"version":"$(VERSION)"}'
 	desktop/scripts/smoke-test.sh $(APP_TARGET)/release/bundle/macos/MyPlow.app
 	rm -rf $(APP_TARGET)/release/bundle/macos/MyPlow.app
+
+# Every cloud MyPlow follows the `myplow` pin in place (cloud/update.py); this moves the pin to
+# VERSION, the published cloud-VERSION image, only after cloud/publish.sh proves it on throwaway VMs
+# on CLOUD_HOST: a Linux docker host with plow-agents logged in to the pin owner's account.
+# CLOUD_LOGIN is the Claude login file on that host the gate's Boss runs on. The ECR push login is
+# made here and travels on stdin, never in an argument or a file. Takes ~30 min; nothing is promoted
+# unless all three checks pass.
+#   make cloud CLOUD_HOST=<host> CLOUD_LOGIN=<path there> [VERSION=x.y.z]
+CLOUD_AWS_PROFILE ?= plow
+cloud:
+	@test -n "$(CLOUD_HOST)" -a -n "$(CLOUD_LOGIN)" || \
+	  { echo "usage: make cloud CLOUD_HOST=<docker host> CLOUD_LOGIN=<Claude login file there>" >&2; exit 1; }
+	ssh $(CLOUD_HOST) 'mkdir -p myplow-publish' && scp -q cloud/publish.sh cloud/fakeplow.py $(CLOUD_HOST):myplow-publish/
+	aws ecr-public get-login-password --region us-east-1 --profile $(CLOUD_AWS_PROFILE) | \
+	  ssh $(CLOUD_HOST) 'CLAUDE_LOGIN_FILE=$(CLOUD_LOGIN) bash myplow-publish/publish.sh $(VERSION)'
