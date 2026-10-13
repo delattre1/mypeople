@@ -293,6 +293,8 @@ def load_creds() -> dict:
 
 def download(att: dict) -> str:
     """Save one inbound attachment where the Boss can open it; return its path."""
+    if not att.get("url"):  # failed media comes with no url: there is nothing to fetch
+        raise ValueError("file unavailable")
     uid = att.get("uid") or "att"
     name = os.path.basename(att.get("filename") or "file")
     dest = ATTACHMENTS / f"{uid}-{name}"

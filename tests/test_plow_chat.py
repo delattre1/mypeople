@@ -167,6 +167,15 @@ class PlowChatTest(unittest.TestCase):
         dl.assert_called_once()
         self.assertIn("[attached, open it: /saved/att_1-menu.jpeg]", self.sent[0])
 
+    def test_a_failed_file_becomes_a_note_and_its_text_still_arrives(self):
+        self.pc.poll_chat(self.creds, "cht_a")
+        self.msgs.append({"uid": "m2", "direction": "inbound", "body": "see the video", "chat_uid": "cht_a",
+                          "created_at": "2", "attachments": [
+                              {"uid": "att_1", "filename": "trip.mov", "url": None, "status": "failed"}]})
+        self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
+        self.assertIn("see the video", self.sent[0])
+        self.assertIn("trip.mov: file unavailable", self.sent[0])
+
     def test_reply_uploads_files_then_sends_their_uids(self):
         calls = []
 
