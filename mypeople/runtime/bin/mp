@@ -61,7 +61,12 @@ def materialize_role(item, aid, backend):
 
 
 def full_aid(aid):
-    return aid if "/" in aid else "%s/%s" % (HOST_ID, aid)
+    full = aid if "/" in aid else "%s/%s" % (HOST_ID, aid)
+    # An agent name never starts with '-'. `mp spawn --help` once spawned a real agent named
+    # --help and `mp kill --help` retired its roster entry (card d7679b9123).
+    if any(part.startswith("-") for part in C.parse_agent_id(full)):
+        sys.exit("ERROR: %r is not an agent name (no part may start with '-'); see mp <verb> --help" % aid)
+    return full
 
 
 def is_local(aid):
@@ -532,10 +537,7 @@ def build_launch(aid, cwd, boss_id, is_master, model, backend, resume_session=No
 
 def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_digest=None):
     if not argv:
-        print("usage: mp spawn <agent_id> [--backend claude|codex|grok] [--cwd PATH] [--boss <id>] "
-              "[--master] [--model <id>] [--role boss|engineer] "
-              "[--owner-task <todo_id>|--temporary] [--record]",
-              file=sys.stderr)
+        print(USAGE["spawn"], file=sys.stderr)
         return 2
     aid = full_aid(argv[0])
     backend = None  # resolved after the flags: the Boss and new agents default differently
@@ -923,7 +925,7 @@ def classify(pane, backend=None):
 
 def do_peek(argv):
     if not argv:
-        print("usage: mp peek <agent_id>", file=sys.stderr); return 2
+        print(USAGE["peek"], file=sys.stderr); return 2
     aid = full_aid(argv[0])
     if not is_local(aid):
         ok, result = remote_task("peek", aid, {}, timeout=30)
@@ -938,7 +940,7 @@ def do_peek(argv):
 
 def do_kill(argv):
     if not argv:
-        print("usage: mp kill <agent_id> [--reason ...]", file=sys.stderr); return 2
+        print(USAGE["kill"], file=sys.stderr); return 2
     aid = full_aid(argv[0])
     reason = ""
     if "--reason" in argv:
@@ -967,7 +969,7 @@ def do_kill(argv):
 
 def do_answer(argv):
     if len(argv) < 2:
-        print("usage: mp answer <agent_id> <N>", file=sys.stderr); return 2
+        print(USAGE["answer"], file=sys.stderr); return 2
     aid = full_aid(argv[0])
     n = argv[1]
     if not is_local(aid):
@@ -1000,7 +1002,7 @@ def session_files(backend, session_id):
 
 def do_revive(argv):
     if not argv:
-        print("usage: mp revive <agent_id>", file=sys.stderr); return 2
+        print(USAGE["revive"], file=sys.stderr); return 2
     aid = full_aid(argv[0])
     if not is_local(aid):
         ok, result = remote_task("revive", aid, {}, timeout=150)
@@ -1363,7 +1365,7 @@ def do_card(argv):
     """mp card <task_id> [--compact] — print a single card (exact id or unique prefix)."""
     ids = [a for a in argv if not a.startswith("--")]
     if not ids:
-        print("usage: mp card <task_id> [--compact]", file=sys.stderr); return 2
+        print(USAGE["card"], file=sys.stderr); return 2
     tid = ids[0]
     board, err = _fetch_board()
     if err:
@@ -1390,8 +1392,7 @@ def do_comment(argv):
 
     Body comes from the remaining args, or from stdin when no body args are given."""
     if not argv:
-        print("usage: mp comment <task_id> <body...> [--by <id>]   (body may come from stdin)",
-              file=sys.stderr)
+        print(USAGE["comment"], file=sys.stderr)
         return 2
     tid = argv[0]
     rest = argv[1:]
@@ -1441,7 +1442,7 @@ def do_owner(argv):
     owns every eligibility rule; this only carries the request.
     """
     if len(argv) < 3:
-        print("usage: mp owner <assign|replace|reopen> <task_id> <agent_id>", file=sys.stderr)
+        print(USAGE["owner"], file=sys.stderr)
         return 2
     action, tid, agent_id = argv[0], argv[1], full_aid(argv[2])
     by = os.environ.get("AGENT_ID", "").strip()
@@ -1482,7 +1483,7 @@ def do_proof(argv):
     A local file is uploaded and served by the board; an http(s) link is stored as a link.
     """
     if len(argv) < 2:
-        print("usage: mp proof <task_id> <path-or-url> [body...]", file=sys.stderr); return 2
+        print(USAGE["proof"], file=sys.stderr); return 2
     tid, target = argv[0], argv[1]
     body = " ".join(argv[2:]).strip()
     local = _local_proof_path(target)
@@ -1666,13 +1667,39 @@ def do_cron(argv):
     return 2
 
 
+USAGE = {
+    "status": "usage: mp status",
+    "spawn": "usage: mp spawn <agent_id> [--backend claude|codex|grok] [--cwd PATH] [--boss <id>] "
+             "[--master] [--model <id>] [--role boss|engineer] [--owner-task <todo_id>|--temporary] [--record]",
+    "send": SEND_USAGE,
+    "peek": "usage: mp peek <agent_id>",
+    "kill": "usage: mp kill <agent_id> [--reason ...]",
+    "answer": "usage: mp answer <agent_id> <N>",
+    "revive": "usage: mp revive <agent_id>",
+    "ensure-boss": "usage: mp ensure-boss [<agent_id>] [--backend claude|codex|grok] [--master] [--role ...]",
+    "reconcile": "usage: mp reconcile",
+    "stop-recorders": "usage: mp stop-recorders [--keep-intent]",
+    "board": "usage: mp board [--compact]",
+    "card": "usage: mp card <task_id> [--compact]",
+    "comment": "usage: mp comment <task_id> <body...> [--by <id>]   (body may come from stdin)",
+    "proof": "usage: mp proof <task_id> <path-or-url> [body...]",
+    "owner": "usage: mp owner <assign|replace|reopen> <task_id> <agent_id>",
+    "cron": CRON_USAGE,
+}
+TOP_USAGE = "usage: mp {%s} ...   (mp <verb> --help for one verb)" % "|".join(USAGE)
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("usage: mp {status|spawn|send|peek|kill|answer|revive|ensure-boss|reconcile|"
-              "stop-recorders|board|card|comment|proof|owner|cron} ...", file=sys.stderr)
-        return 2
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(TOP_USAGE, file=sys.stderr if len(sys.argv) < 2 else sys.stdout)
+        return 2 if len(sys.argv) < 2 else 0
     verb = sys.argv[1]
     rest = sys.argv[2:]
+    # --help/-h prints usage and does NOTHING: verbs act on their argv (`mp spawn --help` spawned
+    # an agent named --help; `mp ensure-boss --help` ran ensure-boss) -- card d7679b9123.
+    if rest[:1] in (["-h"], ["--help"]) and verb in USAGE:
+        print(USAGE[verb])
+        return 0
     return {"status": do_status, "spawn": do_spawn, "send": do_send, "peek": do_peek,
             "kill": do_kill, "answer": do_answer, "revive": do_revive,
             "ensure-boss": do_ensure_boss, "reconcile": do_reconcile,
