@@ -195,6 +195,17 @@ class FirstrunGateTests(unittest.TestCase):
              self._status_ok(), self._verdict("unknown"):
             self.assertTrue(firstrun._claude_authenticated())
 
+    def test_slow_auth_status_is_not_a_refusal(self):
+        """`make live` refused a logged-in node: right after `up` rewrote ~/.claude.json, `claude
+        auth status` took 23 s and the 15 s timeout was read as "not logged in" (5.22.26)."""
+        slow = mock.patch.object(firstrun.subprocess, "run",
+                                 side_effect=subprocess.TimeoutExpired(["claude"], 15))
+        with mock.patch.object(firstrun.shutil, "which", return_value="/usr/bin/claude"), slow:
+            with self._verdict("live"):
+                self.assertTrue(firstrun._claude_authenticated())
+            with self._verdict("unknown"):  # no flag and no proof: still not a login
+                self.assertFalse(firstrun._claude_authenticated())
+
     def test_dead_credential_produces_the_login_message(self):
         with mock.patch.object(firstrun.shutil, "which", return_value="/usr/bin/claude"), \
              self._status_ok(), self._verdict("dead"), \

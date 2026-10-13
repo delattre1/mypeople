@@ -247,6 +247,7 @@ def _claude_authenticated():
     """
     if not shutil.which("claude"):
         return False
+    slow = False
     try:
         r = subprocess.run(["claude", "auth", "status"], capture_output=True,
                            text=True, timeout=15)
@@ -258,6 +259,12 @@ def _claude_authenticated():
             logged_in = "loggedintrue" in normalized or "loginmethod" in normalized
         if r.returncode != 0 or not logged_in:
             return False
+    except subprocess.TimeoutExpired:
+        # Slow is not logged out. `up` rewrites ~/.claude.json just before this gate, and with ~50
+        # live sessions the next `auth status` took 23 s (6 s before the rewrite), so `make live`
+        # refused a logged-in node twice (5.22.26, card d7679b9123). With no flag to go on, the
+        # credential itself must prove live below.
+        slow = True
     except Exception:
         return False
     try:
@@ -265,11 +272,11 @@ def _claude_authenticated():
     except Exception:
         # authcheck itself is broken/absent -- fall back to the old (weaker) answer rather than
         # locking out a node that really is logged in.
-        return True
+        return not slow
     if state == "dead":
         _echo("[myplow] claude credential rejected: %s" % detail)
         return False
-    return True
+    return state == "live" or not slow
 
 
 def _codex_authenticated():
