@@ -461,5 +461,77 @@ class HookHandlerTests(unittest.TestCase):
             self.assertEqual("Block form too", status["summary"])
 
 
+class NestedCliHookTests(unittest.TestCase):
+    """A `claude -p`/`grok -p` run from an agent's Bash tool inherits AGENT_ID and the Claude hooks.
+    Its lifecycle must not touch the agent's status, roster session_id or notification routes
+    (card d7679b9123: six bogus "finished" pings to the Boss from grok image runs)."""
+
+    # pid: (ppid, name). 1 tmux; 10 = the agent's own CLI (the pane process)
+    OWN = {1: (0, "tmux"), 10: (1, "claude"), 11: (10, "sh"), 12: (11, "bash"), 13: (12, "python3")}
+    NESTED = {1: (0, "tmux"), 10: (1, "claude"), 20: (10, "zsh"), 21: (20, "timeout"), 22: (21, "grok"),
+              23: (22, "sh"), 24: (23, "bash"), 25: (24, "python3")}
+
+    def _hh(self, td, procs):
+        import importlib.machinery, importlib.util
+        with mock.patch.dict(os.environ, {"INSTALL_DIR": td, "AGENT_ID": "node/main:eng",
+                                          "BOSS_ID": "node/main:Boss", "MYPEOPLE_BACKEND": "claude",
+                                          "QUEUE_URL": "http://queue", "QUEUE_SECRET": "s"}):
+            loader = importlib.machinery.SourceFileLoader("hh_nested_%d" % id(procs), str(HANDLER))
+            spec = importlib.util.spec_from_loader(loader.name, loader)
+            hh = importlib.util.module_from_spec(spec)
+            loader.exec_module(hh)
+        hh.process_table = lambda: procs
+        hh.time.sleep = lambda s: None
+        hh.test_pid = max(procs)  # the hook process is the deepest pid in each table
+        return hh
+
+    def _fire(self, hh, event, payload):
+        sent = []
+        hh.C = mock.Mock(claim_notification_routes=lambda aid: [],
+                         open_notification_routes=lambda aid, text: None,
+                         read_json=lambda path, default=None: {}, write_json=lambda path, obj: None,
+                         http_json=lambda *a, **k: sent.append(a[2]["target_agent"]))
+        with mock.patch.object(sys, "stdin", __import__("io").StringIO(json.dumps(payload))), \
+                mock.patch.object(sys, "argv", ["hook-handler.py", event]), \
+                mock.patch.object(os, "getpid", return_value=hh.test_pid):
+            hh.main()
+        return sent
+
+    def test_ancestry_rule(self):
+        import importlib.machinery, importlib.util
+        loader = importlib.machinery.SourceFileLoader("hh_rule", str(HANDLER))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        hh = importlib.util.module_from_spec(spec)
+        loader.exec_module(hh)
+        nested = hh.fired_by_nested_cli
+        self.assertFalse(nested(self.OWN, 13))
+        self.assertTrue(nested(self.NESTED, 25))
+        self.assertFalse(nested({}, 13))                                  # ps failed: never drop events
+        self.assertFalse(nested({5: (1, "python3"), 1: (0, "launchd")}, 5))  # CI: no agent CLI at all
+        # a CLI that execs its own binary is one CLI, not two
+        self.assertFalse(nested({1: (0, "tmux"), 9: (1, "codex"), 10: (9, "codex"), 11: (10, "bash")}, 11))
+        # the desktop app is not the claude CLI
+        self.assertFalse(nested({1: (0, "launchd"), 8: (1, "Claude"), 10: (8, "claude"), 11: (10, "bash")}, 11))
+        self.assertFalse(nested({10: (11, "claude"), 11: (10, "claude")}, 10))  # a pid cycle terminates
+
+    def test_a_nested_cli_touches_nothing(self):
+        with tempfile.TemporaryDirectory() as td:
+            hh = self._hh(td, self.NESTED)
+            for event in ("SessionStart", "UserPromptSubmit"):
+                self.assertEqual([], self._fire(hh, event, {"session_id": "child"}))
+            self.assertEqual([], self._fire(hh, "Stop", {"session_id": "child",
+                                                          "last_assistant_message": "157316"}))
+            self.assertFalse((Path(td) / "status").exists())
+
+    def test_the_agents_own_cli_still_records_and_notifies(self):
+        with tempfile.TemporaryDirectory() as td:
+            hh = self._hh(td, self.OWN)
+            self._fire(hh, "SessionStart", {"session_id": "own"})
+            sent = self._fire(hh, "Stop", {"session_id": "own", "last_assistant_message": "done"})
+            status = json.loads((Path(td) / "status" / "mc-main" / "eng.json").read_text())
+            self.assertEqual(("own", "idle", "done"), (status["session_id"], status["status"], status["summary"]))
+            self.assertEqual(["node/main:Boss"], sent)
+
+
 if __name__ == "__main__":
     unittest.main()
