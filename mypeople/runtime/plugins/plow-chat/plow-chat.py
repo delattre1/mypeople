@@ -29,6 +29,7 @@ the chats come from GET /v1/agents/cloud/me.
 import json
 import mimetypes
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -56,6 +57,10 @@ MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 # upgrade path is the account websocket (POST /v1/ws/ticket) via `websockets`.
 POLL_SECONDS = float(os.environ.get("PLOW_CHAT_POLL_SECONDS", "5"))
 SELF = str(Path(__file__).resolve())
+# How the Boss runs this plugin. A second bridge, on another Plow account, runs with its own
+# state dir; the commands it hands the Boss carry that dir, or a reply would go out under the
+# first account's login and miss the chat.
+RUN = (f"PLOW_CHAT_STATE_DIR={shlex.quote(str(STATE_DIR))} " if os.environ.get("PLOW_CHAT_STATE_DIR") else "") + f"python3 {SELF}"
 STATE_LOCK = threading.Lock()
 WELCOME = "MyPlow is up. Text me what you want done."
 
@@ -110,17 +115,17 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
     # who actually spoke and which thread — in a group these differ per message.
     sent = "".join(f"\n[attached, open it: {f}]" for f in files)
     said = "".join(f"\n({c})" for c in context)
-    tap = (f" To tapback this message, run: python3 {SELF} react {chat_uid} {mid} like "
+    tap = (f" To tapback this message, run: {RUN} react {chat_uid} {mid} like "
            f"(or love, laugh, emphasize, question, dislike, or one emoji).") if mid else ""
     # The owner's ask: feedback the moment an agent sees his text, not after the slow turn. It is
     # the first line, so it is the first command run, not one noticed mid-work (Boss, 10-05).
-    seen = (f"FIRST, before reading on: python3 {SELF} react {chat_uid} {mid} 👀"
+    seen = (f"FIRST, before reading on: {RUN} react {chat_uid} {mid} 👀"
             f"  (marks this text seen for the sender; then read, work and reply)\n") if mid else ""
     return (
         f"{seen}[plowchat] from {who} in {chat_uid}: {text}{sent}{said}\n"
         f"(This is the owner's Plow messages line. The owner texts here, and so "
         f"does anyone they added to this thread. To answer, run: "
-        f"python3 {SELF} reply {chat_uid} \"your reply\" — it goes back to that "
+        f"{RUN} reply {chat_uid} \"your reply\" — it goes back to that "
         f"same thread, which may be a group. Plain text only, no markdown. To send "
         f"photos or files, add --file PATH before the text, up to 4.{tap})"
     )

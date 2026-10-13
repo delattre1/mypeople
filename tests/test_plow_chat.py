@@ -7,6 +7,7 @@ import importlib.machinery
 import importlib.util
 from datetime import timedelta
 import os
+import shlex
 from pathlib import Path
 import tempfile
 import unittest
@@ -109,9 +110,20 @@ class PlowChatTest(unittest.TestCase):
         self.pc.poll_chat(self.creds, "cht_a")
         # The very first line, so it is the first command an agent runs, before it starts work.
         first, second = self.sent[0].split("\n")[:2]
-        self.assertTrue(first.startswith("FIRST, before reading on: python3 "))
+        self.assertTrue(first.startswith("FIRST, before reading on: PLOW_CHAT_STATE_DIR="))
         self.assertIn(" react cht_a msg_his 👀", first)
         self.assertEqual("[plowchat] from Dan in cht_a: deploy it?", second)
+
+    def test_a_second_bridge_hands_the_boss_commands_for_its_own_account(self):
+        """A second Plow account (the owner's WhatsApp number as its own identity) runs its own
+        bridge with its own state dir. The reply it hands the Boss must carry that dir, or the
+        reply goes out under the first account's login and never reaches the chat."""
+        told = self.pc.envelope("Dan", "hi", "cht_a", mid="m9")
+        self.assertIn(f"PLOW_CHAT_STATE_DIR={shlex.quote(self.tmp.name)} python3 {self.pc.SELF} reply cht_a", told)
+        with mock.patch.dict(os.environ):
+            os.environ.pop("PLOW_CHAT_STATE_DIR", None)
+            first = load("plow_chat_first", "plow-chat/plow-chat.py", {"HOST_ID": "h"})
+        self.assertIn(f"run: python3 {first.SELF} reply cht_a", first.envelope("Dan", "hi", "cht_a"))
 
     def test_react_sends_a_tapback_and_refuses_a_misspelt_one(self):
         calls = []
