@@ -3,16 +3,20 @@
 # the pin moves only after the release passes three checks here, on throwaway "VMs" booted from the
 # real images, with fakeplow.py standing in for Plow and the login server (no line, no phone):
 #   in place  boot the CURRENT pin; its Boss makes a card from a text; add an OS-level tool and a home
-#             file; move the pin: it must switch, pass its own health check, and keep the card, the
-#             handled text, the tool, the home file and the Boss's session -- and still know the card
+#             file; start the old release's agentsview daemon, the way agent-index leaves it running;
+#             move the pin: it must switch, pass its own health check, keep the card, the handled
+#             text, the tool, the home file and the Boss's session, still know the card, and run
+#             nothing from the old release dir
 #   fresh     boot the release on an empty disk: healthy
-#   rollback  pin a copy of the release whose chat bridge cannot start: it goes back, healthy
+#   rollback  pin a copy of the release whose chat bridge cannot start: it goes back, healthy, and
+#             nothing from the broken copy's dir is left running
 # Then `plow-agents image promote myplow` and read the pin back. Any failure: nothing is promoted.
 #
 # Runs on a Linux docker host, the way `make cloud` starts it: the ECR push login arrives on stdin.
-#   publish.sh <release>     CLAUDE_LOGIN_FILE=<the Claude login the gate's Boss runs on>
+#   publish.sh <release> [--gate-only]   CLAUDE_LOGIN_FILE=<the Claude login the gate's Boss runs on>
 set -euo pipefail
-V="${1:?usage: publish.sh <release>}"
+V="${1:?usage: publish.sh <release> [--gate-only]}"
+GATE_ONLY="${2:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LOGIN="${CLAUDE_LOGIN_FILE:?set CLAUDE_LOGIN_FILE to the Claude login file the gate VM runs on}"
 SRC="ghcr.io/delattre1/mypeople:cloud-$V"
@@ -22,7 +26,8 @@ G=myplow-gate
 say(){ echo "== $(date -u +%T) $*"; }
 fail(){ echo "GATE FAILED, nothing promoted: $*" >&2; exit 1; }
 cleanup(){ docker rm -f $G-vm $G-plow $G-registry >/dev/null 2>&1 || true
-           docker network rm $G >/dev/null 2>&1 || true; rm -rf "${CFG:-/nonexistent}"; }
+           docker network rm $G >/dev/null 2>&1 || true; rm -rf "${CFG:-/nonexistent}"
+           docker images --format '{{.Repository}}:{{.Tag}}' | grep -- '/myplow-cloud:.*-broken$' | xargs -r docker rmi >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 pinned(){ "$PA" image show myplow | python3 -c 'import json,sys; print(json.load(sys.stdin)["plow"]["image"] or "")'; }
 
@@ -77,6 +82,8 @@ tmux list-panes -a -F '#{window_name} #{pane_current_command}' | grep -q '^Boss 
 EOF
 }
 release(){ vm <<< 'readlink /opt/myplow/current'; }
+# Processes still running from a release dir that is not the current one (none, or the list).
+leftovers(){ vm <<< "pgrep -u mypeople -af '/opt/myplow/releases/$1/' || true"; }
 state(){ vm <<EOF
 D=/var/lib/mypeople
 echo "cards \$(python3 -c "import sqlite3; print(sqlite3.connect('file:\$D/todos/board.v2.sqlite3?mode=ro', uri=True).execute('select count(*) from tasks').fetchone()[0])")"
@@ -96,12 +103,18 @@ vm <<< 'echo kept > ~/.myplow-gate'
 SEED="$(text "Gate test: put one card on your board titled GATE-HERON, then reply with just its title.")"
 within 900 replied "$SEED" GATE-HERON || fail "the current pin's Boss never answered (a rig problem, not $V)"
 before="$(state "$SEED")"; echo "$before"
+OLDREL="$(release)"; OLDREL="${OLDREL#releases/}"
+vm <<< "cd /tmp && setsid nohup /opt/myplow/releases/$OLDREL/bin/agentsview serve --skip-initial-sync >/dev/null 2>&1 &"
+sleep 3; [ -n "$(leftovers "$OLDREL" | grep agentsview)" ] || fail "could not start $OLDREL's agentsview (a rig problem)"
 T="$(date -u +%FT%T)"; pin "$NEW"; say "pin -> $V"
 within 1800 verdict "$T" || fail "in place: no switch to $V within 30 min"
 beacon "$T" "healthy on releases/$V" || fail "in place: $V failed its health check and rolled back"
 [ "$(release)" = "releases/$V" ] || fail "in place: running $(release)"
 after="$(state "$SEED")"; echo "$after"
 [ "$after" = "$before" ] || fail "in place: the data changed across the switch"
+left="$(leftovers "$OLDREL")"; [ -z "$left" ] || fail "in place: still running from $OLDREL: $left"
+vm <<< 'CLAUDE_PROJECTS_DIR=$HOME/.claude/projects /opt/myplow/current/bin/agentsview sync >/dev/null 2>&1' \
+  || fail "in place: $V's agentsview sync fails without the old daemon"
 Q="$(text "Gate test after an update: what title did the card you made have? Reply with just the title.")"
 within 900 replied "$Q" GATE-HERON || fail "in place: the Boss no longer knows its card"
 say "gate 1/3 passed"
@@ -133,7 +146,9 @@ beacon "$T" "ROLLED BACK" || fail "rollback: the broken copy passed its health c
 within 900 healthy || fail "rollback: not healthy after going back"
 [ "$(release)" = "releases/$V" ] || fail "rollback: running $(release)"
 vm <<< "grep -qF '$BROKEN' /var/lib/mypeople/run/myplow-update-bad" || fail "rollback: the broken copy is not marked bad"
+left="$(leftovers "$V-broken")"; [ -z "$left" ] || fail "rollback: still running from $V-broken: $left"
 say "gate 3/3 passed"
+[ "$GATE_ONLY" != --gate-only ] || { say "--gate-only: all three passed, pin left on $OLD"; exit 0; }
 
 say "promote myplow -> $NEW"
 "$PA" image promote myplow "$NEW" >/dev/null

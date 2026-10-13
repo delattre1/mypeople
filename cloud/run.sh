@@ -23,6 +23,17 @@ LOG="${MYPEOPLE_HOME:-/var/lib/mypeople}/logs"
 mkdir -p "$LOG"
 beacon "release $(cat "$R/RELEASE")"
 
+# One release runs at a time, and this boot is the one place that makes it true. PID 1's stop list
+# is the copy each VM was born with, so it misses whatever later releases start (the detached
+# agentsview daemon above all): anything still running from another release dir is a leftover of a
+# switch or a rollback. `make cloud`'s gate checks for the same thing.
+for p in $(pgrep -u "$(id -u)" -f "${R%/*}/"); do
+  case "$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)" in
+    *"$R/"*) ;;
+    *) kill "$p" 2>/dev/null && beacon "stopped a leftover of another release: pid $p" ;;
+  esac
+done
+
 # AGENT_ID means "which Index listing" to Plow and "which agent am I" to every mypeople process.
 # Hand Plow's to the reporter and the updater, and keep it out of the fleet's environment.
 INDEX_AGENT_ID="${AGENT_ID:-}"

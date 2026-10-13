@@ -57,11 +57,11 @@ app: released
 # CLOUD_LOGIN is the Claude login file on that host the gate's Boss runs on. The ECR push login is
 # made here and travels on stdin, never in an argument or a file. Takes ~30 min; nothing is promoted
 # unless all three checks pass.
-#   make cloud CLOUD_HOST=<host> CLOUD_LOGIN=<path there> [VERSION=x.y.z]
+#   make cloud CLOUD_HOST=<host> CLOUD_LOGIN=<path there> [VERSION=x.y.z] [GATE_ONLY=1: never promote]
 CLOUD_AWS_PROFILE ?= plow
 cloud:
 	@test -n "$(CLOUD_HOST)" -a -n "$(CLOUD_LOGIN)" || \
 	  { echo "usage: make cloud CLOUD_HOST=<docker host> CLOUD_LOGIN=<Claude login file there>" >&2; exit 1; }
 	ssh $(CLOUD_HOST) 'mkdir -p myplow-publish' && scp -q cloud/publish.sh cloud/fakeplow.py $(CLOUD_HOST):myplow-publish/
 	aws ecr-public get-login-password --region us-east-1 --profile $(CLOUD_AWS_PROFILE) | \
-	  ssh $(CLOUD_HOST) 'CLAUDE_LOGIN_FILE=$(CLOUD_LOGIN) bash myplow-publish/publish.sh $(VERSION)'
+	  ssh $(CLOUD_HOST) 'CLAUDE_LOGIN_FILE=$(CLOUD_LOGIN) bash myplow-publish/publish.sh $(VERSION)$(if $(GATE_ONLY), --gate-only)'
