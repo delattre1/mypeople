@@ -83,6 +83,20 @@ class SeedRunsBeforeTheAuthGateTests(unittest.TestCase):
                      os.path.join(self.install, "run", "eng")):
             self.assertTrue(projects.get(path, {}).get("hasTrustDialogAccepted"), path)
 
+    def test_reseeding_an_unchanged_config_never_rewrites_it(self):
+        """Every live Claude session reads these files; a no-op rewrite made `claude auth status`
+        take 23 s under ~50 sessions and can drop a session's own write (5.22.27 follow-up)."""
+        firstrun.write_claude_config(self.install)
+        files = [os.path.join(self.home, ".claude.json"),
+                 os.path.join(self.home, ".claude", "settings.json")]
+        before = [os.stat(p).st_ino for p in files]
+        firstrun.write_claude_config(self.install)
+        self.assertEqual(before, [os.stat(p).st_ino for p in files])
+        with open(files[0], "w") as f:  # a real change is still written
+            json.dump({"hasCompletedOnboarding": False}, f)
+        firstrun.write_claude_config(self.install)
+        self.assertTrue(self._claude_json()["hasCompletedOnboarding"])
+
     def test_container_degraded_start_seeds_too(self):
         with with_auth(), mock.patch.dict(os.environ, {"MYPEOPLE_CONTAINER": "1"}):
             _, _, backend = firstrun.ensure()

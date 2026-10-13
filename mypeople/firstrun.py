@@ -632,6 +632,18 @@ def write_codex_config(install):
 
 
 def _atomic_json(path, obj):
+    """Write `obj` to `path` atomically, and NOT AT ALL when the file already holds it.
+
+    ~/.claude.json and ~/.claude/settings.json are live files for every running Claude session.
+    `up` rewrote both on every run with nothing changed: under ~50 sessions the next `claude auth
+    status` took 23 s (card d7679b9123), and a session's own write landing between our read and
+    our replace was lost."""
+    try:
+        with open(path) as f:
+            if json.load(f) == obj:
+                return
+    except (OSError, ValueError):
+        pass
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
