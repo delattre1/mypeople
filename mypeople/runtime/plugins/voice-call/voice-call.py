@@ -13,7 +13,13 @@ one sentence and is hung up on, and nothing about them is recorded,
 transcribed or logged except that a call was rejected. Twilio's record of their
 call is deleted once it ends.
 
-On the call: his speech goes to streaming speech-to-text (AssemblyAI), each
+Twilio's webhooks carry a secret in their URL (HTTP Basic auth, the
+credentials only Twilio's copy of the number's config holds), and a right PIN
+opens the voice only after Twilio's own API confirms that CallSid is a live
+call to our number from that caller. The audio stream is let in once, with a
+one-time token from that answer.
+
+On the call: his speech goes to streaming speech-to-text (Deepgram Flux), each
 finished turn goes to the Boss as `[CALL t7] ...`, and the Boss answers with
 `voice-call.py say t7 "..."`, which is spoken (ElevenLabs) at his next pause,
 never over him, or sent by iMessage (the plow-chat plugin) once he hangs up.
@@ -28,13 +34,11 @@ which expires by itself after at most an hour. Only those are recorded, because
 the voice on them is ours.
 
 Turn it on with VOICE_CALL=1, VOICE_CALL_ALLOW=+1555... and VOICE_CALL_PUBLIC_URL
-in queue.env, point a tailscale funnel's /voice at VOICE_CALL_PORT and
-/voice/stream at VOICE_CALL_PORT+1, then once:
-  voice-call.py keys     store the Twilio SID + auth token and the AssemblyAI and ElevenLabs keys
-  voice-call.py keys-page  or that: a one-time page to paste the keys from his phone, served
-                         tailnet-only (`tailscale serve --https=8799`, a port Funnel cannot use)
-                         to VOICE_CALL_KEYS_LOGINS; it refuses to run behind a Funnel
-  voice-call.py setup    buy the Twilio number and make the PIN
+in queue.env, point a tailscale funnel's /voice/twilio at VOICE_CALL_PORT and
+/voice/stream at VOICE_CALL_PORT+1 (only those two: `say` listens on PORT+2,
+which nothing serves), then once:
+  voice-call.py keys     store the Twilio account SID + API key, and the Deepgram and ElevenLabs keys
+  voice-call.py setup    buy the Twilio number, point it here, make the PIN
 
 Usage:
   voice-call.py serve                 run the bridge (supervise.sh entry point)
@@ -44,7 +48,6 @@ Usage:
 """
 import array
 import base64
-import hashlib
 import hmac
 import json
 import os
@@ -69,12 +72,13 @@ STATE_DIR = Path(os.environ.get("VOICE_CALL_STATE_DIR") or INSTALL / "state" / "
 CONFIG = STATE_DIR / "config.json"  # 600: keys and PIN, written by keys/setup
 CLIPS_DIR = STATE_DIR / "clips"      # the short canned lines, rendered once in the call's voice
 PORT = int(os.environ.get("VOICE_CALL_PORT", "8796"))  # Twilio webhooks; PORT+1 is the media stream
+SAY_PORT = PORT + 2  # `say` from the Boss: its own port, so no Funnel on PORT can ever publish it
 PUBLIC_URL = os.environ.get("VOICE_CALL_PUBLIC_URL", "").rstrip("/")
 ALLOW = {n.strip() for n in os.environ.get("VOICE_CALL_ALLOW", "").split(",") if n.strip()}
 OWNER = os.environ.get("VOICE_CALL_OWNER", "Daniel")
 LANG = os.environ.get("VOICE_CALL_LANG", "pt")  # his language until his first turn says otherwise
 TTS_MODEL = os.environ.get("VOICE_CALL_TTS_MODEL", "eleven_v4_turbo")
-STT_MODEL = os.environ.get("VOICE_CALL_STT_MODEL", "universal-3-6-pro")
+STT_MODEL = os.environ.get("VOICE_CALL_STT_MODEL", "flux-general-multi")
 TEST_WINDOW_MAX_MIN = 60  # a test number left on the allowlist is a back door: it expires by itself
 AREA_CODE = os.environ.get("VOICE_CALL_AREA_CODE", "650")
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
@@ -128,16 +132,31 @@ def twilio(cfg, method, path, form=None):
     data = urllib.parse.urlencode(form).encode() if form else None
     req = urllib.request.Request(
         f"https://api.twilio.com/2010-04-01/Accounts/{cfg['twilio_sid']}{path}", data=data, method=method)
-    auth = base64.b64encode(f"{cfg['twilio_sid']}:{cfg['twilio_token']}".encode()).decode()
+    # An API key, not the account's Auth Token: it can be revoked alone, and it is the one we hold.
+    auth = base64.b64encode(f"{cfg['twilio_key']}:{cfg['twilio_secret']}".encode()).decode()
     req.add_header("Authorization", f"Basic {auth}")
     return http(req)
 
 
 # --- who may call: checked at Twilio, before a second of his audio leaves Twilio ---
 
-def twilio_signature(token: str, url: str, params: dict) -> str:
-    data = url + "".join(k + params[k] for k in sorted(params))
-    return base64.b64encode(hmac.new(token.encode(), data.encode(), hashlib.sha1).digest()).decode()
+# Twilio signs webhooks with the Auth Token alone, which we do not hold. So each webhook URL carries
+# Basic auth credentials only Twilio's config of our number has (Twilio sends them after a 401), and
+# a grant also needs Twilio's API to vouch for the call.
+def hook_base(cfg) -> str:
+    return PUBLIC_URL.replace("https://", f"https://twilio:{cfg['hook_secret']}@", 1)
+
+
+def hook_auth_ok(header: str, cfg) -> bool:
+    want = "Basic " + base64.b64encode(f"twilio:{cfg['hook_secret']}".encode()).decode()
+    return bool(cfg.get("hook_secret")) and hmac.compare_digest((header or "").encode(), want.encode())
+
+
+def live_call(cfg, sid: str, caller: str) -> bool:
+    """Twilio's own record: a call on our account, ringing or up, to our number, from this caller."""
+    code, c = twilio(cfg, "GET", f"/Calls/{urllib.parse.quote(sid)}.json")
+    return (code == 200 and c.get("account_sid") == cfg["twilio_sid"] and c.get("to") == cfg["twilio_number"]
+            and c.get("from") == caller and c.get("status") in ("ringing", "in-progress"))
 
 
 REJECTED = set()  # CallSids of strangers, deleted from Twilio's log once they end
@@ -152,7 +171,7 @@ def twiml(*verbs) -> str:
 def gather(cfg, before="") -> str:
     # No prompt: the owner's contact dials the PIN by itself (number,,PIN) right after pickup.
     return twiml(before, f'<Gather input="dtmf" numDigits="{len(cfg["pin"])}" timeout="8" '
-                         f'actionOnEmptyResult="true" action="{PUBLIC_URL}/voice/twilio/pin"/>')
+                         f'actionOnEmptyResult="true" action="{hook_base(cfg)}/voice/twilio/pin"/>')
 
 
 def test_call(p: dict, cfg: dict, now=None) -> bool:
@@ -174,6 +193,9 @@ def on_twilio(path: str, p: dict, cfg: dict) -> str:
     if path == "/voice/twilio/pin":
         if hmac.compare_digest(p.get("Digits", ""), cfg["pin"]):
             ATTEMPTS.pop(sid, None)
+            if not ((p.get("From") in ALLOW or test_call(p, cfg)) and live_call(cfg, sid, p.get("From"))):
+                log(f"call {sid}: right PIN but Twilio does not vouch for this call; hung up")
+                return twiml("<Hangup/>")
             token = secrets.token_urlsafe(24)
             GRANTS[token] = (time.time() + 60, sid, test_call(p, cfg))
             log(f"call {sid}: PIN ok, opening the voice stream")
@@ -225,9 +247,11 @@ def send_to_boss(message: str) -> bool:
     return r.returncode == 0
 
 
-def envelope(ticket: str, lang: str, text: str, interrupted: bool) -> str:
+def envelope(ticket: str, lang: str, text: str, interrupted: bool, test=False) -> str:
     cut = " (He cut off your last reply to say this.)" if interrupted else ""
-    return (f'[CALL {ticket}] {OWNER}, live on the phone ({lang}): "{text}"{cut}\n'
+    who = (f"SYNTHETIC TEST CALL from our own number, not {OWNER}: answer it like a real call, act on nothing"
+           if test else f"{OWNER}, live on the phone")
+    return (f'[CALL {ticket}] {who} ({lang}): "{text}"{cut}\n'
             f"(Answer with: python3 {SELF} say {ticket} \"...\" — he hears it within a second. One or two "
             f"spoken sentences in his language, no markdown or links. He is waiting on the line, so answer "
             f"first and work after; for longer work say a short ack now and the result later with the same "
@@ -249,12 +273,12 @@ class Call:
     """Who talks when, on one call. pump() runs on its own thread; the rest arrive from the
     media stream, the speech-to-text stream and `say`. The voice never talks over him."""
 
-    def __init__(self, play, clear, boss=send_to_boss, now=time.monotonic):
+    def __init__(self, play, clear, boss=send_to_boss, now=time.monotonic, test=False):
         self.play, self.clear, self.boss, self.now = play, clear, boss, now
         self.lock = threading.Lock()
         self.lines = queue.SimpleQueue()   # (ticket, text) from the Boss, waiting for a pause
         self.user_talking = self.speaking = self.interrupted = False
-        self.lang, self.live = LANG, True
+        self.lang, self.live, self.test = LANG, True, test
         self.waiting = None                # [ticket, his turn ended at, nudges given] until the Boss speaks
         self.said_at = {}                  # ticket -> when the Boss's line arrived, for the latency log
         self.queued = ["hello"]            # canned lines to play at the next pause
@@ -277,7 +301,7 @@ class Call:
             self.queued.append("ack")
         with LOCK:
             TICKETS[ticket] = self
-        threading.Thread(target=self.boss, args=(envelope(ticket, self.lang, text, cut),), daemon=True).start()
+        threading.Thread(target=self.boss, args=(envelope(ticket, self.lang, text, cut, self.test),), daemon=True).start()
         log(f"{ticket} sent to the Boss")
 
     def say_later(self, ticket: str, text: str):
@@ -389,26 +413,25 @@ class Stream:
                 if ev == "start":
                     st = m["start"]
                     grant = take_grant((st.get("customParameters") or {}).get("token", ""))
-                    if not grant:
+                    if not grant or st.get("callSid") != grant[1] or st.get("accountSid") != self.cfg["twilio_sid"]:
                         log("a media stream without a valid token: closed")
                         return
                     self.sid = st["streamSid"]
                     if grant[2]:  # synthetic test call: the only kind ever recorded
                         threading.Thread(target=twilio, daemon=True, args=(
                             self.cfg, "POST", f"/Calls/{grant[1]}/Recordings.json", {"RecordingChannels": "dual"})).start()
-                    q = urllib.parse.urlencode({"speech_model": STT_MODEL, "encoding": "pcm_mulaw",
-                                                "sample_rate": 8000, "language_codes": '["pt","en"]',
-                                                "language_detection": "true"})
-                    stt = connect(f"wss://streaming.assemblyai.com/v3/ws?{q}",
-                                  additional_headers={"Authorization": self.cfg["stt_key"]})
-                    self.call = Call(self.play, self.clear)
+                    q = urllib.parse.urlencode([("model", STT_MODEL), ("encoding", "mulaw"), ("sample_rate", 8000),
+                                                ("language_hint", "pt"), ("language_hint", "en")])  # unhinted, it heard pt as Dutch
+                    stt = connect(f"wss://api.deepgram.com/v2/listen?{q}",
+                                  additional_headers={"Authorization": f"Token {self.cfg['stt_key']}"})
+                    self.call = Call(self.play, self.clear, test=grant[2])
                     threading.Thread(target=self.listen, args=(stt,), daemon=True).start()
                     threading.Thread(target=self.pace, daemon=True).start()
                     buf = b""
                     log(f"call {grant[1]} joined")
                 elif ev == "media" and stt:
                     buf += base64.b64decode(m["media"]["payload"])
-                    if len(buf) >= 480:  # AssemblyAI takes 50-1000 ms per message; Twilio sends 20 ms
+                    if len(buf) >= 640:  # Flux wants ~80 ms per message; Twilio sends 20 ms
                         stt.send(buf)
                         buf = b""
                 elif ev == "mark" and self.call:
@@ -420,7 +443,7 @@ class Stream:
                 self.call.live = False
             if stt:
                 try:
-                    stt.send(json.dumps({"type": "Terminate"}))
+                    stt.send(json.dumps({"type": "CloseStream"}))
                     stt.close()
                 except Exception:
                     pass
@@ -430,11 +453,12 @@ class Stream:
         try:
             for raw in stt:
                 m = json.loads(raw)
-                t = m.get("type")
-                if t == "SpeechStarted" or (t == "Turn" and m.get("transcript") and not m.get("end_of_turn")):
+                if m.get("type") != "TurnInfo":
+                    continue
+                if m.get("event") in ("StartOfTurn", "TurnResumed"):
                     self.call.user_started()
-                elif t == "Turn" and m.get("end_of_turn") and m.get("turn_is_formatted"):
-                    self.call.user_ended(m.get("transcript", ""), (m.get("language_code") or "")[:2])
+                elif m.get("event") == "EndOfTurn":
+                    self.call.user_ended(m.get("transcript", ""), ((m.get("languages") or [""])[0])[:2])
         except Exception as e:
             if self.call.live:
                 log(f"ERROR speech-to-text: {e!r}")
@@ -450,25 +474,28 @@ class Stream:
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        path, cfg = self.path.split("?")[0], load_config()
-        if path.startswith("/voice/twilio"):
-            params = dict(urllib.parse.parse_qsl(body.decode(), keep_blank_values=True))  # Twilio signs blanks too
-            sig = twilio_signature(cfg["twilio_token"], PUBLIC_URL + self.path, params)
-            if not hmac.compare_digest(sig, self.headers.get("X-Twilio-Signature") or ""):
-                return self.reply(403)
+        path, cfg, port = self.path.split("?")[0], load_config(), self.server.server_address[1]
+        if port == PORT and path.startswith("/voice/twilio"):
+            if not hook_auth_ok(self.headers.get("Authorization"), cfg):
+                return self.reply(401, headers={"WWW-Authenticate": 'Basic realm="voice-call"'})
+            params = dict(urllib.parse.parse_qsl(body.decode(), keep_blank_values=True))
             return self.reply(200, on_twilio(path, params, cfg), "text/xml")
-        if path == "/voice/say" and hmac.compare_digest(self.headers.get("X-Say-Token") or "", cfg["say_token"]):
+        if (port == SAY_PORT and path == "/voice/say"
+                and hmac.compare_digest(self.headers.get("X-Say-Token") or "", cfg["say_token"])):
             req = json.loads(body)
             call = TICKETS.get(req.get("ticket"))
             if call and call.live:
                 call.say_later(req["ticket"], req["text"])
                 log(f"{req['ticket']} queued for his next pause")
                 return self.reply(200, '{"result": "queued"}', "application/json")
-            return self.reply(200, '{"result": "no-call"}', "application/json")
+            # a late answer to a synthetic call is ours to drop: it must never iMessage him
+            return self.reply(200, '{"result": "%s"}' % ("test-over" if call and call.test else "no-call"), "application/json")
         self.reply(404)
 
-    def reply(self, code, body="", ctype="text/plain"):
+    def reply(self, code, body="", ctype="text/plain", headers=None):
         self.send_response(code)
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.send_header("Content-Type", ctype)
         self.end_headers()
         self.wfile.write(body.encode())
@@ -480,12 +507,13 @@ class Handler(BaseHTTPRequestHandler):
 def serve():
     from websockets.sync.server import serve as ws_serve
     cfg = load_config()
-    if not cfg.get("pin") or not cfg.get("stt_key"):
+    if not cfg.get("pin") or not cfg.get("stt_key") or not cfg.get("hook_secret"):
         sys.exit("not set up: run `voice-call.py keys` then `voice-call.py setup`")
     for name, langs in CLIPS.items():  # render the canned lines now, not on his first call
         for lang in langs:
             clip(cfg, name, lang)
-    threading.Thread(target=ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever, daemon=True).start()
+    for port in (PORT, SAY_PORT):
+        threading.Thread(target=ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever, daemon=True).start()
     log(f"serving {PUBLIC_URL}/voice on 127.0.0.1:{PORT}+{PORT + 1}, {len(ALLOW)} allowed caller(s)")
     with ws_serve(lambda ws: Stream(ws, load_config()).run(), "127.0.0.1", PORT + 1) as server:
         server.serve_forever()
@@ -493,7 +521,7 @@ def serve():
 
 def cmd_say(ticket: str, text: str):
     cfg = load_config()
-    req = urllib.request.Request(f"http://127.0.0.1:{PORT}/voice/say", method="POST",
+    req = urllib.request.Request(f"http://127.0.0.1:{SAY_PORT}/voice/say", method="POST",
                                  data=json.dumps({"ticket": ticket, "text": text}).encode())
     req.add_header("X-Say-Token", cfg.get("say_token", ""))
     try:
@@ -502,6 +530,8 @@ def cmd_say(ticket: str, text: str):
         out = {}
     if out.get("result") == "queued":
         print(f"{ticket}: queued on the live call, spoken at his next pause")
+    elif out.get("result") == "test-over":
+        print(f"{ticket}: that synthetic test call is over; dropped, not texted")
     elif text_owner(text):
         print(f"{ticket}: the call is over, sent by iMessage instead")
     else:
@@ -514,127 +544,15 @@ def cmd_keys():
     import getpass
     cfg = load_config()
     for key, env, label in (("twilio_sid", "TWILIO_ACCOUNT_SID", "Twilio Account SID (AC...)"),
-                            ("twilio_token", "TWILIO_AUTH_TOKEN", "Twilio Auth Token"),
-                            ("stt_key", "ASSEMBLYAI_API_KEY", "AssemblyAI API key"),
+                            ("twilio_key", "TWILIO_API_KEY", "Twilio API key SID (SK...)"),
+                            ("twilio_secret", "TWILIO_API_SECRET", "Twilio API key secret"),
+                            ("stt_key", "DEEPGRAM_API_KEY", "Deepgram API key"),
                             ("tts_key", "ELEVENLABS_API_KEY", "ElevenLabs API key"),
                             ("voice_id", "ELEVENLABS_VOICE_ID", "ElevenLabs voice id for the Boss")):
         cfg[key] = os.environ.get(env) or getpass.getpass(f"{label}: ").strip() or cfg.get(key, "")
     save_config(cfg)
     print(f"saved to {CONFIG}")
 
-
-KEY_FIELDS = (("twilio_sid", "Twilio Account SID", r"AC[0-9a-f]{32}"),
-              ("twilio_token", "Twilio Auth Token", r"[0-9a-f]{32}"),
-              ("stt_key", "AssemblyAI API key", r"[A-Za-z0-9_-]{20,128}"),
-              ("tts_key", "ElevenLabs API key", r"[A-Za-z0-9_-]{20,128}"))
-KEYS_TOKEN = STATE_DIR / "keys-page.token"
-KEYS_PORT = int(os.environ.get("VOICE_CALL_KEYS_PORT", str(PORT + 2)))  # never the funneled PORT
-KEYS_LOGINS = {x.strip() for x in os.environ.get("VOICE_CALL_KEYS_LOGINS", "").split(",") if x.strip()}
-
-
-def save_keys(form: dict):
-    """Store the well-formed keys from the paste page; a value never goes back out."""
-    cfg, saved, bad = load_config(), [], []
-    for key, label, pattern in KEY_FIELDS:
-        value = (form.get(key) or "").strip()
-        if value and re.fullmatch(pattern, value):
-            cfg[key] = value
-            saved.append(label)
-        elif value:
-            bad.append(label)
-    save_config(cfg)
-    return saved, bad
-
-
-def all_keys_in() -> bool:
-    cfg = load_config()
-    return all(cfg.get(k) for k, _, _ in KEY_FIELDS)
-
-
-def keys_page(note=""):
-    cfg = load_config()
-    rows = "".join(
-        f'<label>{label} {"&#10003; saved" if cfg.get(key) else ""}<input name="{key}" '
-        f'type="{"text" if key == "twilio_sid" else "password"}" autocomplete="off" autocapitalize="off" '
-        f'spellcheck="false"></label>' for key, label, _ in KEY_FIELDS)
-    return ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            "<title>Boss line keys</title><style>body{font:17px -apple-system,sans-serif;margin:16px;max-width:30em}"
-            "label{display:block;margin:14px 0}input{display:block;width:100%;font-size:17px;padding:10px;"
-            "box-sizing:border-box}button{font-size:18px;padding:12px 20px}</style>"
-            f"<h2>Keys for calling the Boss</h2><p>{note}</p><form method=post>{rows}"
-            "<button>Save</button></form><p>Paste any you have; come back for the rest.</p>")
-
-
-def funneled(port: int, status_json: str = "") -> bool:
-    """True if any Funnel-enabled (public) host:port proxies to our local port. Funnel is per PORT, so one
-    agent's public /voice on :443 also publishes every other path on :443 (this happened, 2026-10-04)."""
-    if not status_json:
-        r = subprocess.run(["tailscale", "serve", "status", "--json"], capture_output=True, text=True, timeout=20)
-        status_json = r.stdout or "{}"
-    d = json.loads(status_json)
-    public = d.get("AllowFunnel") or {}
-    return any(public.get(hp) and f"127.0.0.1:{port}" in json.dumps(w) for hp, w in (d.get("Web") or {}).items())
-
-
-def keys_request_ok(path: str, headers, token: str, until: float, now=None) -> bool:
-    """Only his tailnet devices: tailscale serve stamps Tailscale-User-Login; the public internet never reaches
-    this port, and a request without his login, on another path, or after expiry gets a plain 404."""
-    return (hmac.compare_digest(path, f"/voice/keys/{token}") and (now or time.time()) < until
-            and (headers.get("Tailscale-User-Login") or "") in KEYS_LOGINS)
-
-
-def cmd_keys_page(days=3):
-    if not KEYS_LOGINS:
-        sys.exit("set VOICE_CALL_KEYS_LOGINS to the owner's tailnet login: the page fails closed without it")
-    if funneled(KEYS_PORT):
-        sys.exit(f"REFUSING: 127.0.0.1:{KEYS_PORT} is behind a Tailscale Funnel (public). Serve it on a port "
-                 f"Funnel cannot use (not 443/8443/10000) and remove that handler first.")
-    if not KEYS_TOKEN.exists():
-        CONFIG.parent.mkdir(parents=True, exist_ok=True)
-        with os.fdopen(os.open(KEYS_TOKEN, os.O_WRONLY | os.O_CREAT, 0o600), "w") as f:
-            f.write(secrets.token_urlsafe(18))
-    token, until = KEYS_TOKEN.read_text().strip(), KEYS_TOKEN.stat().st_mtime + days * 86400
-    done = all_keys_in
-
-    class Keys(BaseHTTPRequestHandler):
-        def ok(self):
-            return keys_request_ok(self.path, self.headers, token, until)
-
-        def do_GET(self):
-            self.send(200 if self.ok() else 404, keys_page() if self.ok() else "")
-
-        def do_POST(self):
-            if not self.ok():
-                return self.send(404, "")
-            form = dict(urllib.parse.parse_qsl(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 8192)).decode()))
-            saved, bad = save_keys(form)
-            log(f"keys page: saved {len(saved)}, refused {len(bad)}")  # never the values
-            note = (f"Saved: {', '.join(saved) or 'nothing'}." + (f" Not the right shape, not saved: {', '.join(bad)}." if bad else "")
-                    + (" All keys are in. Thank you, you can close this." if done() else ""))
-            self.send(200, keys_page(note))
-
-        def send(self, code, body):
-            self.send_response(code)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body.encode())
-
-        def log_message(self, *args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", KEYS_PORT), Keys)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    log(f"keys page up on 127.0.0.1:{KEYS_PORT} for {len(KEYS_LOGINS)} tailnet login(s) until {datetime.fromtimestamp(until).isoformat(timespec='minutes')}")
-    while not done() and time.time() < until:
-        time.sleep(5)
-        if funneled(KEYS_PORT):  # someone published it after start: close at once
-            log("REFUSING: the keys page became reachable through a Funnel; shutting down")
-            break
-    time.sleep(10)  # let the last "all four are in" page render
-    server.shutdown()
-    KEYS_TOKEN.unlink(missing_ok=True)
-    log("keys page closed: " + ("all keys saved" if done() else "expired"))
 
 
 def cmd_test_window(minutes: int):
@@ -648,23 +566,29 @@ def cmd_test_window(minutes: int):
 
 def cmd_setup():
     cfg = load_config()
-    if not (cfg.get("twilio_sid") and cfg.get("stt_key") and cfg.get("tts_key") and PUBLIC_URL):
+    if not (cfg.get("twilio_key") and cfg.get("stt_key") and cfg.get("tts_key") and PUBLIC_URL):
         sys.exit("run `voice-call.py keys` first and set VOICE_CALL_PUBLIC_URL")
     cfg.setdefault("pin", f"{secrets.randbelow(10**6):06d}")
     cfg.setdefault("say_token", secrets.token_urlsafe(24))
+    cfg.setdefault("hook_secret", secrets.token_urlsafe(24))
+    save_config(cfg)
     if not cfg.get("twilio_number"):
         code, found = twilio(cfg, "GET", f"/AvailablePhoneNumbers/US/Local.json?AreaCode={AREA_CODE}&VoiceEnabled=true")
         numbers = found.get("available_phone_numbers") or []
         if code != 200 or not numbers:
             sys.exit(f"no Twilio number available in {AREA_CODE}: {code} {found}")
-        code, bought = twilio(cfg, "POST", "/IncomingPhoneNumbers.json", {
-            "PhoneNumber": numbers[0]["phone_number"], "FriendlyName": "voice-call",
-            "VoiceUrl": f"{PUBLIC_URL}/voice/twilio", "VoiceMethod": "POST",
-            "StatusCallback": f"{PUBLIC_URL}/voice/twilio/status", "StatusCallbackMethod": "POST"})
+        code, bought = twilio(cfg, "POST", "/IncomingPhoneNumbers.json",
+                              {"PhoneNumber": numbers[0]["phone_number"], "FriendlyName": "voice-call"})
         if code not in (200, 201):
             sys.exit(f"buying {numbers[0]['phone_number']} failed: {code} {bought}")
         cfg["twilio_number"], cfg["twilio_number_sid"] = bought["phone_number"], bought["sid"]
-    save_config(cfg)
+        save_config(cfg)  # bought: never lose it to a later failure
+    # Every run re-points the number, so a new PUBLIC_URL or hook secret takes effect.
+    code, out = twilio(cfg, "POST", f"/IncomingPhoneNumbers/{cfg['twilio_number_sid']}.json", {
+        "VoiceUrl": f"{hook_base(cfg)}/voice/twilio", "VoiceMethod": "POST",
+        "StatusCallback": f"{hook_base(cfg)}/voice/twilio/status", "StatusCallbackMethod": "POST"})
+    if code != 200:
+        sys.exit(f"pointing {cfg['twilio_number']} here failed: {code} {out.get('message')}")
     print(f"ready: {cfg['twilio_number']}. The owner's contact dials <line>,,<PIN> (PIN in {CONFIG}).")
 
 
@@ -707,8 +631,6 @@ def main():
         cmd_say(sys.argv[2], sys.argv[3])
     elif cmd == "keys":
         cmd_keys()
-    elif cmd == "keys-page":
-        cmd_keys_page()
     elif cmd == "setup":
         cmd_setup()
     elif cmd == "test-window" and len(sys.argv) == 3:

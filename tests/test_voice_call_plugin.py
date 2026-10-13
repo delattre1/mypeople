@@ -1,6 +1,7 @@
 """Voice Call plugin (card 79584b97bd): the owner phones his Boss.
 
-What must hold: only the owner with the PIN gets a voice stream, a stranger leaves no trace, and
+What must hold: only the owner with the PIN gets a voice stream, and only for a call Twilio itself
+vouches for; a webhook without our secret is refused and `say` is never on the public port; a stranger leaves no trace, and
 our own test number gets in only while a self-expiring window is open; only those synthetic calls
 are recorded. On the call every finished turn reaches the Boss, the Boss's answer is spoken only in
 a pause, never over him, talking over the voice stops it, a slow Boss gets one "one sec", one
@@ -13,9 +14,12 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import tempfile
 import unittest
 from unittest import mock
+import urllib.error
+import urllib.request
 import wave
 
 PLUGINS = Path(__file__).resolve().parents[1] / "mypeople" / "runtime" / "plugins"
@@ -31,22 +35,60 @@ def load(env):
 
 
 OWNER = "+15555550123"  # synthetic: this repo is public
-CFG = {"pin": "482913", "twilio_number": "+16505550100"}
+CFG = {"pin": "482913", "twilio_number": "+16505550100", "twilio_sid": "AC" + "0" * 32, "hook_secret": "s3cret",
+       "twilio_key": "SK" + "0" * 32, "twilio_secret": "x", "say_token": "say"}
 ENV = {"VOICE_CALL_ALLOW": OWNER, "VOICE_CALL_PUBLIC_URL": "https://h.example"}
 
 
-def sync_threads(vc):
-    vc.threading.Thread = lambda target, args=(), daemon=None: mock.Mock(start=lambda: target(*args))
+def sync_threads(test, vc):
+    # vc.threading is the process-wide module: patch it for this test only, or every later test's servers run inline
+    patch = mock.patch.object(vc.threading, "Thread", lambda target, args=(), daemon=None: mock.Mock(start=lambda: target(*args)))
+    patch.start()
+    test.addCleanup(patch.stop)
 
 
-class TwilioSignatureTest(unittest.TestCase):
-    def test_official_vector(self):
-        # twilio-python tests/unit/test_request_validator.py
-        vc = load(ENV)
-        params = {"CallSid": "CA1234567890ABCDE", "Digits": "1234", "From": "+14158675309",
-                  "To": "+18005551212", "Caller": "+14158675309"}
-        self.assertEqual(vc.twilio_signature("12345", "https://mycompany.com/myapp.php?foo=1&bar=2", params),
-                         "RSOYDt4T1cUTdK1PDd93/VVr8B8=")
+def vouching(vc, **over):
+    """Twilio's API answering GET /Calls/<sid>: a live call to our number from whoever the webhook says."""
+    def twilio(cfg, method, path, form=None):
+        sid = path.split("/Calls/")[1].split(".")[0]
+        return over.get("code", 200), dict({"account_sid": CFG["twilio_sid"], "to": CFG["twilio_number"],
+                                            "from": vc._from[sid], "status": "in-progress"}, **over.get("call", {}))
+    vc._from = {}
+    vc.twilio = twilio
+
+
+def pin(vc, sid, caller, digits=CFG["pin"], cfg=CFG):
+    vc._from[sid] = caller
+    return vc.on_twilio("/voice/twilio/pin", {"CallSid": sid, "From": caller, "Digits": digits}, cfg)
+
+
+class WebhookAuthTest(unittest.TestCase):
+    """No Auth Token, so no signature: the webhook secret gates the door, Twilio's API vouches for the call."""
+
+    def setUp(self):
+        self.vc = load(ENV)
+        self.vc.log = lambda m: None
+        vouching(self.vc)
+
+    def test_only_our_secret_gets_in(self):
+        good = "Basic " + __import__("base64").b64encode(b"twilio:s3cret").decode()
+        self.assertTrue(self.vc.hook_auth_ok(good, CFG))
+        for bad in (None, "", "Basic " + __import__("base64").b64encode(b"twilio:guess").decode()):
+            self.assertFalse(self.vc.hook_auth_ok(bad, CFG))
+        self.assertFalse(self.vc.hook_auth_ok("Basic " + __import__("base64").b64encode(b"twilio:").decode(),
+                                              dict(CFG, hook_secret="")))  # unset secret never matches
+
+    def test_right_pin_needs_twilio_to_vouch_for_the_call(self):
+        self.assertIn("<Connect>", pin(self.vc, "CA1", OWNER))
+        for over in ({"code": 404}, {"call": {"status": "completed"}}, {"call": {"to": "+16505550199"}},
+                     {"call": {"account_sid": "AC" + "1" * 32}}, {"call": {"from": "+14155550000"}}):
+            vouching(self.vc, **over)
+            out = pin(self.vc, "CA2", OWNER)
+            self.assertNotIn("<Connect", out, over)
+            self.assertIn("<Hangup/>", out)
+
+    def test_a_forged_pin_webhook_from_a_stranger_gets_nothing(self):
+        self.assertNotIn("<Connect", pin(self.vc, "CA3", "+14155550000"))  # even with the right PIN and a real call
 
 
 class WhoMayCallTest(unittest.TestCase):
@@ -55,14 +97,15 @@ class WhoMayCallTest(unittest.TestCase):
         self.logs, self.texts = [], []
         self.vc.log = self.logs.append
         self.vc.text_owner = self.texts.append
-        sync_threads(self.vc)
+        sync_threads(self, self.vc)
+        vouching(self.vc)
 
     def test_stranger_hears_one_sentence_and_leaves_no_trace(self):
         out = self.vc.on_twilio("/voice/twilio", {"CallSid": "CA1", "From": "+14155550000"}, CFG)
         self.assertIn("This line takes texts only", out)
         self.assertIn("<Hangup/>", out)
         self.assertNotIn("<Connect", out)
-        self.assertEqual(self.logs, ["rejected a call"])  # no number, nothing else
+        self.assertEqual(self.logs, ["rejected a call"])  # no number, nothing else, not even Twilio's API
         deleted = []
         self.vc.twilio = lambda cfg, method, path, form=None: deleted.append((method, path)) or (204, {})
         self.vc.on_twilio("/voice/twilio/status", {"CallSid": "CA1", "CallStatus": "completed"}, CFG)
@@ -71,7 +114,7 @@ class WhoMayCallTest(unittest.TestCase):
     def test_owner_needs_the_pin(self):
         out = self.vc.on_twilio("/voice/twilio", {"CallSid": "CA2", "From": OWNER}, CFG)
         self.assertIn('numDigits="6"', out)
-        self.assertIn('action="https://h.example/voice/twilio/pin"', out)
+        self.assertIn('action="https://twilio:s3cret@h.example/voice/twilio/pin"', out)
         self.assertNotIn("<Connect", out)
         for _ in (1, 2):
             out = self.vc.on_twilio("/voice/twilio/pin", {"CallSid": "CA2", "From": OWNER, "Digits": "111111"}, CFG)
@@ -82,7 +125,7 @@ class WhoMayCallTest(unittest.TestCase):
         self.assertEqual(len(self.texts), 1)  # he is told someone tried
 
     def test_right_pin_opens_a_stream_only_its_one_time_token_can_join(self):
-        out = self.vc.on_twilio("/voice/twilio/pin", {"CallSid": "CA3", "From": OWNER, "Digits": "482913"}, CFG)
+        out = pin(self.vc, "CA3", OWNER)
         self.assertIn('<Stream url="wss://h.example/voice/stream">', out)
         token = out.split('name="token" value="')[1].split('"')[0]
         self.assertIsNone(self.vc.take_grant("guess"))
@@ -91,7 +134,7 @@ class WhoMayCallTest(unittest.TestCase):
         self.assertIsNone(self.vc.take_grant(token))  # once only
 
     def test_token_expires_after_a_minute(self):
-        out = self.vc.on_twilio("/voice/twilio/pin", {"CallSid": "CA4", "From": OWNER, "Digits": "482913"}, CFG)
+        out = pin(self.vc, "CA4", OWNER)
         token = out.split('name="token" value="')[1].split('"')[0]
         self.assertIsNone(self.vc.take_grant(token, now=self.vc.time.time() + 61))
 
@@ -119,10 +162,10 @@ class TestWindowTest(unittest.TestCase):
 
     def test_only_synthetic_calls_are_recorded(self):
         cfg = dict(CFG, test_until=1000)
-        pin = {"Digits": CFG["pin"]}
+        vouching(self.vc)
         with mock.patch.object(self.vc.time, "time", return_value=999):
-            ours = self.vc.on_twilio("/voice/twilio/pin", dict(pin, CallSid="C4", From=self.ours), cfg)
-            his = self.vc.on_twilio("/voice/twilio/pin", dict(pin, CallSid="C5", From=OWNER), cfg)
+            ours = pin(self.vc, "C4", self.ours, cfg=cfg)
+            his = pin(self.vc, "C5", OWNER, cfg=cfg)
             grant = lambda out: self.vc.take_grant(out.split('value="')[1].split('"')[0])
             self.assertTrue(grant(ours)[2])
             self.assertFalse(grant(his)[2])  # even with a window open
@@ -140,7 +183,7 @@ class CallTest(unittest.TestCase):
     def setUp(self):
         self.vc = load(ENV)
         self.vc.log = lambda m: None
-        sync_threads(self.vc)
+        sync_threads(self, self.vc)
         self.t, self.played, self.cleared, self.boss = 0.0, [], [], []
         self.call = self.vc.Call(play=lambda kind, what, lang, ticket: self.played.append((kind, what, lang)),
                                  clear=lambda: self.cleared.append(1), boss=self.boss.append, now=lambda: self.t)
@@ -221,40 +264,6 @@ class SayAndLatencyTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_keys_page_saves_only_well_formed_keys_and_never_shows_them(self):
-        sid, tok = "AC" + "a" * 32, "b" * 32
-        saved, bad = self.vc.save_keys({"twilio_sid": sid, "twilio_token": "not-a-token", "tts_key": "sk_" + "c" * 40})
-        self.assertEqual(saved, ["Twilio Account SID", "ElevenLabs API key"])
-        self.assertEqual(bad, ["Twilio Auth Token"])
-        self.vc.save_keys({"twilio_token": tok})
-        cfg = self.vc.load_config()
-        self.assertEqual((cfg["twilio_sid"], cfg["twilio_token"]), (sid, tok))
-        page = self.vc.keys_page()
-        self.assertNotIn(sid, page)
-        self.assertNotIn(tok, page)
-        self.assertEqual(page.count("saved"), 3)
-        self.assertEqual(oct(self.vc.CONFIG.stat().st_mode & 0o777), "0o600")
-
-    def test_keys_page_answers_only_his_tailnet_login(self):
-        vc = load({"VOICE_CALL_STATE_DIR": self.tmp.name, "VOICE_CALL_KEYS_LOGINS": "daniel@example.com"})
-        ok = lambda headers, path="/voice/keys/tok", now=100: vc.keys_request_ok(path, headers, "tok", 200, now)
-        self.assertTrue(ok({"Tailscale-User-Login": "daniel@example.com"}))
-        self.assertFalse(ok({}))  # the public internet carries no tailnet identity
-        self.assertFalse(ok({"Tailscale-User-Login": "someone@example.org"}))
-        self.assertFalse(ok({"Tailscale-User-Login": "daniel@example.com"}, path="/voice/keys/guess"))
-        self.assertFalse(ok({"Tailscale-User-Login": "daniel@example.com"}, now=300))  # expired
-        self.assertNotEqual(vc.KEYS_PORT, vc.PORT)  # never the funneled port
-        bad = json.dumps({"AllowFunnel": {"h:443": True}, "Web": {"h:443": {"Handlers": {
-            "/voice": {"Proxy": "http://127.0.0.1:8796/voice"}, "/": {"Proxy": f"http://127.0.0.1:{vc.KEYS_PORT}"}}}}})
-        good = json.dumps({"AllowFunnel": {"h:443": True}, "Web": {
-            "h:443": {"Handlers": {"/voice": {"Proxy": "http://127.0.0.1:8796/voice"}}},
-            "h:8799": {"Handlers": {"/voice/keys": {"Proxy": f"http://127.0.0.1:{vc.KEYS_PORT}/voice/keys"}}}}})
-        self.assertTrue(vc.funneled(vc.KEYS_PORT, bad))
-        self.assertFalse(vc.funneled(vc.KEYS_PORT, good))
-        closed = load({"VOICE_CALL_STATE_DIR": self.tmp.name})
-        with self.assertRaises(SystemExit):
-            closed.cmd_keys_page()  # no allowed login: it refuses to start at all
-
     def test_say_falls_back_to_imessage_when_no_call_is_live(self):
         texts = []
         self.vc.text_owner = lambda t: texts.append(t) or True
@@ -280,6 +289,85 @@ class SayAndLatencyTest(unittest.TestCase):
         self.assertEqual(len(gaps), 2)
         self.assertAlmostEqual(gaps[0], 0.8, delta=0.04)
         self.assertAlmostEqual(gaps[1], 1.2, delta=0.04)
+
+
+def free_port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+class ServerTest(unittest.TestCase):
+    """The real handler on real sockets: Twilio's port wants our secret, `say` answers only on its own port."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        port = free_port()
+        self.vc = load(dict(ENV, VOICE_CALL_STATE_DIR=self.tmp.name, VOICE_CALL_PORT=str(port)))
+        self.vc.log = lambda m: None
+        self.vc.save_config(dict(CFG))
+        self.servers = [self.vc.ThreadingHTTPServer(("127.0.0.1", p), self.vc.Handler) for p in (port, port + 2)]
+        for srv in self.servers:
+            self.vc.threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        for srv in self.servers:
+            srv.shutdown()
+            srv.server_close()
+        self.tmp.cleanup()
+
+    def post(self, port, path, data=b"", headers=None):
+        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method="POST", headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.headers, r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, ""
+
+    def test_twilio_port_challenges_then_answers_with_our_secret(self):
+        body = f"CallSid=CA1&From={OWNER.replace('+', '%2B')}".encode()
+        code, headers, _ = self.post(self.vc.PORT, "/voice/twilio", body)
+        self.assertEqual(code, 401)  # Twilio sends the URL's credentials after this challenge
+        self.assertIn("Basic", headers["WWW-Authenticate"])
+        auth = "Basic " + __import__("base64").b64encode(b"twilio:s3cret").decode()
+        code, _, out = self.post(self.vc.PORT, "/voice/twilio", body, {"Authorization": auth})
+        self.assertEqual(code, 200)
+        self.assertIn("<Gather", out)
+
+    def test_say_is_never_on_the_twilio_port(self):
+        req = json.dumps({"ticket": "t1", "text": "hi"}).encode()
+        self.assertEqual(self.post(self.vc.PORT, "/voice/say", req, {"X-Say-Token": "say"})[0], 404)
+        self.assertEqual(self.post(self.vc.SAY_PORT, "/voice/say", req, {"X-Say-Token": "say"})[0], 200)
+        self.assertEqual(self.post(self.vc.SAY_PORT, "/voice/say", req, {"X-Say-Token": "guess"})[0], 404)
+        self.assertEqual(self.post(self.vc.SAY_PORT, "/voice/twilio", b"", {})[0], 404)
+
+    def test_a_late_answer_to_a_synthetic_call_never_texts_him(self):
+        texts = []
+        self.vc.text_owner = lambda t: texts.append(t) or True
+        for ticket, test in (("t1", True), ("t2", False)):
+            call = self.vc.Call(play=None, clear=None, boss=lambda m: None, test=test)
+            call.live = False
+            self.vc.TICKETS[ticket] = call
+            with mock.patch("sys.stdout", io.StringIO()):
+                self.vc.cmd_say(ticket, "late")
+        self.assertEqual(texts, ["late"])  # only his own call's answer goes on by iMessage
+        self.assertIn("SYNTHETIC TEST CALL", self.vc.envelope("t1", "pt", "oi", False, test=True))
+        self.assertNotIn("SYNTHETIC", self.vc.envelope("t2", "pt", "oi", False))
+
+
+class FluxTurnsTest(unittest.TestCase):
+    def test_start_barges_in_and_end_of_turn_carries_text_and_language(self):
+        vc = load(ENV)
+        stream = vc.Stream(ws=None, cfg=CFG)
+        stream.call = mock.Mock(live=True)
+        msgs = [{"type": "Connected"}, {"type": "TurnInfo", "event": "Update", "transcript": "e o"},
+                {"type": "TurnInfo", "event": "StartOfTurn", "transcript": "e o"},
+                {"type": "TurnInfo", "event": "EndOfTurn", "transcript": "e o deploy?", "languages": ["pt"]},
+                {"type": "TurnInfo", "event": "TurnResumed"},
+                {"type": "TurnInfo", "event": "EndOfTurn", "transcript": "ok", "languages": []}]
+        stream.listen([json.dumps(m) for m in msgs])
+        self.assertEqual(stream.call.user_started.call_count, 2)
+        self.assertEqual(stream.call.user_ended.call_args_list, [mock.call("e o deploy?", "pt"), mock.call("ok", "")])
 
 
 if __name__ == "__main__":
