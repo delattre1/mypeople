@@ -201,7 +201,7 @@ class PollRoutingTests(unittest.TestCase):
 class WiringTests(unittest.TestCase):
     def test_supervise_starts_it_only_when_turned_on(self):
         sup = (ROOT / "mypeople" / "runtime" / "bin" / "supervise.sh").read_text()
-        self.assertIn('[ -n "${GITHUB_PRS:-}" ] && ensure "$ID/plugins/github-prs/github-prs.py"', sup)
+        self.assertIn('[ -n "${GITHUB_PRS:-}" ] && ensure "$ID/plugins/github-prs/github-prs.py serve$"', sup)
 
     def test_down_stops_it(self):
         cli = (ROOT / "mypeople" / "cli.py").read_text()

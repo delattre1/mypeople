@@ -7,7 +7,10 @@ import importlib.machinery
 import importlib.util
 from datetime import timedelta
 import os
+import re
 import shlex
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -278,8 +281,37 @@ class WiringTest(unittest.TestCase):
     def test_supervise_starts_it_only_when_turned_on_and_down_stops_it(self):
         root = PLUGINS.parents[2]
         sup = (root / "mypeople" / "runtime" / "bin" / "supervise.sh").read_text()
-        self.assertIn('[ -n "${PLOW_CHAT:-}" ] && ensure "$ID/plugins/plow-chat/plow-chat.py"', sup)
+        self.assertIn('[ -n "${PLOW_CHAT:-}" ] && ensure "$ID/plugins/plow-chat/plow-chat.py serve$"', sup)
         self.assertIn('os.path.join(install, "plugins") + os.sep', (root / "mypeople" / "cli.py").read_text())
+
+    def test_supervise_sees_only_the_main_bridge_as_the_main_bridge(self):
+        """10-13: a second bridge (the owner's WhatsApp number as its own Plow account) ran the same
+        script, supervise's liveness check matched it, and the dead main bridge was never restarted:
+        the owner's texts went unanswered for 51 minutes. A labelled second bridge or a one-shot
+        `reply` must not count as the main bridge; the main bridge itself still must."""
+        sup = (PLUGINS.parent / "bin" / "supervise.sh").read_text()
+        pat = re.search(r'\[ -n "\$\{PLOW_CHAT:-\}" \] && ensure "([^"]+)"', sup).group(1)
+        with tempfile.TemporaryDirectory() as idir:
+            script = f"{idir}/plugins/plow-chat/plow-chat.py"
+            pat = pat.replace("$ID", idir)
+
+            def running(*argv):
+                return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", script, *argv])
+
+            def seen():
+                return subprocess.run(["pgrep", "-f", pat], capture_output=True, text=True).stdout.split()
+
+            others = [running("serve", "whatsapp"), running("reply", "cht_x", "hi")]
+            try:
+                self.assertEqual([], seen())
+                main = running("serve")
+                try:
+                    self.assertEqual([str(main.pid)], seen())
+                finally:
+                    main.kill()
+            finally:
+                for p in others:
+                    p.kill()
 
 
 if __name__ == "__main__":

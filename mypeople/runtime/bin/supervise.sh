@@ -27,6 +27,9 @@ echo $$ > "$PIDFILE"
 ensure(){
   # Match the daemon by script ABSPATH in argv. Never key liveness on interpreter/comm: Homebrew
   # framework Python reports `Python`, not `python3`, which otherwise causes duplicate respawns.
+  # A plugin daemon's pattern ends in "serve$": the path alone also matched a one-shot run of the
+  # same script (`plow-chat.py reply`) and a second, labelled bridge (`plow-chat.py serve whatsapp`),
+  # and either one made this skip a dead daemon -- the owner's texts went unanswered for 51 min.
   local pat="$1"; shift
   if pgrep -f "$pat" >/dev/null 2>&1; then return; fi
   echo "$(date -u +%FT%TZ) starting: $*" >> "$LOG/supervise.log"
@@ -82,25 +85,25 @@ while true; do
   ensure "ttyd -a -p $TTYD_RO_PORT"        "exec ttyd -a -p $TTYD_RO_PORT $TTYD_CLIENT_OPTS '$BIN/ttyd-attach.sh'"
   ensure "$BIN/boss-supervisor.sh"         "exec bash '$BIN/boss-supervisor.sh'"
   # Cron: each schedule is one `mp send` on a timer (mp cron add/ls/rm). Idle when none exist.
-  ensure "$BIN/mp cron serve"              "exec python3 '$BIN/mp' cron serve"
+  ensure "$BIN/mp cron serve$"             "exec python3 '$BIN/mp' cron serve"
   # GitHub PR watcher: off until queue.env sets GITHUB_PRS (see the plugin's header).
-  [ -n "${GITHUB_PRS:-}" ] && ensure "$ID/plugins/github-prs/github-prs.py" "exec python3 '$ID/plugins/github-prs/github-prs.py' serve"
+  [ -n "${GITHUB_PRS:-}" ] && ensure "$ID/plugins/github-prs/github-prs.py serve$" "exec python3 '$ID/plugins/github-prs/github-prs.py' serve"
   # Instagram comment watcher: off until queue.env sets INSTAGRAM_COMMENTS (see the plugin's header).
-  [ -n "${INSTAGRAM_COMMENTS:-}" ] && ensure "$ID/plugins/instagram-comments/instagram-comments.py" "exec python3 '$ID/plugins/instagram-comments/instagram-comments.py' serve"
+  [ -n "${INSTAGRAM_COMMENTS:-}" ] && ensure "$ID/plugins/instagram-comments/instagram-comments.py serve$" "exec python3 '$ID/plugins/instagram-comments/instagram-comments.py' serve"
   # Plow Chat: the owner texts the Boss over iMessage. Off until queue.env sets PLOW_CHAT (see the plugin's header).
-  [ -n "${PLOW_CHAT:-}" ] && ensure "$ID/plugins/plow-chat/plow-chat.py" "exec python3 '$ID/plugins/plow-chat/plow-chat.py' serve"
+  [ -n "${PLOW_CHAT:-}" ] && ensure "$ID/plugins/plow-chat/plow-chat.py serve$" "exec python3 '$ID/plugins/plow-chat/plow-chat.py' serve"
   # Voice call: the owner phones the Boss and talks to it live. Off until queue.env sets VOICE_CALL
   # (see the plugin's header). Needs uv on PATH: it is the one plugin with a dependency (websockets).
-  [ -n "${VOICE_CALL:-}" ] && ensure "$ID/plugins/voice-call/voice-call.py" "exec uv run --script '$ID/plugins/voice-call/voice-call.py' serve"
+  [ -n "${VOICE_CALL:-}" ] && ensure "$ID/plugins/voice-call/voice-call.py serve$" "exec uv run --script '$ID/plugins/voice-call/voice-call.py' serve"
   # Discord agent: builders' questions in the listed channels, answered by its own agent. Off until
   # queue.env sets DISCORD_AGENT (see the plugin's header).
-  [ -n "${DISCORD_AGENT:-}" ] && ensure "$ID/plugins/discord-agent/discord-agent.py" "exec python3 '$ID/plugins/discord-agent/discord-agent.py' serve"
+  [ -n "${DISCORD_AGENT:-}" ] && ensure "$ID/plugins/discord-agent/discord-agent.py serve$" "exec python3 '$ID/plugins/discord-agent/discord-agent.py' serve"
   # YouTube chat: bridge between the owner's YouTube live chat and MyPlow, both ways. Off until
   # queue.env sets YOUTUBE_CHAT (see the plugin's header).
-  [ -n "${YOUTUBE_CHAT:-}" ] && ensure "$ID/plugins/youtube-chat/youtube-chat.mjs" "exec node '$ID/plugins/youtube-chat/youtube-chat.mjs' serve"
+  [ -n "${YOUTUBE_CHAT:-}" ] && ensure "$ID/plugins/youtube-chat/youtube-chat.mjs serve$" "exec node '$ID/plugins/youtube-chat/youtube-chat.mjs' serve"
   # Latch reconnect: after Latch restarts, types `/mcp reconnect all` into each IDLE Claude agent so it gets
   # its Latch tools back. Off until queue.env sets LATCH_RECONNECT (see the plugin's header).
-  [ -n "${LATCH_RECONNECT:-}" ] && ensure "$ID/plugins/latch-reconnect/latch-reconnect.py" "exec python3 '$ID/plugins/latch-reconnect/latch-reconnect.py' serve"
+  [ -n "${LATCH_RECONNECT:-}" ] && ensure "$ID/plugins/latch-reconnect/latch-reconnect.py serve$" "exec python3 '$ID/plugins/latch-reconnect/latch-reconnect.py' serve"
   recycle_leaked_ttyd "ttyd -W -a -p $TTYD_PORT"
   recycle_leaked_ttyd "ttyd -a -p $TTYD_RO_PORT"
   sleep 10
