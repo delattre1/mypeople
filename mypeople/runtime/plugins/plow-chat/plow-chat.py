@@ -244,16 +244,16 @@ def route_message(message: dict) -> str:
 
     who = speaker(message.get("sender") or {})
     chat_uid = message.get("chat_uid") or ""
-    files = []
+    files, notes = [], []  # a file that did not arrive is a note, never "open it"
     for a in atts:
         try:
             files.append(download(a))
         except (OSError, ValueError) as e:
             log(f"attachment {a.get('uid')} not saved: {e}")
-            files.append(f"(could not download {a.get('filename') or 'attachment'}: {e})")
+            notes.append(f"could not download {a.get('filename') or 'attachment'}: {e}")
     with STATE_LOCK:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
-    if send_to_boss(envelope(who, text, chat_uid, files, context(message) + taps, mid)):
+    if send_to_boss(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid)):
         if taps:
             with STATE_LOCK:
                 st = read_json(STATE, {})

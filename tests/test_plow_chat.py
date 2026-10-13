@@ -174,7 +174,8 @@ class PlowChatTest(unittest.TestCase):
                               {"uid": "att_1", "filename": "trip.mov", "url": None, "status": "failed"}]})
         self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
         self.assertIn("see the video", self.sent[0])
-        self.assertIn("trip.mov: file unavailable", self.sent[0])
+        self.assertIn("\n(could not download trip.mov: file unavailable)", self.sent[0])
+        self.assertNotIn("open it", self.sent[0], "nothing to open: the file never arrived")
 
     def test_reply_uploads_files_then_sends_their_uids(self):
         calls = []
