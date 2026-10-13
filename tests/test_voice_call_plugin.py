@@ -179,6 +179,53 @@ class TestWindowTest(unittest.TestCase):
         self.assertEqual(self.vc.load_config()["test_until"], 0)
 
 
+class SetupNeverBuysOnItsOwnTest(unittest.TestCase):
+    """A Twilio number is a purchase: setup prints what to buy and the price, and buys only with --buy."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.vc = load(dict(ENV, VOICE_CALL_STATE_DIR=self.tmp.name))
+        self.calls = []
+
+        def twilio(cfg, method, path, form=None):
+            self.calls.append((method, path))
+            if "AvailablePhoneNumbers" in path:
+                return 200, {"available_phone_numbers": [{"phone_number": "+16505550142"}]}
+            if path.startswith("https://pricing."):
+                return 200, {"price_unit": "USD", "phone_number_prices": [{"number_type": "local", "current_price": "1.15"}]}
+            if path == "/IncomingPhoneNumbers.json":
+                return 201, {"phone_number": form["PhoneNumber"], "sid": "PN1"}
+            return 200, {}
+        self.vc.twilio = twilio
+        self.vc.save_config({"twilio_sid": CFG["twilio_sid"], "twilio_key": "SK1", "twilio_secret": "x",
+                             "stt_key": "k", "tts_key": "k"})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def bought(self):
+        return [c for c in self.calls if c == ("POST", "/IncomingPhoneNumbers.json")]
+
+    def test_without_a_number_it_stops_and_names_the_number_and_price(self):
+        with self.assertRaises(SystemExit) as stop:
+            self.vc.cmd_setup()
+        self.assertIn("+16505550142, 1.15 USD a month", str(stop.exception))
+        self.assertIn("setup --buy +16505550142", str(stop.exception))
+        self.assertEqual(self.bought(), [])
+        self.assertNotIn("twilio_number", self.vc.load_config())
+
+    def test_it_buys_only_the_number_named_and_never_a_second(self):
+        with mock.patch("sys.stdout", io.StringIO()):
+            self.vc.cmd_setup("+16505550142")
+        self.assertEqual(len(self.bought()), 1)
+        self.assertEqual(self.vc.load_config()["twilio_number"], "+16505550142")
+        with self.assertRaises(SystemExit):
+            self.vc.cmd_setup("+16505550199")  # already have one
+        with mock.patch("sys.stdout", io.StringIO()):
+            self.vc.cmd_setup()  # plain setup re-points what we have
+        self.assertEqual(len(self.bought()), 1)
+
+
 class CallTest(unittest.TestCase):
     def setUp(self):
         self.vc = load(ENV)

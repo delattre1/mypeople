@@ -38,7 +38,9 @@ in queue.env, point a tailscale funnel's /voice/twilio at VOICE_CALL_PORT and
 /voice/stream at VOICE_CALL_PORT+1 (only those two: `say` listens on PORT+2,
 which nothing serves), then once:
   voice-call.py keys     store the Twilio account SID + API key, and the Deepgram and ElevenLabs keys
-  voice-call.py setup    buy the Twilio number, point it here, make the PIN
+  voice-call.py setup    point the Twilio number here and make the PIN. With no number yet it
+                         stops and prints which to buy and the price: a purchase needs the
+                         owner's yes, and only `setup --buy +1...` after that yes buys it
 
 Usage:
   voice-call.py serve                 run the bridge (supervise.sh entry point)
@@ -130,8 +132,8 @@ def http(req: urllib.request.Request, timeout=20):
 
 def twilio(cfg, method, path, form=None):
     data = urllib.parse.urlencode(form).encode() if form else None
-    req = urllib.request.Request(
-        f"https://api.twilio.com/2010-04-01/Accounts/{cfg['twilio_sid']}{path}", data=data, method=method)
+    url = path if path.startswith("https://") else f"https://api.twilio.com/2010-04-01/Accounts/{cfg['twilio_sid']}{path}"
+    req = urllib.request.Request(url, data=data, method=method)
     # An API key, not the account's Auth Token: it can be revoked alone, and it is the one we hold.
     auth = base64.b64encode(f"{cfg['twilio_key']}:{cfg['twilio_secret']}".encode()).decode()
     req.add_header("Authorization", f"Basic {auth}")
@@ -564,7 +566,7 @@ def cmd_test_window(minutes: int):
           f"{cfg.get('twilio_number')} {'may' if minutes else 'may not'} call in")
 
 
-def cmd_setup():
+def cmd_setup(buy=""):
     cfg = load_config()
     if not (cfg.get("twilio_key") and cfg.get("stt_key") and cfg.get("tts_key") and PUBLIC_URL):
         sys.exit("run `voice-call.py keys` first and set VOICE_CALL_PUBLIC_URL")
@@ -572,15 +574,22 @@ def cmd_setup():
     cfg.setdefault("say_token", secrets.token_urlsafe(24))
     cfg.setdefault("hook_secret", secrets.token_urlsafe(24))
     save_config(cfg)
+    if buy and cfg.get("twilio_number"):
+        sys.exit(f"already set up with {cfg['twilio_number']}: not buying {buy}")
     if not cfg.get("twilio_number"):
-        code, found = twilio(cfg, "GET", f"/AvailablePhoneNumbers/US/Local.json?AreaCode={AREA_CODE}&VoiceEnabled=true")
-        numbers = found.get("available_phone_numbers") or []
-        if code != 200 or not numbers:
-            sys.exit(f"no Twilio number available in {AREA_CODE}: {code} {found}")
-        code, bought = twilio(cfg, "POST", "/IncomingPhoneNumbers.json",
-                              {"PhoneNumber": numbers[0]["phone_number"], "FriendlyName": "voice-call"})
+        if not buy:  # a number is a purchase: setup never buys one on its own
+            code, found = twilio(cfg, "GET", f"/AvailablePhoneNumbers/US/Local.json?AreaCode={AREA_CODE}&VoiceEnabled=true")
+            pick = ((found.get("available_phone_numbers") or [{}])[0]).get("phone_number") or f"a {AREA_CODE} number"
+            _, prices = twilio(cfg, "GET", "https://pricing.twilio.com/v1/PhoneNumbers/Countries/US")
+            price = next((f"{x['current_price']} {prices.get('price_unit', 'USD')}" for x in prices.get("phone_number_prices", [])
+                          if x.get("number_type") == "local"), "price unknown")
+            sys.exit(f"No Twilio number yet, and buying one needs the owner's yes first. Ask for: {pick}, "
+                     f"{price} a month, recurring. After the yes: voice-call.py setup --buy {pick}")
+        if not re.fullmatch(r"\+\d{8,15}", buy):
+            sys.exit(f"--buy takes the number to buy, like +16505550100, not {buy!r}")
+        code, bought = twilio(cfg, "POST", "/IncomingPhoneNumbers.json", {"PhoneNumber": buy, "FriendlyName": "voice-call"})
         if code not in (200, 201):
-            sys.exit(f"buying {numbers[0]['phone_number']} failed: {code} {bought}")
+            sys.exit(f"buying {buy} failed: {code} {bought.get('message')}")
         cfg["twilio_number"], cfg["twilio_number_sid"] = bought["phone_number"], bought["sid"]
         save_config(cfg)  # bought: never lose it to a later failure
     # Every run re-points the number, so a new PUBLIC_URL or hook secret takes effect.
@@ -631,8 +640,8 @@ def main():
         cmd_say(sys.argv[2], sys.argv[3])
     elif cmd == "keys":
         cmd_keys()
-    elif cmd == "setup":
-        cmd_setup()
+    elif cmd == "setup" and (len(sys.argv) == 2 or (len(sys.argv) == 4 and sys.argv[2] == "--buy")):
+        cmd_setup(sys.argv[3] if len(sys.argv) == 4 else "")
     elif cmd == "test-window" and len(sys.argv) == 3:
         cmd_test_window(int(sys.argv[2]))
     elif cmd == "latency" and len(sys.argv) == 3:
