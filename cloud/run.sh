@@ -96,6 +96,8 @@ if ! CLAUDE_CODE_OAUTH_TOKEN="$("$R/claude-login.sh" fetch 2>>"$LOG/claude-login
   exec python3 -c "import signal; signal.pause()"
 fi
 export CLAUDE_CODE_OAUTH_TOKEN
+# Hold the pool lease (if this boot got one): report usage, move to another login at a usage limit.
+python3 "$R/pool-lease.py" loop >>"$LOG/pool-lease.log" 2>&1 &
 n="$("$R/claude-login.sh" skills 2>>"$LOG/claude-login.log")"
 beacon "owner skills: ${n:-none}"
 # The owner's Mac re-packs them daily, and a VM can run for weeks: fetch again daily, so the age in

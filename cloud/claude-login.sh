@@ -1,6 +1,7 @@
 #!/bin/bash
-# The Claude login of this MyPlow's OWNER, fetched at boot. Daniel's agents get his from his login
-# server (plow-seedlab-seedbed-substrate lease/lease-server.py, POST /token), which hands it only to
+# The Claude login of this MyPlow's OWNER, fetched at boot. Daniel's agents get one of his from his
+# login server's pool (lease/lease-server.py POST /checkout, via pool-lease.py; POST /token on a server
+# without a pool), which hands it only to
 # agents on his Plow account. Anyone else's install gets a 401 there and uses ITS OWN owner's Claude:
 # saved on this VM from an earlier boot, or asked for once by text (own-login.py). Nothing is in the
 # image, and nobody else's install ever runs on Daniel's plan.
@@ -50,9 +51,32 @@ case "${1:-}" in
       exit 1
     fi
     if [ -n "$BANK" ]; then
-      out=$(curl -sS -m 30 -w '\n%{http_code}' -X POST -H "Content-Type: application/json" \
-            -H "X-Plow-Index-Assertion: $a" -d '{"holder": "'"$(hostname)"'"}' "$BANK/token")
-      code="${out##*$'\n'}"; body="${out%$'\n'*}"
+      # The owner's pool first: one login held by this VM alone, moved to another at a usage limit
+      # (pool-lease.py). A login server without a pool (exit 3) still has the one shared login at /token.
+      if [ -f "$(dirname "$0")/pool-lease.py" ]; then
+        tok="$(python3 "$(dirname "$0")/pool-lease.py" checkout)"; rc=$?
+      else
+        rc=3   # a release without the pool client: the shared login, as before
+      fi
+      case $rc in
+        0)
+          beacon "pool login"
+          for _ in 1 2 3; do
+            if works "$tok"; then rm -rf "$TOLD"; printf '%s' "$tok"; exit 0; fi
+            tok="$(python3 "$(dirname "$0")/pool-lease.py" bad)" || break   # disabled in the pool; take the next
+          done
+          say_once expired "$EXPIRED"; exit 1 ;;
+        4)
+          say_once no-capacity "Every Claude login my owner keeps for agents is in use, so I can't answer. \
+Restart me once one is free, or add another login to the pool."; exit 1 ;;
+        5) code=401; body="" ;;
+        3)
+          rm -f "${MYPEOPLE_HOME:-/var/lib/mypeople}/state/claude-login/lease.json"
+          out=$(curl -sS -m 30 -w '\n%{http_code}' -X POST -H "Content-Type: application/json" \
+                -H "X-Plow-Index-Assertion: $a" -d '{"holder": "'"$(hostname)"'"}' "$BANK/token")
+          code="${out##*$'\n'}"; body="${out%$'\n'*}" ;;
+        *) code=000; body="" ;;
+      esac
     else
       code=401; body=""   # no login server configured: this install runs on its own owner's Claude
     fi

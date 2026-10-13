@@ -131,5 +131,37 @@ class OwnLoginParsing(unittest.TestCase):
         self.assertEqual("abc123#state9", code)
 
 
+class ClaudeLoginFromPool(ClaudeLoginFetch):
+    """With the pool client beside it, Daniel's agents take one pool login each, never /token."""
+
+    def setUp(self):
+        super().setUp()
+        (self.script.parent / "pool-lease.py").write_text(
+            "import os, sys\nrc = int(os.environ['POOL_RC'])\n"
+            "sys.stdout.write('sk-ant-oat01-pool-' + '0' * 30 if rc == 0 else '')\nsys.exit(rc)\n")
+        # The inherited tests run against a login server WITHOUT a pool (3): exactly the old behaviour.
+        self.env["POOL_RC"] = "3"
+
+    def pool(self, rc):
+        return subprocess.run(["bash", str(self.script), "fetch"], capture_output=True, text=True,
+                              env=dict(self.env, POOL_RC=str(rc), BANK_STATUS="200"), timeout=60)
+
+    def test_a_pool_login_is_used_and_token_never_asked(self):
+        r = self.pool(0)
+        self.assertEqual(0, r.returncode)
+        self.assertTrue(r.stdout.startswith("sk-ant-oat01-pool-"))
+
+    def test_a_full_pool_starts_no_claude(self):
+        r = self.pool(4)
+        self.assertEqual(1, r.returncode)
+        self.assertEqual("", r.stdout)
+
+    def test_not_the_owners_agent_uses_its_own_login(self):
+        r = self.pool(5)
+        self.assertEqual(0, r.returncode)
+        self.assertFalse(r.stdout.startswith("sk-ant-oat01-pool-"))
+        self.assertTrue(Path(self.env["ASKED"]).exists())
+
+
 if __name__ == "__main__":
     unittest.main()
