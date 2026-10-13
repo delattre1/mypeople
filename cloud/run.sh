@@ -102,7 +102,12 @@ n="$("$R/claude-login.sh" skills 2>>"$LOG/claude-login.log")"
 beacon "owner skills: ${n:-none}"
 # The owner's Mac re-packs them daily, and a VM can run for weeks: fetch again daily, so the age in
 # ~/.claude/skills/.synced is the Mac's sync, never this VM's uptime.
-( while sleep 86400; do "$R/claude-login.sh" skills >/dev/null 2>>"$LOG/claude-login.log"; done ) &
+# It wakes every minute only to see whether this run.sh is still there: a release switch stops run.sh
+# with a signal (so it never reaches the kill below), and a helper that outlives its release is a leak.
+RUNSH=$$
+( n=0; while kill -0 "$RUNSH" 2>/dev/null; do sleep 60; n=$((n + 1))
+    [ "$n" -ge 1440 ] && { n=0; "$R/claude-login.sh" skills >/dev/null 2>>"$LOG/claude-login.log"; }
+  done ) &
 
 "$R/agent-index.sh" "$INDEX_AGENT_ID" >>"$LOG/agent-index.log" 2>&1 &
 python3 "$R/update.py" loop >>"$LOG/update.log" 2>&1 &

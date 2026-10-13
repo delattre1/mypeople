@@ -34,6 +34,8 @@ ROSTER = HOME / "run" / "roster.json"
 PROJECTS = Path.home() / ".claude" / "projects"
 EVERY = int(os.environ.get("MYPLOW_POOL_EVERY", "60"))
 RETRY_AFTER = int(os.environ.get("MYPLOW_POOL_RETRY_AFTER", "600"))   # after a failed move, before the next
+ROOT = Path(os.environ.get("MYPLOW_ROOT", "/opt/myplow"))
+OWN = Path(__file__).resolve().parent
 # What a usage limit looks like in Claude Code's own session log (an API error turn).
 LIMIT = re.compile(r"usage limit|limit reached|rate_limit_error|API Error: 429", re.I)
 USAGE = {"input_tokens": "input", "output_tokens": "output",
@@ -249,10 +251,24 @@ def rotate(lease, rot, old_token):
     return old_token
 
 
+def still_mine(own=OWN, root=ROOT, ppid=None):
+    """This loop belongs to the release that started it. A switch or rollback stops run.sh with a
+    signal, so run.sh never kills its own helpers, and the VM's entrypoint (never updated) only stops
+    the helpers it knows. So the loop checks for itself: is its release still the current one, and
+    is the run.sh that started it still there (an orphan is re-parented to PID 1)?"""
+    cur = root / "current"
+    if cur.exists() and cur.resolve() != own:
+        return False
+    return (os.getppid() if ppid is None else ppid) != 1
+
+
 def loop():
     token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
     while True:
         time.sleep(EVERY)
+        if not still_mine():
+            log("this release is no longer the running one; lease loop exits")
+            return
         lease = read_lease()
         if not lease.get("lease_id"):
             continue
@@ -278,4 +294,5 @@ if __name__ == "__main__":
         sys.exit(bad())
     if cmd == "loop":
         loop()
+        sys.exit(0)   # left on purpose: its release is no longer the running one
     sys.exit(__doc__)

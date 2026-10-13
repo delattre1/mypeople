@@ -65,5 +65,22 @@ class Agents(unittest.TestCase):
         self.assertEqual(pl.claude_agents(), ["n/main:Boss", "n/main:eng-1"])
 
 
+class OnlyItsOwnRelease(unittest.TestCase):
+    """A switch or rollback must not leave this release's lease loop running next to the next one's."""
+
+    def test_exits_when_current_points_elsewhere_or_it_was_orphaned(self):
+        root = Path(tempfile.mkdtemp())
+        a, b = root / "releases" / "5.0.1", root / "releases" / "5.0.2"
+        a.mkdir(parents=True)
+        b.mkdir(parents=True)
+        (root / "current").symlink_to("releases/5.0.1")
+        self.assertTrue(pl.still_mine(own=a.resolve(), root=root, ppid=4242))
+        self.assertFalse(pl.still_mine(own=a.resolve(), root=root, ppid=1))      # run.sh is gone
+        (root / "current").unlink()
+        (root / "current").symlink_to("releases/5.0.2")                         # switched
+        self.assertFalse(pl.still_mine(own=a.resolve(), root=root, ppid=4242))
+        self.assertTrue(pl.still_mine(own=b.resolve(), root=root, ppid=4242))
+
+
 if __name__ == "__main__":
     unittest.main()
