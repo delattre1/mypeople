@@ -242,9 +242,50 @@ def normalize(d):
     return d
 
 
+AGENT_CLIS = ("claude", "grok", "codex")
+
+
+def process_table():
+    """{pid: (ppid, command basename)} for every process, from one `ps` call; {} if ps fails."""
+    import subprocess
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,comm="], capture_output=True,
+                             text=True, timeout=5).stdout
+    except Exception:
+        return {}
+    table = {}
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+            table[int(parts[0])] = (int(parts[1]), os.path.basename(parts[2].strip()))
+    return table
+
+
+def fired_by_nested_cli(table, pid):
+    """True when this hook was fired by an agent CLI running INSIDE the agent's own CLI, e.g. a
+    `claude -p` or `grok -p` started from a Bash tool. That child inherits AGENT_ID and the Claude
+    hooks (Grok imports them), so without this guard its SessionStart/Stop rewrite the agent's
+    status and roster session_id (so `mp revive` would resume the child), claim the agent's
+    notification routes, and notify as the agent (card d7679b9123: 6 bogus Boss pings from grok).
+    It counts agent-CLI ancestors; directly chained ones (a CLI exec-ing its own binary) count once.
+    ponytail: matches the process name only, so a CLI run as `node .../cli.js` is not seen;
+    add an args check if such an install appears."""
+    groups, prev_cli, seen = 0, False, set()
+    while pid in table and pid not in seen and pid > 1:
+        seen.add(pid)
+        ppid, name = table[pid]
+        is_cli = name in AGENT_CLIS
+        groups += is_cli and not prev_cli
+        prev_cli = is_cli
+        pid = ppid
+    return groups >= 2
+
+
 def main():
     global DATA
-    raw = sys.stdin.read()
+    raw = sys.stdin.read()  # drain stdin first so the caller never hits a broken pipe
+    if fired_by_nested_cli(process_table(), os.getpid()):
+        return  # a child CLI's lifecycle is not the agent's; leave status, roster and routes alone
     try:
         DATA = json.loads(raw) if raw.strip() else {}
     except Exception:
