@@ -184,6 +184,25 @@ class PlowChatTest(unittest.TestCase):
         self.assertEqual(self.pc.poll_chat(self.creds, "cht_a", seed=False), 1)
         self.assertIn("[plowchat]", self.sent[0])
 
+    def test_a_send_first_chats_first_reply_reaches_the_boss(self):
+        """A chat we started (Plow's send-first POST /v1/chats) first shows only our own send.
+        It got no mark, so the next pass took it for a chat from before marks and swallowed
+        the reply (whatsapp lab line 2, 10-14)."""
+        self.msgs[:] = [{"uid": "m0", "direction": "outbound", "body": "hello", "chat_uid": "cht_a",
+                         "created_at": "1"}]
+        self.assertEqual(self.pc.poll_chat(self.creds, "cht_a", seed=False), 0)
+        self.msgs.append({"uid": "m2", "direction": "inbound", "body": "the reply", "chat_uid": "cht_a",
+                          "created_at": "2"})
+        self.assertEqual(self.pc.poll_chat(self.creds, "cht_a", seed=False), 1)
+        self.assertIn("the reply", self.sent[0])
+
+    def test_a_chat_empty_at_startup_routes_its_first_text(self):
+        self.msgs[:] = []
+        self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 0)
+        self.msgs.append({"uid": "m2", "direction": "inbound", "body": "first text", "chat_uid": "cht_a",
+                          "created_at": "2"})
+        self.assertEqual(self.pc.poll_chat(self.creds, "cht_a", seed=False), 1)
+
     def test_photo_without_text_reaches_the_boss_with_its_path(self):
         self.pc.poll_chat(self.creds, "cht_a")
         self.msgs.append({"uid": "m2", "direction": "inbound", "body": "", "chat_uid": "cht_a",

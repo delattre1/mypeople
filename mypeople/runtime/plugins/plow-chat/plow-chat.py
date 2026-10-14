@@ -273,6 +273,9 @@ def message_age(message: dict) -> float:
         return float("inf")  # no readable time: treat it as long overdue
 
 
+FLOOR = ["", ""]  # a mark below every message: everything after it routes
+
+
 def order(message: dict) -> list:
     """A message's place in its chat: [created_at as fixed-width UTC, uid]. Parsed, because servers
     differ (api.plow.co sends microseconds, whatsapp-linq-api milliseconds)."""
@@ -531,14 +534,19 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
         st = read_json(STATE, {})
         seeded = set(st.get("seeded_chats", []))
         first = chat_uid not in seeded
+        marks = st.setdefault("marks", {})
         if first and not seed:
+            # The floor mark routes everything on its page, and gives it a mark at once. Without
+            # one, a chat whose first page was only our own send (Plow's send-first POST
+            # /v1/chats) passed next time for a chat from before marks, which marks its whole
+            # page handled, and its first reply never reached the Boss.
             st["seeded_chats"] = sorted(seeded | {chat_uid})
+            marks[chat_uid] = FLOOR
             write_json(STATE, st)
             first = False
-        marks = st.setdefault("marks", {})
         mark = None
-        if first and msgs:
-            mark = max(order(m) for m in msgs)
+        if first:
+            mark = max((order(m) for m in msgs), default=FLOOR)  # empty at startup: same floor
         elif chat_uid in seeded and chat_uid not in marks and msgs:
             # Seen before marks existed: the mark is the newest message the old id list says was
             # routed, or, if they all aged out of it, the newest on the page (no replay).
