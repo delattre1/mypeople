@@ -8,7 +8,8 @@ What the cloud MyPlow calls, and nothing more:
   POST /v1/chats/<uid>/messages           -> an agent reply (recorded as outbound)
   GET  /v1/auth/index-identity            -> a fake assertion
   GET  /v1/agent-images/<slug>            -> the pin the rig sets
-  POST /claude-bank/token                 -> the owner's real Claude login, read from a mounted file
+  POST /claude-bank/checkout              -> one fake lease carrying the gate login
+  POST /claude-bank/heartbeat|return      -> keep or release that lease
   POST /claude-bank/beacon                -> boot/update step lines (kept for the proof)
 Rig control (the test harness only):
   POST /rig/pin {"image"}   POST /rig/inbound {"body"}   GET /rig/messages   GET /rig/beacons
@@ -27,7 +28,7 @@ TOKEN_FILE = os.environ.get("RIG_TOKEN_FILE", "/secret/claude-setup-token")
 LOCK = threading.Lock()
 MESSAGES, BEACONS = [], []
 PIN = {"image": os.environ.get("RIG_PIN", "")}
-BANK = {"status": int(os.environ.get("RIG_BANK_STATUS", "200"))}
+BANK = {"status": int(os.environ.get("RIG_BANK_STATUS", "200")), "lease": None}
 SEQ = itertools.count(1)
 
 
@@ -86,6 +87,19 @@ class H(BaseHTTPRequestHandler):
                 return self.send(BANK["status"], {"error": "not the bank owner's agent"})
             with open(TOKEN_FILE) as f:
                 return self.send(200, {"token": f.read().strip()})
+        if p == "/claude-bank/checkout":
+            if BANK["status"] != 200:
+                return self.send(BANK["status"], {"error": "bank unavailable"})
+            with open(TOKEN_FILE) as f:
+                BANK["lease"] = BANK["lease"] or "rig-lease"
+                return self.send(200, {"lease_id": BANK["lease"], "account": "rig", "token": f.read().strip()})
+        if p == "/claude-bank/heartbeat":
+            return self.send(200 if b.get("lease_id") == BANK["lease"] else 410, {"ok": b.get("lease_id") == BANK["lease"]})
+        if p == "/claude-bank/return":
+            if b.get("lease_id") == BANK["lease"]:
+                BANK["lease"] = None
+                return self.send(200, {"ok": True})
+            return self.send(410, {"ok": False})
         if p == "/claude-bank/skills":
             return self.send(BANK["status"] if BANK["status"] != 200 else 404, {})
         if p == "/rig/bank":
