@@ -13,6 +13,7 @@ import shlex
 import shutil
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest import mock
 
@@ -227,19 +228,24 @@ class RoleLaunchTests(unittest.TestCase):
             self.assertIn("MYPEOPLE_ROLE_REF=%s" % resolved["role_ref"], launch)
             self.assertTrue(resolved["role_ref"].startswith("engineer@"))
 
-    def test_codex_mounts_via_home_and_profile(self):
+    def test_codex_mounts_via_its_home(self):
         with tempfile.TemporaryDirectory() as td:
             mp = load_mp(td)
-            bundle = mp.materialize_role(mp.resolve_role("engineer", "codex"),
-                                         "t/main:eng", "codex")
+            item = mp.resolve_role("engineer", "codex")
+            item["personality_bytes"] += b'\nmatch \\d+ in C:\\work, never """ this\n'
+            bundle = mp.materialize_role(item, "t/main:eng", "codex")
             launch = mp.build_launch("t/main:eng", td, "t/main:Boss", False, "m", "codex",
                                      role_bundle=bundle)
-            self.assertIn("--profile", shlex.split(launch))
+            # codex 0.144+ refuses to start with --profile and a [profiles.x] table in config.toml
+            self.assertNotIn("--profile", shlex.split(launch))
             self.assertIn("CODEX_HOME=", launch)
-            self.assertIn("developer_instructions", Path(bundle["settings_path"]).read_text())
             home = Path(bundle["codex_home"])
-            # --profile only resolves from CODEX_HOME's own config.toml; elsewhere it is ignored
+            # the role's instructions, top-level in the config codex reads, valid TOML whatever
+            # the role doc holds (a backslash or a triple quote)
             self.assertEqual(Path(bundle["settings_path"]), home / "config.toml")
+            config = tomllib.loads((home / "config.toml").read_text())
+            self.assertEqual(Path(bundle["startup_path"]).read_text(), config["developer_instructions"])
+            self.assertIn('C:\\work, never """ this', config["developer_instructions"])
             # #36: codex rejects any top-level key but "hooks" (and "description")
             hooks = json.loads((home / "hooks.json").read_text())
             self.assertEqual(list(hooks), ["hooks"])

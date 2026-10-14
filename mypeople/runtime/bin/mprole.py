@@ -324,7 +324,6 @@ def materialize_role(item, aid, backend, bundle_root):
     plugin_path = os.path.join(bp, "claude", "plugin")
     settings_path = None
     codex_home = os.path.join(bp, "codex", "home")
-    codex_profile = "mypeople-%s" % item["role"]
     grok_home = os.path.join(bp, "grok", "home")
 
     if backend == "claude":
@@ -352,12 +351,14 @@ def materialize_role(item, aid, backend, bundle_root):
         os.makedirs(codex_home, exist_ok=True)
         for name in ("auth.json", "sessions"):
             _link_home_entry(codex_home, name, "codex")
-        # generated profile config carrying the SAME startup bytes as additive developer_instructions.
-        # It must be CODEX_HOME's own config.toml: codex silently ignores a --profile it cannot find.
+        # the SAME startup bytes as additive developer_instructions, top-level in CODEX_HOME's own
+        # config.toml (the home is per-agent already). Not a --profile: a [profiles.x] table there is
+        # rejected at launch by codex 0.144+, and a profile anywhere else is silently ignored.
         settings_path = os.path.join(codex_home, "config.toml")
-        toml = ('[profiles.%s]\n# additive; never a replacement model_instructions_file\n'
-                'developer_instructions = """\n%s"""\n'
-                % (codex_profile, startup_text.replace('"""', '\\"\\"\\"')))
+        # A JSON string is a valid TOML basic string, so any backslash or quote in a role doc is
+        # escaped; a raw one would be a TOML error that stops codex at launch.
+        toml = ('# additive; never a replacement model_instructions_file\n'
+                'developer_instructions = %s\n' % json.dumps(startup_text, ensure_ascii=False))
         _write_ro(settings_path, toml)
     elif backend == "grok":
         # grok has no per-agent personality/skills FLAGS; it keys everything off GROK_HOME, so the
@@ -406,7 +407,7 @@ def materialize_role(item, aid, backend, bundle_root):
         "skills": [{"name": s["name"], "sha256": s["sha256"]} for s in item["skills"]],
         "bundle_path": bp, "startup_path": startup_path, "personality_path": personality_path,
         "plugin_path": plugin_path, "settings_path": settings_path,
-        "codex_home": codex_home, "codex_profile": codex_profile,
+        "codex_home": codex_home,
         "grok_home": grok_home,
         "startup_digest": startup_digest, "adapter_version": item["adapter_version"],
     }
@@ -440,7 +441,7 @@ def claude_flags(bundle):
 
 
 def codex_flags(bundle):
-    return ["--profile", bundle["codex_profile"]]
+    return []
 
 
 def grok_flags(bundle):
