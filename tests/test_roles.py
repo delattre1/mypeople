@@ -77,6 +77,23 @@ def load_mp(home):
             sys.path.remove(str(BIN))
 
 
+def setUpModule():
+    """codex and grok mounts link the operator's CLI login into the agent home and fail without
+    one: run the module against a throwaway HOME holding fake logins, never the real ones."""
+    global _HOME, _HOME_PATCH
+    _HOME = tempfile.TemporaryDirectory()
+    for cli in (".codex", ".grok"):
+        (Path(_HOME.name) / cli).mkdir()
+        (Path(_HOME.name) / cli / "auth.json").write_text("{}", encoding="utf-8")
+    _HOME_PATCH = mock.patch.dict(os.environ, {"HOME": _HOME.name})
+    _HOME_PATCH.start()
+
+
+def tearDownModule():
+    _HOME_PATCH.stop()
+    _HOME.cleanup()
+
+
 class RoleStoreTests(unittest.TestCase):
     def test_registry_points_at_profiles_that_exist(self):
         reg = json.loads((ROLES / "registry.json").read_text())
@@ -220,6 +237,26 @@ class RoleLaunchTests(unittest.TestCase):
             self.assertIn("--profile", shlex.split(launch))
             self.assertIn("CODEX_HOME=", launch)
             self.assertIn("developer_instructions", Path(bundle["settings_path"]).read_text())
+            home = Path(bundle["codex_home"])
+            # --profile only resolves from CODEX_HOME's own config.toml; elsewhere it is ignored
+            self.assertEqual(Path(bundle["settings_path"]), home / "config.toml")
+            # #36: codex rejects any top-level key but "hooks" (and "description")
+            hooks = json.loads((home / "hooks.json").read_text())
+            self.assertEqual(list(hooks), ["hooks"])
+            self.assertIn("emit-event.sh SessionStart",
+                          hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"])
+            # #34: the operator's login, linked, so the agent does not open on the sign-in screen
+            self.assertTrue((home / "auth.json").is_symlink())
+            self.assertTrue((home / "auth.json").samefile(Path.home() / ".codex" / "auth.json"))
+            # #37: ~/.codex/sessions did not exist; the link must still resolve to a real dir
+            self.assertTrue((home / "sessions").is_dir())
+
+    def test_codex_mount_without_a_login_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as bare:
+            mp = load_mp(td)
+            with mock.patch.dict(os.environ, {"HOME": bare}), \
+                 self.assertRaisesRegex(mp.mprole.RoleError, "codex/auth.json missing"):
+                mp.materialize_role(mp.resolve_role("engineer", "codex"), "t/main:eng", "codex")
 
     def test_grok_mounts_via_home_only(self):
         """grok has no personality/skills flags: everything rides on GROK_HOME.

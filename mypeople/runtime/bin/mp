@@ -256,14 +256,20 @@ def pane_looks_ready(aid):
 
 
 def pane_looks_working(aid):
-    """True when the pane shows an in-flight turn (do not reap as zombie)."""
+    """True when the pane shows an in-flight turn or a sign-in screen (do not reap as zombie).
+
+    A sign-in screen never reports a session, but a respawn kills the device-code login the
+    user may be finishing in it (delattre1/mypeople#35).
+    """
     try:
         pane = C.tmux_capture(C.tmux_target(aid), lines=80)
     except Exception:
         return False
     low = (pane or "").lower()
     return ("waiting for response" in low or "esc to interrupt" in low
-            or "ctrl+c:cancel" in low or "tokens" in low)
+            or "ctrl+c:cancel" in low or "tokens" in low
+            or "sign in with chatgpt" in low or "sign in with device code" in low
+            or "one-time code" in low or "select login method" in low)
 
 
 def wait_for_backend_ready(aid, timeout=None, interval=0.5):

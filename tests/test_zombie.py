@@ -149,6 +149,18 @@ class BirthZombieTests(unittest.TestCase):
         self.assertFalse(self.mp.is_birth_zombie(AID, {}, now=self.now))
 
 
+class SignInScreenTests(unittest.TestCase):
+    def test_a_pane_on_a_sign_in_screen_is_not_reaped(self):
+        """#35: a respawn every 90s threw away the device-code login being finished in the pane."""
+        with tempfile.TemporaryDirectory() as td:
+            mp = load_mp(td)
+            codex = ("Welcome to Codex, OpenAI's command-line coding agent\n"
+                     "> 1. Sign in with ChatGPT\n  2. Sign in with Device Code\n")
+            for pane, busy in ((codex, True), ("Select login method:", True), ("> ", False)):
+                with mock.patch.object(mp.C, "tmux_capture", return_value=pane):
+                    self.assertEqual(busy, mp.pane_looks_working(AID), pane)
+
+
 class ZombieReapCapTests(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()

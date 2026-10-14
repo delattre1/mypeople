@@ -198,6 +198,80 @@ class PollRoutingTests(unittest.TestCase):
         self.assertIn("comment:5", state["seen"])
 
 
+class NewIssueTests(unittest.TestCase):
+    """New issues in the watched searches reach the Boss (or the card that links them), once."""
+
+    ISSUE = "https://github.com/acme/app/issues/5"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.m = load(self.tmp.name)
+        env = mock.patch.dict(os.environ, {"HOST_ID": "node", "MYPEOPLE_CONFIG_PATH": "/nonexistent",
+                                           "GITHUB_ISSUES": "owner:acme; owner:other author:fleet"})
+        env.start()
+        self.addCleanup(env.stop)
+        self.issues = {"owner:acme": [self.issue(4)], "owner:other author:fleet": []}
+        self.sent, self.board = [], {"tasks": {}}
+        for name, fn in {
+            "open_prs": lambda author: [],
+            "search_issues": lambda query: list(self.issues[" ".join(query)]),
+            "fetch_board": lambda: self.board,
+            "deliver": lambda agent, text: (self.sent.append((agent, text)), True)[1],
+        }.items():
+            p = mock.patch.object(self.m, name, fn)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def issue(self, n, title="Codex starts unauthenticated"):
+        return {"repository": {"nameWithOwner": "acme/app"}, "number": n, "author": {"login": "aspen"},
+                "url": "https://github.com/acme/app/issues/%d" % n, "title": title, "body": "repro steps"}
+
+    def poll(self):
+        self.m.poll("fleet", self.m.load_state())
+
+    def test_a_new_issue_reaches_the_boss_once_and_the_backlog_never_does(self):
+        self.poll()                                   # bootstrap: #4 is backlog, silent
+        self.assertEqual([], self.sent)
+        self.issues["owner:acme"].insert(0, self.issue(5))
+        self.poll()
+        self.poll()
+        (agent, text), = self.sent
+        self.assertEqual("node/main:Boss", agent)
+        self.assertIn("[new issue] acme/app#5 by aspen: Codex starts unauthenticated — repro steps", text)
+        self.assertIn("no card on the board links this issue", text)
+
+    def test_an_issue_a_card_links_goes_to_that_card_owner(self):
+        self.poll()
+        self.board = {"tasks": {"a": card("node/main:eng-2", comments=[self.ISSUE])}}
+        self.issues["owner:acme"].insert(0, self.issue(5))
+        self.poll()
+        self.assertEqual(["node/main:eng-2"], [a for a, _ in self.sent])
+
+    def test_a_query_added_later_starts_silent_too(self):
+        self.poll()
+        with mock.patch.dict(os.environ, {"GITHUB_ISSUES": "owner:acme;owner:other author:fleet;org:new"}):
+            self.issues["org:new"] = [self.issue(7)]
+            self.poll()
+        self.assertEqual([], self.sent)
+
+    def test_a_failed_search_does_not_stop_the_others(self):
+        self.poll()
+        self.issues["owner:other author:fleet"] = [self.issue(9)]
+        def search(query):
+            if query == ["owner:acme"]:
+                raise RuntimeError("rate limited")
+            return list(self.issues[" ".join(query)])
+        with mock.patch.object(self.m, "search_issues", search):
+            self.poll()
+        self.assertEqual(["node/main:Boss"], [a for a, _ in self.sent])
+
+    def test_off_unless_configured(self):
+        with mock.patch.dict(os.environ, {"GITHUB_ISSUES": ""}), \
+                mock.patch.object(self.m, "search_issues", side_effect=AssertionError("searched")):
+            self.poll()
+
+
 class WiringTests(unittest.TestCase):
     def test_supervise_starts_it_only_when_turned_on(self):
         sup = (ROOT / "mypeople" / "runtime" / "bin" / "supervise.sh").read_text()

@@ -211,16 +211,20 @@ def _safe_aid(aid):
     return re.sub(r"[^A-Za-z0-9._-]", "_", aid)
 
 
-def _link_grok_home_entry(grok_home, name):
-    """Symlink ~/.grok/<name> into a per-agent GROK_HOME, promoting private auth first.
+def _link_home_entry(home, name, cli):
+    """Symlink ~/.<cli>/<name> into a per-agent GROK_HOME/CODEX_HOME, promoting private auth first.
 
-    auth.json is load-bearing. Grok may unlink the symlink and write a private auth.json into
-    GROK_HOME during device-login; we must never discard a newer private token (root cause of the
-    "Boss opens as Grok unauthenticated" flap: the old loop os.remove()'d the fresh token and
+    auth.json is load-bearing. The CLI may unlink the symlink and write a private auth.json into
+    the agent home during device-login; we must never discard a newer private token (root cause of
+    the "Boss opens as Grok unauthenticated" flap: the old loop os.remove()'d the fresh token and
     re-linked the stale one on every respawn). Card f6339b85a2.
     """
-    src = os.path.expanduser("~/.grok/%s" % name)
-    dst = os.path.join(grok_home, name)
+    src = os.path.expanduser("~/.%s/%s" % (cli, name))
+    dst = os.path.join(home, name)
+    if name == "sessions":
+        # a link to a missing dir dangles, and the CLI then fails every transcript save with
+        # EEXIST (delattre1/mypeople#37); ensure the real dir so the link always resolves
+        os.makedirs(src, exist_ok=True)
     if name == "auth.json" and os.path.lexists(dst) and (not os.path.islink(dst)) and os.path.isfile(dst):
         try:
             promote = False
@@ -237,29 +241,30 @@ def _link_grok_home_entry(grok_home, name):
                 os.replace(tmp, src)
                 os.chmod(src, 0o600)
         except OSError as e:
-            raise RoleError("failed to promote private GROK_HOME auth.json into ~/.grok: %s" % e)
+            raise RoleError("failed to promote private %s auth.json into ~/.%s: %s" % (home, cli, e))
     if os.path.lexists(dst):
         try:
             os.remove(dst)
         except OSError as e:
             if name == "auth.json":
-                raise RoleError("cannot replace GROK_HOME auth.json with symlink: %s" % e)
+                raise RoleError("cannot replace %s/auth.json with symlink: %s" % (home, e))
             return
     if not os.path.exists(src):
         if name == "auth.json":
             raise RoleError(
-                "operator ~/.grok/auth.json missing — run `grok` once outside MyPlow and "
-                "complete login, then re-spawn the Grok Boss")
+                "operator ~/.%s/auth.json missing — run `%s` once outside MyPlow and "
+                "complete login, then re-spawn the agent" % (cli, cli))
         return
     try:
         os.symlink(src, dst)
     except OSError as e:
         if name == "auth.json":
-            raise RoleError("cannot symlink GROK_HOME auth.json -> ~/.grok/auth.json: %s" % e)
+            raise RoleError("cannot symlink %s/auth.json -> ~/.%s/auth.json: %s" % (home, cli, e))
         return
     if name == "auth.json":
         if not os.path.islink(dst) or not os.path.samefile(dst, src):
-            raise RoleError("GROK_HOME auth.json is not a live symlink to ~/.grok/auth.json after mount")
+            raise RoleError("%s/auth.json is not a live symlink to ~/.%s/auth.json after mount"
+                            % (home, cli))
 
 
 def _write_ro(path, data):
@@ -313,6 +318,8 @@ def materialize_role(item, aid, backend, bundle_root):
             pass
     events = sorted(set(events))
     handler_abs = os.path.join(os.path.dirname(item["role_dir"]), handler)
+    hooks = {ev: [{"hooks": [{"type": "command", "command": "%s %s" % (handler_abs, ev)}]}]
+             for ev in events}
 
     plugin_path = os.path.join(bp, "claude", "plugin")
     settings_path = None
@@ -332,28 +339,22 @@ def materialize_role(item, aid, backend, bundle_root):
         # ORs skipDangerousModePermissionPrompt across user/local/flag/policy settings before it
         # decides whether to block on the Bypass Permissions modal, so declaring it here makes a
         # role-mounted spawn self-sufficient even if ~/.claude was never seeded (card 293fc81898).
-        overlay = {"skipDangerousModePermissionPrompt": True,
-                   "hooks": {ev: [{"hooks": [{"type": "command",
-                                              "command": "%s %s" % (handler_abs, ev)}]}]
-                             for ev in events}}
+        overlay = {"skipDangerousModePermissionPrompt": True, "hooks": hooks}
         _write_ro(settings_path, json.dumps(overlay, indent=2))
     elif backend == "codex":
         for s in item["skills"]:
             _write_ro(os.path.join(codex_home, "skills", s["name"], "SKILL.md"), s["bytes"])
-        _write_ro(os.path.join(codex_home, "hooks.json"),
-                  json.dumps({"events": events, "handler": handler_abs}, indent=2))
-        # reference the user's existing codex session dir (never copy credential bytes)
-        sessions_link = os.path.join(codex_home, "sessions")
+        # codex takes claude's hook shape under a top-level "hooks" key; anything else is rejected
+        # at startup and no hook runs (delattre1/mypeople#36)
+        _write_ro(os.path.join(codex_home, "hooks.json"), json.dumps({"hooks": hooks}, indent=2))
+        # CODEX_HOME is codex's whole home, like GROK_HOME: a bare one opens on the sign-in screen
+        # (#34). Link the operator's login and session dir -- never copied bytes.
         os.makedirs(codex_home, exist_ok=True)
-        if os.path.islink(sessions_link) or os.path.exists(sessions_link):
-            try: os.remove(sessions_link)
-            except OSError: pass
-        try:
-            os.symlink(os.path.expanduser("~/.codex/sessions"), sessions_link)
-        except OSError:
-            pass
-        # generated profile config carrying the SAME startup bytes as additive developer_instructions
-        settings_path = os.path.join(bp, "codex", "config.toml")
+        for name in ("auth.json", "sessions"):
+            _link_home_entry(codex_home, name, "codex")
+        # generated profile config carrying the SAME startup bytes as additive developer_instructions.
+        # It must be CODEX_HOME's own config.toml: codex silently ignores a --profile it cannot find.
+        settings_path = os.path.join(codex_home, "config.toml")
         toml = ('[profiles.%s]\n# additive; never a replacement model_instructions_file\n'
                 'developer_instructions = """\n%s"""\n'
                 % (codex_profile, startup_text.replace('"""', '\\"\\"\\"')))
@@ -379,7 +380,7 @@ def materialize_role(item, aid, backend, bundle_root):
         # -- symlinks, never copied bytes, so credentials are never duplicated into the bundle and
         # a token refresh writes through to the one real auth.json.
         for name in _GROK_HOME_LINKS:
-            _link_grok_home_entry(grok_home, name)
+            _link_home_entry(grok_home, name, "grok")
         # A per-agent home starts with no config, which would re-arm the project picker that
         # swallows the first message (see mp.grok_pretrust) and drop the operator's
         # permission_mode -- a mounted Boss would hang on an approval prompt. Carry the operator's

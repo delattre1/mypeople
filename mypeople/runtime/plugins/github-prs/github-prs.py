@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""GitHub PR watcher: reviews and comments on the fleet's open PRs reach the agent that owns them.
+"""GitHub PR watcher: reviews and comments on the fleet's open PRs reach the agent that owns them,
+and new issues in the fleet's repos reach the Boss.
 
 Without this, an engineer opens a PR, requests a review, and never hears the verdict: nothing in
 the fleet reads GitHub. Every poll this finds the open PRs authored by the fleet's GitHub login,
@@ -7,6 +8,10 @@ and delivers each NEW comment, review or inline review comment with `mp send` to
 board card links that PR -- so the engineer who opened it reacts to its own review. When one of
 those PRs leaves the open list, its owner hears whether it was merged or closed. A PR no card
 links, or whose owner is gone, goes to the Boss.
+
+New issues are announced only for the gh search queries in GITHUB_ISSUES (";"-separated, any
+author unless the query says otherwise). Each one goes to the agent whose card links it, else the
+Boss. A query's first poll records the issues it already matches without sending them.
 
 Someone else's PR is not watched unless asked: `watch` adds one (a PR the fleet took over) and
 names the agent that hears it; the watch ends by itself when the PR is merged or closed.
@@ -16,6 +21,7 @@ Turn it on in ~/.config/mypeople/queue.env, then restart the daemons:
     export GITHUB_PRS=1
     export GITHUB_PRS_AUTHOR="your-github-login"   # optional: default is whoever `gh` is logged in as
     export GITHUB_PRS_INTERVAL=60                  # optional: seconds between polls
+    export GITHUB_ISSUES="owner:your-login"        # optional: announce new issues in these searches
 
 Needs the `gh` CLI logged in. The first time a PR is seen its existing comments are recorded
 without being sent, so turning this on never replays a PR's history at anyone.
@@ -51,6 +57,7 @@ INTERVAL = int(os.environ.get("GITHUB_PRS_INTERVAL") or 60)
 FULL_SWEEP_SECS = 30 * 60   # updatedAt does not move for every event (a body-less approve), so recheck all
 SEARCH_LIMIT = 100          # gh search's ceiling; hitting it is logged, never silent
 SNIPPET = 400
+ISSUE_LIMIT = 50            # newest first: only a burst of more new issues than this between polls is missed
 # Catch-up reaches back this far by default; --days overrides it, 0 means no limit.
 CATCHUP_MAX_AGE_DAYS = int(os.environ.get("GITHUB_PRS_CATCHUP_DAYS") or 30)
 GH_TIMEOUT = 60
@@ -133,6 +140,16 @@ def pr_outcome(repo, n):
     return {"state": p.get("state") or "", "by": (p.get("mergedBy") or {}).get("login") or ""}
 
 
+def issue_queries():
+    return [q.split() for q in cfg("GITHUB_ISSUES").split(";") if q.strip()]
+
+
+def search_issues(query):
+    """The newest issues matching one search query (a list of qualifiers), open or already closed."""
+    return gh("search", "issues", *query, "--sort", "created", "--order", "desc",
+              "--limit", str(ISSUE_LIMIT), "--json", "repository,number,url,author,title,body")
+
+
 def pr_events(repo, n):
     """Comments, inline review comments and reviews on one PR, each with a stable key."""
     out = []
@@ -176,6 +193,22 @@ def fresh_events(pr_key, events, state):
     return [e for e in new if not is_noise(e)]
 
 
+def fresh_issues(query, issues, state):
+    """Issues not announced before, recording all as seen. A query's first poll is silent."""
+    seen = set(state.setdefault("seen", []))
+    known = state.setdefault("issue_queries", [])
+    events = [{"key": "issue:%s#%d" % (i["repository"]["nameWithOwner"], i["number"]), "kind": "issue",
+               "repo": i["repository"]["nameWithOwner"], "n": i["number"],
+               "user": (i.get("author") or {}).get("login", "?"),
+               "body": "%s — %s" % (i.get("title") or "", i.get("body") or ""), "state": "", "url": i["url"]}
+              for i in issues]
+    state["seen"] = sorted(seen | {e["key"] for e in events})
+    if " ".join(query) not in known:
+        known.append(" ".join(query))
+        return []
+    return [e for e in events if e["key"] not in seen]
+
+
 def owner_for_pr(board, pr_url):
     """The assignee of the most recently updated card that links this PR, or "".
 
@@ -206,15 +239,19 @@ def format_event(repo, n, event, owned, orphan=False):
     verdict = event["state"].lower().replace("_", " ") if event["kind"] == "review" else ""
     what = {"review": "review", "review_comment": "inline review comment",
             "merged": "merged", "closed": "closed"}.get(event["kind"], "comment")
-    head = "[PR %s] %s#%d%s by %s" % (what, repo, n, " (your PR)" if owned else "", event["user"])
+    noun = "issue" if event["kind"] == "issue" else "PR"
+    if noun == "issue":
+        head = "[new issue] %s#%d by %s" % (repo, n, event["user"])
+    else:
+        head = "[PR %s] %s#%d%s by %s" % (what, repo, n, " (your PR)" if owned else "", event["user"])
     if verdict:
         head += " — %s" % verdict
     tail = ""
     if orphan:
         # Landing on the Boss with nobody owning it is how a review goes unanswered: it reads as
         # one more line among everything else the Boss is told. Say what to do with it.
-        tail = (" — no card on the board links this PR, so nobody owns it: give it to an agent"
-                " or handle it yourself.")
+        tail = (" — no card on the board links this %s, so nobody owns it: give it to an agent"
+                " or handle it yourself." % noun)
     if event["kind"] in ("merged", "closed"):
         return "%s: %s%s" % (head, event["url"], tail)
     return "%s: %s %s%s" % (head, body or "(no text)", event["url"], tail)
@@ -347,6 +384,14 @@ def poll(author, state):
         save_watch(fresh)
     if full:
         state["last_full_sweep"] = now
+    for query in issue_queries():
+        try:
+            issues = search_issues(query)
+        except RuntimeError as e:
+            log("skip issues %s: %s" % (" ".join(query), e))
+            continue
+        for e in fresh_issues(query, issues, state):
+            outbox.append((e["repo"], e["n"], e["url"], e))
     board = None
     if outbox:
         try:
@@ -461,6 +506,7 @@ def main(argv):
         watch = load_watch()
         prs = watched_prs(author, watch)
         print("watching %d open PRs: by %s, plus %d on request" % (len(prs), author, len(watch)))
+        print("new issues announced for: %s" % ("; ".join(" ".join(q) for q in issue_queries()) or "nothing (GITHUB_ISSUES unset)"))
         for repo, n, _, url in prs:
             agent, owned = route(board, url, watch.get("%s#%d" % (repo, n), {}).get("agent", ""))
             print("  %s#%d -> %s%s" % (repo, n, agent, "" if owned else "  (no card links it)"))
