@@ -195,6 +195,20 @@ def claude_pids():
                               text=True).stdout.split())
 
 
+def proc_view(pid):
+    """(command line, CLAUDE_CODE_OAUTH_TOKEN) of one of this user's processes: /proc on Linux, and
+    `ps -E` where there is no /proc (a Mac install), which prints the command followed by its env."""
+    try:
+        cmd = Path("/proc/%s/cmdline" % pid).read_bytes().replace(b"\0", b" ")
+        env = dict(l.split(b"=", 1) for l in Path("/proc/%s/environ" % pid).read_bytes().split(b"\0") if b"=" in l)
+        return cmd, env.get(b"CLAUDE_CODE_OAUTH_TOKEN", b"")
+    except OSError:
+        pass
+    out = subprocess.run(["ps", "-E", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True).stdout
+    m = re.search(rb"(?:^|\s)CLAUDE_CODE_OAUTH_TOKEN=(\S*)", out)
+    return out, m.group(1) if m else b""
+
+
 def boss_on(token, session_id, before, wait=180):
     """True once a NEW claude process (not one of `before`) runs on `token`, resumed on `session_id`.
     A process from before the restart never counts: it would pass when old and new are one login."""
@@ -202,12 +216,8 @@ def boss_on(token, session_id, before, wait=180):
     end = time.time() + wait
     while time.time() < end:
         for pid in claude_pids() - before:
-            try:
-                cmd = Path("/proc/%s/cmdline" % pid).read_bytes().split(b"\0")
-                env = dict(l.split(b"=", 1) for l in Path("/proc/%s/environ" % pid).read_bytes().split(b"\0") if b"=" in l)
-            except OSError:
-                continue
-            if session_id.encode() in cmd and hashlib.sha256(env.get(b"CLAUDE_CODE_OAUTH_TOKEN", b"")).hexdigest() == want:
+            cmd, tok = proc_view(pid)
+            if session_id.encode() in cmd and hashlib.sha256(tok).hexdigest() == want:
                 return True
         time.sleep(3)
     return False
@@ -251,6 +261,23 @@ def rotate(lease, rot, old_token):
     return old_token
 
 
+def regain(lease, token):
+    """The pool dropped this lease (no heartbeat for its TTL: the machine slept or lost the network),
+    so its login may already be lent to someone else. Take a lease again at once: the same login back
+    is kept as is; any other one is moved to like a rotation, so no login is ever used unleased."""
+    code, out = call("/checkout", {})
+    if code != 200 or not out.get("token"):
+        log("lease gone and no login free (%s): still on %s, which may be lent to someone else"
+            % (code, lease.get("account")), beacon=True)
+        return token
+    if out["token"] == token:
+        write_lease({"lease_id": out["lease_id"], "account": out["account"], "started": time.time()})
+        log("lease gone; took %s back" % out["account"], beacon=True)
+        return token
+    log("lease gone; %s may be lent to someone else, moving to %s" % (lease.get("account"), out["account"]), beacon=True)
+    return rotate(lease, out, token)
+
+
 def still_mine(own=OWN, root=ROOT, ppid=None):
     """This loop belongs to the release that started it. A switch or rollback stops run.sh with a
     signal, so run.sh never kills its own helpers, and the VM's entrypoint (never updated) only stops
@@ -275,7 +302,7 @@ def loop():
         usage, limit = seen_since(lease.get("started", time.time()))
         code, out = call("/heartbeat", {"lease_id": lease["lease_id"], "usage": usage, "limit_hit": limit})
         if code == 410:
-            log("lease gone: %s may be lent to someone else now" % lease.get("account"), beacon=True)
+            token = regain(lease, token)
         elif out.get("rotate") and time.time() < lease.get("retry_at", 0):
             call("/return", {"lease_id": out["rotate"]["lease_id"]})   # backing off: don't sit on a reservation
         elif out.get("rotate"):

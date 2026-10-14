@@ -84,3 +84,47 @@ class OnlyItsOwnRelease(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LapsedLease(unittest.TestCase):
+    """A holder that missed heartbeats for LEASE_TTL (a Mac asleep, a network gap) lost its lease, so its
+    login may be lent to someone else. It must take a lease again at once, never keep the login unleased."""
+
+    def setUp(self):
+        d = Path(tempfile.mkdtemp())
+        self.saved = pl.LEASE, pl.call, pl.rotate
+        pl.LEASE = d / "lease.json"
+        self.rotated = []
+        pl.rotate = lambda lease, rot, token: self.rotated.append((lease, rot, token)) or rot["token"]
+
+    def tearDown(self):
+        pl.LEASE, pl.call, pl.rotate = self.saved
+
+    def test_the_same_login_back_is_kept_without_a_restart(self):
+        pl.call = lambda path, body: (200, {"lease_id": "L2", "account": "plow-1", "token": "T"})
+        self.assertEqual(pl.regain({"lease_id": "L1", "account": "plow-1"}, "T"), "T")
+        self.assertEqual(self.rotated, [])
+        self.assertEqual(pl.read_lease()["lease_id"], "L2")
+
+    def test_another_login_moves_every_agent_to_it(self):
+        pl.call = lambda path, body: (200, {"lease_id": "L2", "account": "dogfood-3", "token": "U"})
+        self.assertEqual(pl.regain({"lease_id": "L1", "account": "plow-1"}, "T"), "U")
+        self.assertEqual(self.rotated[0][1]["account"], "dogfood-3")
+
+
+class SeesTheBossWithoutProc(unittest.TestCase):
+    """The proof a move worked is a new Claude on the new login; macOS has no /proc, so `ps -E` reads it."""
+
+    def test_reads_command_line_and_login_of_a_live_process(self):
+        import subprocess
+        import sys
+        # Not /bin/sh: macOS hides a system binary's env from `ps -E`; Claude Code is not one.
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "sess-4242"],
+                             env=dict(os.environ, CLAUDE_CODE_OAUTH_TOKEN="tok-1"))
+        try:
+            time.sleep(0.3)
+            cmd, tok = pl.proc_view(p.pid)
+            self.assertIn(b"sess-4242", cmd)
+            self.assertEqual(tok, b"tok-1")
+        finally:
+            p.kill()
