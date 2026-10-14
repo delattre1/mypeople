@@ -1,18 +1,25 @@
 """Plow Chat plugin (card f864c568e6): the owner's iMessages reach the Boss exactly once.
 
-The bridge polls, so what must hold: turning it on never replays history at the Boss, each
-new message is delivered once, and a failed delivery is retried instead of skipped.
+What must hold: turning it on never replays history at the Boss, each new message is
+delivered once, and a failed delivery is retried instead of skipped. The bridge holds Plow's
+websocket (card 5b125624f8), so the same holds across a dropped socket.
 """
+import base64
+import hashlib
 import importlib.machinery
 import importlib.util
 from datetime import timedelta
+import json
 import os
 import re
 import shlex
+import socket
 import subprocess
 import sys
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -271,7 +278,7 @@ class PlowChatTest(unittest.TestCase):
         self.pc.send_to_boss = lambda m: False
         self.pc.STARTED -= 300  # a bridge that has been up a while
         with mock.patch.object(self.pc, "send_message") as warn:
-            self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 0)
+            self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), -1)  # still waiting
         warn.assert_called_once()  # the sender hears it did not land
         self.pc.send_to_boss = lambda m: self.sent.append(m) or True
         self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
@@ -297,6 +304,76 @@ class PlowChatTest(unittest.TestCase):
         self.pc.send_to_boss = lambda m: self.sent.append(m) or True
         self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
 
+
+    def test_the_socket_routes_at_once_and_a_reconnect_drops_and_repeats_nothing(self):
+        """A ping is answered and a frame routes its chat at once; a text sent while the socket was
+        down arrives by the catch-up on reconnect; a fragmented frame is joined; nothing twice."""
+        srv = socket.create_server(("127.0.0.1", 0))
+        self.addCleanup(srv.close)
+        self.pc.BASE = f"http://127.0.0.1:{srv.getsockname()[1]}"
+        self.pc.api = lambda m, p, body=None, token=None: (
+            (201, {"ticket": "t"}) if p == "/v1/ws/ticket"
+            else (200, {"data": [{"uid": "cht_a"}]}) if p == "/v1/chats" else (200, {"data": self.msgs}))
+        self.pc.poll_chat(self.creds, "cht_a")  # m1 is history
+        msg = lambda uid: {"uid": uid, "direction": "inbound", "body": f"text {uid}",
+                           "chat_uid": "cht_a", "created_at": uid}
+        frame = lambda op, data, fin=0x80: bytes([fin | op]) + (  # an event needs the 16-bit length
+            bytes([len(data)]) if len(data) < 126 else bytes([126]) + len(data).to_bytes(2, "big")) + data
+        event = lambda uid: json.dumps({"event_type": "message_received", "chat_id": "cht_a",
+                                        "data": {"message": msg(uid)}}).encode()
+        pong, caught_up = [], []
+
+        def accept():
+            c, _ = srv.accept()
+            req = b""
+            while b"\r\n\r\n" not in req:
+                req += c.recv(4096)
+            key = re.search(rb"Sec-WebSocket-Key: (\S+)", req).group(1)
+            ok = base64.b64encode(hashlib.sha1(key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
+            c.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade"
+                      b"\r\nSec-WebSocket-Accept: " + ok + b"\r\n\r\n" + frame(0x1, b'{"type": "connected"}'))
+            return c
+
+        def server():
+            c = accept()
+            c.sendall(frame(0x9, b"hb"))
+            pong.append(c.recv(64))       # answered: the bridge is past its catch-up, listening
+            self.msgs.append(msg("m2"))
+            c.sendall(frame(0x1, event("m2")))
+            time.sleep(0.3)
+            c.close()                     # the socket drops,
+            self.msgs.append(msg("m3"))   # a text lands meanwhile and its frame is never sent;
+            c = accept()
+            for _ in range(50):           # the catch-up on reconnect is the only way it can arrive
+                if len(self.sent) >= 2:
+                    break
+                time.sleep(0.1)
+            caught_up.append(len(self.sent))
+            self.msgs.append(msg("m4"))   # a new text's frame comes in two fragments, then m2's again
+            c.sendall(frame(0x1, event("m4")[:9], 0) + frame(0x0, event("m4")[9:]) + frame(0x1, event("m2")))
+            time.sleep(0.3)
+            c.close()
+
+        class Stop(Exception):
+            pass
+        opened, real = [], self.pc.open_socket
+
+        def open_socket(creds):
+            opened.append(1)
+            if len(opened) > 2:
+                raise Stop
+            return real(creds)
+        self.pc.open_socket = open_socket
+        threading.Thread(target=server, daemon=True).start()
+        bridge = threading.Thread(target=lambda: self.assertRaises(Stop, self.pc.bridge_loop, self.creds),
+                                  daemon=True)
+        bridge.start()
+        bridge.join(20)
+        self.assertFalse(bridge.is_alive())
+        self.assertEqual([2], caught_up)  # m3 came by the catch-up, before any frame after it
+        self.assertEqual(["text m2", "text m3", "text m4"], [re.search(r"text m\d", m).group() for m in self.sent])
+        head, mask, data = pong[0][:2], pong[0][2:6], pong[0][6:]
+        self.assertEqual((b"\x8a\x82", b"hb"), (head, bytes(c ^ mask[i % 4] for i, c in enumerate(data))))
 
 
 class CloudTest(unittest.TestCase):

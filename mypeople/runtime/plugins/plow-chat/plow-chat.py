@@ -25,16 +25,27 @@ In a Plow cloud agent (PLOW_API_BASE set, no saved login) there is nothing to
 activate: the VM's own line is the chat, the token comes from the environment
 (or the "proxied" placeholder the exe.dev proxy swaps for the real one), and
 the chats come from GET /v1/agents/cloud/me.
+
+The bridge holds Plow's account websocket (POST /v1/ws/ticket, then /v1/ws): a frame
+says which chat changed and that chat is read at once. Every (re)connect, and every
+minute, a pass over all chats catches whatever the socket missed; while the socket
+is down the bridge polls every PLOW_CHAT_POLL_SECONDS.
 """
+import base64
+import hashlib
+import http.client
 import json
 import mimetypes
 import os
 import shlex
+import socket
+import ssl
 import subprocess
 import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,11 +62,12 @@ STATE = STATE_DIR / "state.json"          # {"marks": {chat: [created_at, uid]},
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
-# ponytail: polls every chat each POLL_SECONDS instead of holding Plow's
-# websocket, so the plugin needs no dependency beyond the stdlib. Ceiling: a
-# text lands up to POLL_SECONDS late and each pass costs 1 + chats requests;
-# upgrade path is the account websocket (POST /v1/ws/ticket) via `websockets`.
+# A pass over every chat runs on each (re)connect, every SWEEP_SECONDS on a live socket (Plow's
+# events are best-effort, so a frame can go missing), and every POLL_SECONDS while the socket is
+# down or a text waits on the Boss.
 POLL_SECONDS = float(os.environ.get("PLOW_CHAT_POLL_SECONDS", "5"))
+SWEEP_SECONDS = 60
+PING_SECONDS = 30  # a socket that answered nothing for two of these is dead, whatever TCP says
 SELF = str(Path(__file__).resolve())
 # How the Boss runs this plugin. A second bridge, on another Plow account or another Plow-shaped
 # server (a WhatsApp number's whatsapp-linq-api), runs with its own state dir and base URL; the
@@ -71,12 +83,17 @@ def log(msg: str):
           flush=True)
 
 
+READER = []  # this process's one kept-alive connection for reads
+
+
 def api(method: str, path: str, body=None, token=None, timeout=20):
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(f"{BASE}{path}", data=data, method=method)
-    req.add_header("Content-Type", "application/json")
+    headers = {"Content-Type": "application/json"}
     if token:
-        req.add_header("Authorization", f"Bearer {token}")
+        headers["Authorization"] = f"Bearer {token}"
+    if method == "GET":
+        return read(path, headers, timeout)
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"{BASE}{path}", data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read() or b"{}")
@@ -85,6 +102,32 @@ def api(method: str, path: str, body=None, token=None, timeout=20):
             return e.code, json.loads(e.read() or b"{}")
         except ValueError:
             return e.code, {}
+
+
+def read(path: str, headers: dict, timeout: float):
+    """GET over one kept-alive connection: a fresh TLS handshake per read was ~1s of every text's
+    wait. Only reads reuse it, because only a read is safe to resend when the server closed the
+    idle connection under it."""
+    u = urllib.parse.urlsplit(BASE)
+    for retry in (False, True):
+        if not READER:
+            conn = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+            READER.append(conn(u.netloc, timeout=timeout))
+        try:
+            READER[0].request("GET", u.path + path, headers=headers)
+            r = READER[0].getresponse()
+            raw = r.read()
+            break
+        except (OSError, http.client.HTTPException) as e:
+            READER.pop().close()
+            if retry:
+                raise OSError(f"GET {path}: {e!r}") from e
+    try:
+        return r.status, json.loads(raw or b"{}")
+    except ValueError:
+        if r.status < 400:
+            raise
+        return r.status, {}
 
 
 def read_json(p: Path, default):
@@ -473,6 +516,7 @@ def list_chats(creds: dict) -> list:
 def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
     """Route new messages in one chat, seeding it silently the first time.
 
+    Returns how many it routed, or -1 while one still waits (the read or the Boss failed).
     Seeding is per chat: a group joined months in carries its own history, and
     replaying it would hand the Boss a fake inbox. Only chats already there when
     the bridge starts are seeded; one that appears while it runs was started by
@@ -481,7 +525,7 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
     status, data = api("GET", f"/v1/chats/{chat_uid}/messages", token=creds["token"])
     if status >= 400:
         log(f"read failed {chat_uid} {status}: {json.dumps(data)[:160]}")
-        return 0
+        return -1
     msgs = listing(data)
     with STATE_LOCK:
         st = read_json(STATE, {})
@@ -524,22 +568,148 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
         if not r.startswith("skip"):
             log(r)
         if r.startswith("ERROR"):
-            break  # routing a newer one would move the mark past this one, and it would be lost
+            return -1  # routing a newer one would move the mark past this one, and it would be lost
         routed += r.startswith("ROUTE")
     return routed
 
 
+def sweep(creds: dict, seed: bool = False) -> bool:
+    """One pass over every chat; False while a text still waits on the Boss."""
+    return min([poll_chat(creds, uid, seed) for uid in list_chats(creds)], default=0) >= 0
+
+
+class WebSocket:
+    """Just enough RFC 6455 on the stdlib for Plow's event socket: text in, pings both ways.
+
+    No extension is offered, so frames come uncompressed; fragments are joined; a ping is answered;
+    a close frame raises. The server speaks first with {"type": "connected"}: a ticket it refuses
+    is accepted and then closed with 4401, which raises here.
+    """
+
+    def __init__(self, url: str, timeout: float = 15):
+        u = urllib.parse.urlsplit(url)
+        sock = socket.create_connection((u.hostname, u.port or (443 if u.scheme == "wss" else 80)),
+                                        timeout)
+        if u.scheme == "wss":
+            sock = ssl.create_default_context().wrap_socket(sock, server_hostname=u.hostname)
+        self.sock, self.buf, self.parts, self.heard = sock, b"", b"", time.time()
+        key = base64.b64encode(os.urandom(16)).decode()
+        sock.sendall(f"GET {u.path}?{u.query} HTTP/1.1\r\nHost: {u.netloc}\r\n"
+                     f"Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
+                     f"Sec-WebSocket-Version: 13\r\n\r\n".encode())
+        while b"\r\n\r\n" not in self.buf:
+            self._fill()
+        head, self.buf = self.buf.split(b"\r\n\r\n", 1)
+        accept = base64.b64encode(hashlib.sha1(
+            (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest())
+        if not head.startswith(b"HTTP/1.1 101") or accept not in head:
+            raise OSError(f"websocket refused: {head.splitlines()[0][:100]!r}")
+        first = self.recv(timeout)
+        if json.loads(first or "{}").get("type") != "connected":
+            raise OSError(f"websocket opened without connected: {first!r:.100}")
+
+    def _fill(self):
+        chunk = self.sock.recv(65536)
+        if not chunk:
+            raise OSError("websocket closed by the server")
+        self.buf += chunk
+        self.heard = time.time()
+
+    def recv(self, timeout: float):
+        """The next text message, or None when none came within `timeout`. Raises once closed."""
+        self.sock.settimeout(timeout)
+        while True:
+            b = self.buf
+            n, at = (b[1] & 0x7F, 2) if len(b) >= 2 else (0, 2)
+            if n > 125:
+                at = 4 if n == 126 else 10
+                n = int.from_bytes(b[2:at], "big") if len(b) >= at else 0
+            if len(b) < 2 or len(b) < at + n:  # a frame not yet whole: read more, keep what came
+                try:
+                    self._fill()
+                except socket.timeout:
+                    return None
+                continue
+            op, fin, data, self.buf = b[0] & 0x0F, b[0] & 0x80, b[at:at + n], b[at + n:]
+            if op == 0x9:
+                self.send(0xA, data)
+            elif op == 0x8:
+                raise OSError(f"websocket closed {int.from_bytes(data[:2], 'big')} "
+                              f"{data[2:].decode(errors='replace')}")
+            elif op in (0x0, 0x1, 0x2):
+                self.parts += data
+                if fin:
+                    text, self.parts = self.parts.decode(), b""
+                    return text
+
+    def send(self, op: int, data: bytes = b""):
+        """One control frame (ping 0x9, pong 0xA): 125 bytes at most, masked like every client frame."""
+        mask = os.urandom(4)
+        self.sock.sendall(bytes([0x80 | op, 0x80 | len(data)]) + mask
+                          + bytes(c ^ mask[i % 4] for i, c in enumerate(data)))
+
+
+def open_socket(creds: dict) -> WebSocket:
+    # No chat_id: an account ticket carries every chat, a group made after it connected included.
+    status, data = api("POST", "/v1/ws/ticket", {}, token=creds["token"])
+    if status >= 400 or not data.get("ticket"):
+        raise OSError(f"ws ticket {status}: {json.dumps(data)[:160]}")
+    return WebSocket(f"{BASE.replace('http', 'ws', 1)}/v1/ws?ticket={urllib.parse.quote(data['ticket'])}")
+
+
+def listen(creds: dict, ws: WebSocket, due: float):
+    """Read each chat the moment a frame says it changed, until the socket dies (it raises).
+
+    A frame only names the chat: the read routes through the same marks as a pass, so the text of
+    a frame the server dropped still arrives, in order, with the next frame or pass.
+    """
+    ping = time.time() + PING_SECONDS
+    while True:
+        raw = ws.recv(max(0.05, min(due, ping) - time.time()))
+        if raw is not None:
+            event = json.loads(raw)
+            chat = event.get("chat_id")
+            # Delivery receipts of the Boss's own replies change nothing to route.
+            if chat and event.get("event_type") != "message_status_updated" \
+                    and poll_chat(creds, chat, False) < 0:
+                due = min(due, time.time() + POLL_SECONDS)
+        now = time.time()
+        if now >= due:
+            due = now + (SWEEP_SECONDS if sweep(creds) else POLL_SECONDS)
+        if now >= ping:
+            if now - ws.heard > 2 * PING_SECONDS:
+                raise OSError(f"websocket silent for {now - ws.heard:.0f}s")
+            ws.send(0x9)
+            ping = now + PING_SECONDS
+
+
 def bridge_loop(creds: dict):
     log(f"bridge up, routing to {BOSS_AGENT}")
-    seed = True
+    seed, fails, retry_at = True, 0, 0.0
     while True:
+        ws = None
+        if time.time() >= retry_at:
+            try:
+                ws = open_socket(creds)
+                fails = 0
+                log("websocket connected")
+            except (OSError, ValueError) as e:
+                fails += 1
+                retry_at = time.time() + min(POLL_SECONDS * 2 ** fails, 300)
+                log(f"websocket down ({e}); polling every {POLL_SECONDS:g}s until it is back")
         try:
-            for uid in list_chats(creds):
-                poll_chat(creds, uid, seed)
+            # After connecting, so a text sent during this catch-up also comes as a frame (the marks
+            # make that second sight a no-op). Without a socket, this pass is the whole bridge.
+            ok = sweep(creds, seed)
             seed = False
+            if ws:
+                listen(creds, ws, time.time() + (SWEEP_SECONDS if ok else POLL_SECONDS))
         except (OSError, ValueError) as e:
-            log(f"poll error: {e}")
-        time.sleep(POLL_SECONDS)
+            log(f"websocket lost: {e}" if ws else f"poll error: {e}")
+        finally:
+            if ws:
+                ws.sock.close()
+        time.sleep(1 if ws else POLL_SECONDS)
 
 
 HELP = ("-h", "--help")
