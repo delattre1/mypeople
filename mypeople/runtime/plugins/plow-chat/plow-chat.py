@@ -57,10 +57,11 @@ MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 # upgrade path is the account websocket (POST /v1/ws/ticket) via `websockets`.
 POLL_SECONDS = float(os.environ.get("PLOW_CHAT_POLL_SECONDS", "5"))
 SELF = str(Path(__file__).resolve())
-# How the Boss runs this plugin. A second bridge, on another Plow account, runs with its own
-# state dir; the commands it hands the Boss carry that dir, or a reply would go out under the
-# first account's login and miss the chat.
-RUN = (f"PLOW_CHAT_STATE_DIR={shlex.quote(str(STATE_DIR))} " if os.environ.get("PLOW_CHAT_STATE_DIR") else "") + f"python3 {SELF}"
+# How the Boss runs this plugin. A second bridge, on another Plow account or another Plow-shaped
+# server (a WhatsApp number's whatsapp-linq-api), runs with its own state dir and base URL; the
+# commands it hands the Boss carry both, or a reply goes out under the wrong login or to the wrong server.
+RUN = "".join(f"{k}={shlex.quote(os.environ[k])} " for k in ("PLOW_CHAT_STATE_DIR", "PLOW_CHAT_BASE_URL")
+              if os.environ.get(k)) + f"python3 {SELF}"
 STATE_LOCK = threading.Lock()
 WELCOME = "MyPlow is up. Text me what you want done."
 

@@ -127,6 +127,11 @@ class PlowChatTest(unittest.TestCase):
             os.environ.pop("PLOW_CHAT_STATE_DIR", None)
             first = load("plow_chat_first", "plow-chat/plow-chat.py", {"HOST_ID": "h"})
         self.assertIn(f"run: python3 {first.SELF} reply cht_a", first.envelope("Dan", "hi", "cht_a"))
+        # A bridge on another server (the WhatsApp QR number) must hand over that server too.
+        other = load("plow_chat_other", "plow-chat/plow-chat.py",
+                     {"PLOW_CHAT_STATE_DIR": self.tmp.name, "PLOW_CHAT_BASE_URL": "http://127.0.0.1:18790", "HOST_ID": "h"})
+        self.assertIn(f"PLOW_CHAT_STATE_DIR={shlex.quote(self.tmp.name)} PLOW_CHAT_BASE_URL=http://127.0.0.1:18790 "
+                      f"python3 {other.SELF} reply cht_a", other.envelope("Dan", "hi", "cht_a"))
 
     def test_react_sends_a_tapback_and_refuses_a_misspelt_one(self):
         calls = []
