@@ -43,7 +43,7 @@ RUN set -eux; \
     R="/opt/myplow/releases/${MYPLOW_RELEASE}"; mkdir -p "$R/bin" "$R/py"; \
     pip install --no-cache-dir --no-deps --target "$R/py" /dist/mypeople-*.whl; \
     printf '#!/bin/sh\nexec python3 -m mypeople.cli "$@"\n' > "$R/bin/mypeople"; \
-    npm install -g --no-audit --no-fund @anthropic-ai/claude-code@2.1.170; \
+    npm install -g --force --no-audit --no-fund @anthropic-ai/claude-code@2.1.170; \
     cp -L /usr/local/bin/claude "$R/bin/claude"; \
     curl -fsSL "https://github.com/wesm/agentsview/releases/download/v${AGENTSVIEW_VERSION}/agentsview_${AGENTSVIEW_VERSION}_linux_amd64.tar.gz" -o /tmp/av.tgz; \
     echo "${AGENTSVIEW_SHA256}  /tmp/av.tgz" | sha256sum -c -; \
