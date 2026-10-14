@@ -170,6 +170,31 @@ class SignInScreenTests(unittest.TestCase):
                     self.assertEqual(busy, mp.pane_looks_working(AID), pane)
 
 
+class ReconcileKillRaceTests(unittest.TestCase):
+    def test_an_agent_killed_during_the_pass_is_not_revived(self):
+        """A pass works from the roster as it was when it started; an mp kill made since must win."""
+        with tempfile.TemporaryDirectory() as td:
+            mp = load_mp(td)
+            one, two = "test-node/main:eng-1", "test-node/main:eng-2"
+            mp.save_roster({a: {"agent_id": a, "backend": "codex", "retired": False} for a in (one, two)})
+            revived = []
+
+            def revive(argv):
+                if argv == [one]:   # while eng-1 is being brought back, the Boss kills eng-2
+                    r = mp.load_roster()
+                    r[two].update(retired=True, retire_reason="killed")
+                    mp.save_roster(r)
+                revived.append(argv[0])
+                return 0
+            with mock.patch.object(mp, "is_local", return_value=True), \
+                 mock.patch.object(mp, "window_exists", return_value=False), \
+                 mock.patch.object(mp, "is_birth_zombie", return_value=False), \
+                 mock.patch.object(mp, "do_revive", revive):
+                mp.do_reconcile([])
+            self.assertEqual([one], revived)
+            self.assertEqual("killed", mp.load_roster()[two]["retire_reason"])
+
+
 class ZombieReapCapTests(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()

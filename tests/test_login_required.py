@@ -285,7 +285,8 @@ class BossSupervisorGateTests(unittest.TestCase):
                          "an unauthenticated node must not start a Boss")
 
     def test_boss_starts_as_soon_as_the_login_lands(self):
-        self.assertTrue(self._run(authenticated=True),
+        # returns the moment ensure-boss runs; 3s was too tight for bash startup on a loaded Mac
+        self.assertTrue(self._run(authenticated=True, seconds=15),
                         "after login the Boss must come up without a container restart")
 
 

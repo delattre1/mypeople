@@ -1277,6 +1277,13 @@ def do_reconcile(argv):
 
         if window_exists(sess, tab):
             continue
+        # This pass's snapshot can predate an `mp kill` made while an earlier agent was being
+        # respawned (seconds each); deciding on it revived killed agents. mp kill retires before
+        # it closes the window, so the roster read now already says so.
+        roster = load_roster()
+        rr = roster.get(aid)
+        if not rr:
+            continue
         reason = rr.get("retire_reason", "")
         if rr.get("retired") and reason not in ACCIDENTAL_REASONS:
             continue
