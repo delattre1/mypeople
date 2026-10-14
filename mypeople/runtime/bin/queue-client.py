@@ -68,7 +68,7 @@ def live_agents():
     health = auth_health()
     node_unauthenticated = health.get("state") == authcheck.DEAD
     out = []
-    changed = False
+    gone, recorders = [], {}
     for aid, rr in roster.items():
         if rr.get("retired"):
             continue
@@ -78,23 +78,14 @@ def live_agents():
         if not (sess and tab):
             continue
         if not window_alive(sess, tab):
-            try:
-                rr["recorder_stop"] = C.stop_recorder(
-                    sess, tab, rr.get("recorder"), HOST_ID)
-            except Exception as exc:
-                rr["recorder_stop"] = {"error": str(exc), "requested_ts": time.time()}
-            rr["retired"] = True
-            rr.setdefault("retire_reason", "died-no-window")
-            rr.setdefault("retired_ts", time.time())
-            changed = True
+            gone.append((aid, sess, tab))
             continue
         current_recorder = C.current_recorder(sess, tab, HOST_ID)
         if current_recorder and rr.get("recorder", {}).get("pid") != current_recorder["pid"]:
             prior_recorder = rr.get("recorder")
             if prior_recorder:
                 C.stop_recorder(sess, tab, prior_recorder, HOST_ID, include_current=False)
-            rr["recorder"] = current_recorder
-            changed = True
+            recorders[aid] = current_recorder
         backend = rr.get("backend", "claude")
         # Only the backend whose credential we actually validated is downgraded; a codex agent on
         # a node with a dead claude token is still alive.
@@ -107,7 +98,26 @@ def live_agents():
             "summary": status_summary(aid), "spawn_cmd": rr.get("spawn_cmd", ""),
             "model": rr.get("model", ""), "tmux_target": "mc-%s:%s" % (sess, tab),
         })
-    if changed:
+    if gone or recorders:
+        # The probes above take seconds across the fleet, so apply what they found to the roster
+        # as it is NOW. Written from the read above, a record killed meanwhile came back as
+        # "died-no-window" -- an accidental reason -- and reconcile revived it (delattre1/mypeople#39).
+        roster = C.read_json_tracked(ROSTER_PATH, {}) or {}
+        for aid, sess, tab in gone:
+            rr = roster.get(aid)
+            if not rr or rr.get("retired") or window_alive(sess, tab):
+                continue
+            try:
+                rr["recorder_stop"] = C.stop_recorder(
+                    sess, tab, rr.get("recorder"), HOST_ID)
+            except Exception as exc:
+                rr["recorder_stop"] = {"error": str(exc), "requested_ts": time.time()}
+            rr["retired"] = True
+            rr.setdefault("retire_reason", "died-no-window")
+            rr.setdefault("retired_ts", time.time())
+        for aid, recorder in recorders.items():
+            if aid in roster:
+                roster[aid]["recorder"] = recorder
         # The heartbeat is the writer that used to clobber `mp kill` and `mp spawn`.
         C.write_json_merged(ROSTER_PATH, roster)
     return out

@@ -490,6 +490,8 @@ class NestedCliHookTests(unittest.TestCase):
         hh.C = mock.Mock(claim_notification_routes=lambda aid: [],
                          open_notification_routes=lambda aid, text: None,
                          read_json=lambda path, default=None: {}, write_json=lambda path, obj: None,
+                         read_json_tracked=lambda path, default=None: {},
+                         write_json_merged=lambda path, obj: None,
                          http_json=lambda *a, **k: sent.append(a[2]["target_agent"]))
         with mock.patch.object(sys, "stdin", __import__("io").StringIO(json.dumps(payload))), \
                 mock.patch.object(sys, "argv", ["hook-handler.py", event]), \

@@ -188,6 +188,28 @@ class RecorderLifecycleTests(unittest.TestCase):
             self.assertEqual("died-no-window", roster[aid]["retire_reason"])
             self.assertEqual(stopped, roster[aid]["recorder_stop"])
 
+    def test_a_kill_made_while_the_heartbeat_probes_stays_a_kill(self):
+        """#39: the heartbeat probed from a stale read, then wrote "died-no-window" over an
+        `mp kill` made meanwhile; that reason is accidental, so reconcile revived the agent."""
+        with tempfile.TemporaryDirectory() as td:
+            queue = load_runtime("test_recorder_kill_race", "queue-client.py", td)
+            aid = "test-node/main:eng-1"
+            Path(queue.ROSTER_PATH).parent.mkdir(parents=True, exist_ok=True)
+            Path(queue.ROSTER_PATH).write_text(json.dumps({aid: {
+                "agent_id": aid, "session": "main", "tab": "eng-1", "retired": False}}))
+
+            def window_alive(sess, tab):   # mp kill lands while the heartbeat probes this window
+                roster = json.loads(Path(queue.ROSTER_PATH).read_text())
+                roster[aid].update(retired=True, retire_reason="killed")
+                Path(queue.ROSTER_PATH).write_text(json.dumps(roster))
+                return False
+            with mock.patch.object(queue, "window_alive", window_alive), \
+                 mock.patch.object(queue, "auth_health", return_value={"state": "live"}), \
+                 mock.patch.object(queue.C, "stop_recorder", return_value={}):
+                self.assertEqual([], queue.live_agents())
+            roster = json.loads(Path(queue.ROSTER_PATH).read_text())
+            self.assertEqual("killed", roster[aid]["retire_reason"])
+
     def test_socket_generation_change_reaps_old_pid_and_backfills_current(self):
         with tempfile.TemporaryDirectory() as td:
             queue = load_runtime("test_recorder_generation", "queue-client.py", td)

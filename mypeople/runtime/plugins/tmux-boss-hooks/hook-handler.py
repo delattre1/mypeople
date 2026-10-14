@@ -74,10 +74,12 @@ def set_status(aid, status, summary=None):
     sid = DATA.get("session_id")
     if sid and C:
         roster_path = os.path.join(INSTALL_DIR, "run", "roster.json")
-        roster = C.read_json(roster_path, {}) or {}
+        # tracked read + merged write: a plain rewrite of the whole roster erased whatever another
+        # writer (an `mp kill`) saved between this read and this write (#39)
+        roster = C.read_json_tracked(roster_path, {}) or {}
         if aid in roster and roster[aid].get("session_id") != sid:
             roster[aid]["session_id"] = sid
-            C.write_json(roster_path, roster)
+            C.write_json_merged(roster_path, roster)
 
 
 def grok_transcript(tp, sid):
