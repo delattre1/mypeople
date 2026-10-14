@@ -232,6 +232,22 @@ def owner_for_pr(board, pr_url):
     return best[1] if best else ""
 
 
+CARD_ID = re.compile(r"\b[0-9a-f]{10}\b")
+
+
+def owner_for_card_mention(board, text):
+    """The assignee of the first live board card whose id the text names, or "".
+
+    Issues filed by an agent name their card ("card 53c281fdf9") instead of being linked from it.
+    """
+    tasks = (board or {}).get("tasks") or {}
+    for cid in CARD_ID.findall(text or ""):
+        task = tasks.get(cid) or {}
+        if task.get("assignee") and task.get("state") not in ("done", "cancelled"):
+            return task["assignee"]
+    return ""
+
+
 def format_event(repo, n, event, owned, orphan=False):
     body = " ".join(HTML_COMMENT.sub("", event["body"]).split())
     if len(body) > SNIPPET:
@@ -276,9 +292,10 @@ def deliver(agent, text):
     return r.returncode == 0
 
 
-def route(board, pr_url, agent=""):
-    """Who hears about a PR: the agent it is watched for, else the card that links it, else the Boss."""
-    owner = agent or (owner_for_pr(board, pr_url) if board else "")
+def route(board, pr_url, agent="", text=""):
+    """Who hears about a PR or issue: the agent it is watched for, else the card that links it, else
+    the card its text names, else the Boss."""
+    owner = agent or (owner_for_pr(board, pr_url) or owner_for_card_mention(board, text) if board else "")
     return owner or boss_id(), bool(owner)
 
 
@@ -399,7 +416,8 @@ def poll(author, state):
         except Exception as e:  # routing degrades to the Boss; the event is never dropped
             log("board unreadable (%s); sending to the Boss" % e)
     for repo, n, url, e in outbox:
-        agent, owned = route(board, url, watch.get("%s#%d" % (repo, n), {}).get("agent", ""))
+        agent, owned = route(board, url, watch.get("%s#%d" % (repo, n), {}).get("agent", ""),
+                             e["body"] if e["kind"] == "issue" else "")
         text = format_event(repo, n, e, owned, orphan=not owned)
         if not deliver(agent, text) and agent != boss_id():
             log("%s unreachable; sending to the Boss" % agent)

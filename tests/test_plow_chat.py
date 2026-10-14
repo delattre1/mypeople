@@ -217,6 +217,53 @@ class PlowChatTest(unittest.TestCase):
         self.assertEqual(calls[1], ("POST", "/v1/chats/cht_a/messages",
                                     {"body": "look", "attachment_uids": ["att_out"]}))
 
+    def _two_chats(self, quiet, busy):
+        self.pc.api = lambda method, path, body=None, token=None: (
+            200, {"data": quiet if "/cht_a/" in path else busy})
+
+    def test_a_quiet_chats_old_messages_never_route_again(self):
+        """#40: 1000+ messages elsewhere pushed a quiet chat's ids out of one shared window, and
+        its unchanged page was routed to the Boss again as new."""
+        busy = [{"uid": "b%d" % i, "direction": "inbound", "body": "x", "chat_uid": "cht_b",
+                 "created_at": "2026-10-14T10:00:%02d.%06dZ" % (i // 1000000, i)} for i in range(1001)]
+        self._two_chats(self.msgs, busy)
+        self.pc.poll_chat(self.creds, "cht_a")             # seeded: m1 is history
+        self.pc.poll_chat(self.creds, "cht_b", seed=False)  # a busy chat routes 1001 messages
+        self.sent.clear()
+        self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 0)
+        self.assertEqual([], self.sent)
+
+    def test_upgrading_from_the_id_window_neither_replays_nor_drops(self):
+        old = {"uid": "m0", "direction": "inbound", "body": "routed long ago", "chat_uid": "cht_a",
+               "created_at": "0"}
+        new = {"uid": "m2", "direction": "inbound", "body": "landed during the restart",
+               "chat_uid": "cht_a", "created_at": "2"}
+        self.msgs[:] = [old, self.msgs[0], new]
+        self.pc.write_json(self.pc.STATE, {"seen_ids": ["m1"], "seeded_chats": ["cht_a"]})
+        self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)   # m0 aged out: not replayed
+        self.assertIn("landed during the restart", self.sent[0])
+        self.pc.write_json(self.pc.STATE, {"seen_ids": ["gone"], "seeded_chats": ["cht_a"]})
+        self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 0)   # all aged out: nothing
+
+    def test_a_quiet_chats_old_tapbacks_never_come_back(self):
+        like = {"uid": "r1", "type": "like", "actor": {"type": "member", "name": "Sam"}}
+        self.msgs[0].update(direction="outbound", reactions=[like])  # Sam liked the Boss's text
+        busy = [{"uid": "b%d" % i, "direction": "outbound", "body": "x", "chat_uid": "cht_b",
+                 "created_at": "1", "reactions": [dict(like, uid="rb%d" % i)]} for i in range(1001)]
+        self._two_chats(self.msgs, busy)
+        self.pc.poll_chat(self.creds, "cht_a")
+        self.pc.poll_chat(self.creds, "cht_b")
+        st = self.pc.read_json(self.pc.STATE, {})
+        st["pending_tapbacks"] = []
+        self.pc.write_json(self.pc.STATE, st)
+        self.pc.poll_chat(self.creds, "cht_a")
+        self.assertEqual([], self.pc.read_json(self.pc.STATE, {}).get("pending_tapbacks"))
+
+    def test_times_from_different_servers_order_by_instant(self):
+        o = lambda ts: self.pc.order({"created_at": ts, "uid": "u"})
+        self.assertLess(o("2026-10-14T13:09:05Z"), o("2026-10-14T13:09:05.056Z"))
+        self.assertLess(o("2026-10-14T13:09:05.056Z"), o("2026-10-14T13:09:05.056001+00:00"))
+
     def test_failed_delivery_is_retried(self):
         self.pc.poll_chat(self.creds, "cht_a")
         self.msgs.append({"uid": "m2", "direction": "inbound", "body": "hi",

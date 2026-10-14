@@ -248,6 +248,20 @@ class NewIssueTests(unittest.TestCase):
         self.poll()
         self.assertEqual(["node/main:eng-2"], [a for a, _ in self.sent])
 
+    def test_an_issue_naming_a_live_card_goes_to_that_card_owner(self):
+        """Agents' issues name their card ("card 53c281fdf9") rather than being linked from it."""
+        self.poll()
+        self.board = {"tasks": {"53c281fdf9": card("node/main:eng-7"),
+                                "aaaaaaaaaa": card("node/main:eng-8", state="done")}}
+        issue = self.issue(5)
+        issue["body"] = "Found on 5.22.39 (card 53c281fdf9)."
+        self.issues["owner:acme"].insert(0, issue)
+        done = self.issue(6, title="old card aaaaaaaaaa")
+        self.issues["owner:acme"].insert(0, done)
+        self.poll()
+        self.assertEqual({"node/main:eng-7", "node/main:Boss"}, {a for a, _ in self.sent})
+        self.assertNotIn("no card on the board", dict(self.sent)["node/main:eng-7"])
+
     def test_a_query_added_later_starts_silent_too(self):
         self.poll()
         with mock.patch.dict(os.environ, {"GITHUB_ISSUES": "owner:acme;owner:other author:fleet;org:new"}):

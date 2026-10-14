@@ -47,7 +47,7 @@ STATE_DIR = Path(os.environ.get("PLOW_CHAT_STATE_DIR") or INSTALL / "state" / "p
 CREDS = STATE_DIR / "creds.json"          # {"token": ..., "chat_uid": ...}
 ACTIVATION = STATE_DIR / "activation.json"
 ATTACHMENTS = STATE_DIR / "attachments"   # inbound photos/files, for the Boss to open
-STATE = STATE_DIR / "state.json"          # {"seen_ids": [...], "seeded_chats": [...]}
+STATE = STATE_DIR / "state.json"          # {"marks": {chat: [created_at, uid]}, "seeded_chats": [...]}
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
@@ -188,16 +188,19 @@ def note_tapbacks(msgs: list, chat_uid: str, seed: bool = True) -> int:
                          f"{speaker(actor)} {verb} {whose(m)}")
     with STATE_LOCK:
         st = read_json(STATE, {})
-        chats = st.get("tapback_chats", [])
-        seen = st.get("seen_tapbacks", [])
-        new = [k for k in live if k not in seen]
-        if not new and chat_uid in chats:
+        # Per chat, exactly the tapbacks on its page now: one window shared by every chat let a
+        # quiet chat's old tapbacks age out and come back as news (delattre1/mypeople#40).
+        by_chat = st.setdefault("page_tapbacks", {})
+        known = by_chat.get(chat_uid)
+        new = [k for k in live if k not in (known or [])]
+        if not new and known is not None and len(known) == len(live):
             return 0
-        # First sight of a chat with seeding on: its tapbacks are history, not news.
-        news = [live[k] for k in new] if chat_uid in chats or not seed else []
+        # First sight of a chat with seeding on: its tapbacks are history, not news. A chat seen
+        # before this per-chat record existed is seeded too, once.
+        first = known is None and (seed or chat_uid in st.get("tapback_chats", []))
+        news = [] if first else [live[k] for k in new]
         st["pending_tapbacks"] = (st.get("pending_tapbacks", []) + news)[-20:]
-        st["seen_tapbacks"] = (seen + new)[-1000:]
-        st["tapback_chats"] = sorted(set(chats) | {chat_uid})
+        by_chat[chat_uid] = sorted(live)
         write_json(STATE, st)
     return len(news)
 
@@ -227,8 +230,20 @@ def message_age(message: dict) -> float:
         return float("inf")  # no readable time: treat it as long overdue
 
 
-def route_message(message: dict) -> str:
-    """Deliver one inbound message to the Boss, exactly once."""
+def order(message: dict) -> list:
+    """A message's place in its chat: [created_at as fixed-width UTC, uid]. Parsed, because servers
+    differ (api.plow.co sends microseconds, whatsapp-linq-api milliseconds)."""
+    ts = message.get("created_at") or ""
+    try:
+        ts = (datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
+              .strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
+    except ValueError:
+        pass
+    return [ts, message.get("uid") or ""]
+
+
+def route_message(message: dict, chat: str = "") -> str:
+    """Deliver one inbound message in `chat` (the one being polled) to the Boss, exactly once."""
     if message.get("direction") != "inbound":
         return "skip: outbound"
     mid = message.get("uid") or ""
@@ -239,17 +254,23 @@ def route_message(message: dict) -> str:
     if not mid or not (text or atts):
         return "skip: empty"
 
-    # Claim before sending, so an overlapping pass cannot wake the Boss twice.
+    chat_uid = message.get("chat_uid") or chat
+    chat = chat or chat_uid
+    key = order(message)
+    # Claim before sending, so an overlapping pass cannot wake the Boss twice. The claim is the
+    # chat's high-water mark: a message routes only if it is newer than the newest one routed.
+    # A window of seen ids shared by every chat let a quiet chat's page age out of it and be
+    # routed again as new (delattre1/mypeople#40).
     with STATE_LOCK:
         st = read_json(STATE, {})
-        seen = list(st.get("seen_ids", []))
-        if mid in seen:
+        marks = st.setdefault("marks", {})
+        prev = marks.get(chat)
+        if prev is not None and key <= prev:
             return "skip: already routed"
-        st["seen_ids"] = (seen + [mid])[-1000:]
+        marks[chat] = key
         write_json(STATE, st)
 
     who = speaker(message.get("sender") or {})
-    chat_uid = message.get("chat_uid") or ""
     files, notes = [], []  # a file that did not arrive is a note, never "open it"
     for a in atts:
         try:
@@ -268,7 +289,12 @@ def route_message(message: dict) -> str:
         return f"ROUTE {chat_uid} {who}: {text[:60]}"
     with STATE_LOCK:  # release the claim so the next pass retries it
         st = read_json(STATE, {})
-        st["seen_ids"] = [i for i in st.get("seen_ids", []) if i != mid]
+        marks = st.setdefault("marks", {})
+        if marks.get(chat) == key:
+            if prev is None:
+                marks.pop(chat)
+            else:
+                marks[chat] = prev
         warned = mid in st.get("warned_ids", [])
         late = min(message_age(message), time.time() - STARTED) >= WARN_AFTER
         if late and not warned:
@@ -465,11 +491,21 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
             st["seeded_chats"] = sorted(seeded | {chat_uid})
             write_json(STATE, st)
             first = False
-        if first:
-            seen = list(st.get("seen_ids", []))
-            seen += [m["uid"] for m in msgs if m.get("uid") and m["uid"] not in seen]
-            st["seen_ids"] = seen[-1000:]
-            st["seeded_chats"] = sorted(seeded | {chat_uid})
+        marks = st.setdefault("marks", {})
+        mark = None
+        if first and msgs:
+            mark = max(order(m) for m in msgs)
+        elif chat_uid in seeded and chat_uid not in marks and msgs:
+            # Seen before marks existed: the mark is the newest message the old id list says was
+            # routed, or, if they all aged out of it, the newest on the page (no replay).
+            legacy = set(st.get("seen_ids", []))
+            done = [order(m) for m in msgs if m.get("uid") in legacy]
+            mark = max(done or [order(m) for m in msgs])
+        if mark or first:
+            if mark:
+                marks[chat_uid] = mark
+            if first:
+                st["seeded_chats"] = sorted(seeded | {chat_uid})
             write_json(STATE, st)
     note_tapbacks(msgs, chat_uid, seed)
     if first:
@@ -483,10 +519,12 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
                 log(f"welcome not sent: {e}")
         return 0
     routed = 0
-    for m in sorted(msgs, key=lambda m: m.get("created_at") or ""):
-        r = route_message(m)
+    for m in sorted(msgs, key=order):
+        r = route_message(m, chat_uid)
         if not r.startswith("skip"):
             log(r)
+        if r.startswith("ERROR"):
+            break  # routing a newer one would move the mark past this one, and it would be lost
         routed += r.startswith("ROUTE")
     return routed
 
