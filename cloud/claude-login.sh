@@ -13,8 +13,7 @@
 # ponytail: a login that expires while the agent runs is only noticed at its next boot (it goes
 # quiet until then); upgrade path is the chat bridge re-checking when a text gets no answer.
 set -u
-# The owner's login server: this install's own setting (env, or the file on its data disk). No default:
-# an install without one runs on its own owner's Claude and sends no beacons.
+# The shared Auth Bank URL comes from the image. A local override or a retained file can replace it.
 BANK="${MYPLOW_CLAUDE_BANK:-$(cat "${MYPEOPLE_HOME:-/var/lib/mypeople}/state/claude-bank-url" 2>/dev/null)}"
 TOLD="${MYPEOPLE_HOME:-/var/lib/mypeople}/state/claude-login-told"
 # This VM's own owner's login (not Daniel's): theirs, on their VM, like ~/.claude on a laptop. Kept by
@@ -87,7 +86,7 @@ Restart me once one is free, or add another login to the pool."; exit 1 ;;
         if works "$tok"; then rm -rf "$TOLD"; printf '%s' "$tok"; exit 0; fi
         say_once expired "$EXPIRED"; exit 1 ;;
       401)
-        # Not Daniel's account: this install runs on its own owner's Claude.
+        # The shared bank refused this request, so use this VM's own owner login as the fallback.
         if [ -s "$OWN" ] && works "$(cat "$OWN")"; then beacon "own login (saved)"; cat "$OWN"; exit 0; fi
         beacon "own login: texting the owner a Claude login link"
         tok="$(python3 "$(dirname "$0")/own-login.py")" || { beacon "own login FAILED"; exit 1; }

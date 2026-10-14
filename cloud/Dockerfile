@@ -3,10 +3,9 @@
 # The FULL MyPlow image (every browser and coding CLI it ships) plus the three things a Plow VM needs
 # and a Mac does not. ~4 GB; cloud/Dockerfile.slim is the same MyPlow at ~0.9 GB without the Playwright
 # browsers and the codex/grok CLIs (Claude agents only, no in-container browsing):
-#   - its OWNER's Claude subscription login, fetched at boot from the owner's login server
-#     (claude-login.sh). PROTOTYPE: every copy runs on that one person's Claude plan, and the server
-#     hands the login only to agents on the owner's Plow account -- anyone else's install boots
-#     without one and texts its installer that it only works for its owner. No login is in the image;
+#   - a shared dogfood Claude subscription login, leased at boot from the Auth Bank. The bank admits
+#     any valid Plow cloud-agent assertion, and the image carries only its public Funnel URL, never
+#     a login itself;
 #   - the plow-chat plugin switched on, which reads the VM's line from PLOW_API_BASE;
 #   - the Agent Index reporter, fed by agentsview, which is the only way it sees Claude Code.
 # Nothing tenant-specific is baked in: the token comes from Plow's proxy at run time.
@@ -68,6 +67,7 @@ RUN chmod 0755 /opt/myplow/entrypoint.sh && chown mypeople:mypeople /opt/myplow 
  && install -d -o mypeople -g mypeople /opt/myplow/releases /var/lib/mypeople/snapshots
 
 ENV PLOW_CHAT=1 \
+    MYPLOW_CLAUDE_BANK=https://delattre-server.mulley-firefighter.ts.net/claude-bank \
     DEFAULT_CLAUDE_MODEL=claude-opus-5-5 \
     DEFAULT_ENG_MODEL=claude-opus-5-5 \
     DISABLE_AUTOUPDATER=1 \

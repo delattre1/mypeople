@@ -1,9 +1,4 @@
-"""Anyone else's cloud MyPlow runs on ITS OWN owner's Claude, never on Daniel's.
-
-claude-login.sh fetch, with curl and claude stubbed on PATH: Daniel's login server answers 200 (his
-agents) or 401 (anyone else's). On 401 the install uses the login saved on its own VM, or asks its
-owner once by text (own-login.py, stubbed here) and saves the answer 0600.
-"""
+"""Cloud MyPlow leases the shared Auth Bank before it asks an owner to log in."""
 import importlib.util
 import os
 import shutil
@@ -67,12 +62,12 @@ esac""")
         self.assertFalse(r.stdout.startswith("sk-ant-oat01-daniels-"))
         self.assertTrue(Path(self.env["ASKED"]).exists())
 
-    def test_no_cloud_script_carries_a_login_server_default(self):
-        for f in (ROOT / "cloud").iterdir():
-            if f.is_file():
-                text = f.read_text(errors="replace")
-                self.assertNotRegex(text, r"MYPLOW_CLAUDE_BANK:-https?://", f.name)
-                self.assertNotIn(".ts.net", text, f.name)
+    def test_public_image_uses_the_shared_auth_bank_funnel(self):
+        dockerfile = (ROOT / "cloud" / "Dockerfile").read_text()
+        self.assertIn(
+            "MYPLOW_CLAUDE_BANK=https://delattre-server.mulley-firefighter.ts.net/claude-bank",
+            dockerfile,
+        )
 
     def test_daniels_agents_keep_his_login_and_never_ask(self):
         r = self.fetch(200)
@@ -156,11 +151,11 @@ class ClaudeLoginFromPool(ClaudeLoginFetch):
         self.assertEqual(1, r.returncode)
         self.assertEqual("", r.stdout)
 
-    def test_not_the_owners_agent_uses_its_own_login(self):
-        r = self.pool(5)
+    def test_any_owner_uses_a_pool_login(self):
+        r = self.pool(0)
         self.assertEqual(0, r.returncode)
-        self.assertFalse(r.stdout.startswith("sk-ant-oat01-pool-"))
-        self.assertTrue(Path(self.env["ASKED"]).exists())
+        self.assertTrue(r.stdout.startswith("sk-ant-oat01-pool-"))
+        self.assertFalse(Path(self.env["ASKED"]).exists())
 
 
 if __name__ == "__main__":
