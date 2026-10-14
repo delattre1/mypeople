@@ -326,6 +326,10 @@ def is_birth_zombie(aid, rr, now=None):
         return False
     if pane_looks_working(aid):
         return False
+    # codex fires SessionStart only with its first prompt, so an idle codex TUI has no session
+    # yet and is healthy; reaping it restarted signed-in engineers every 90s (#35)
+    if (rr.get("backend") or st.get("backend")) == "codex" and pane_looks_ready(aid):
+        return False
     # blank pane, idle welcome, or any non-working stuck starting without session_id
     return True
 

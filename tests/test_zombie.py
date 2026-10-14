@@ -126,6 +126,15 @@ class BirthZombieTests(unittest.TestCase):
         with mock.patch.object(self.mp, "pane_looks_working", return_value=True):
             self.assertFalse(self.verdict())
 
+    def test_an_idle_codex_tui_is_not_a_zombie(self):
+        """#35: codex reports its session only with the first prompt; idle and signed in is healthy."""
+        with mock.patch.object(self.mp, "pane_looks_ready", return_value=True):
+            self.assertTrue(self.verdict(), "a claude welcome screen with no session is still a zombie")
+            self.rr["backend"] = "codex"
+            self.assertFalse(self.verdict())
+        with mock.patch.object(self.mp, "pane_looks_ready", return_value=False):
+            self.assertTrue(self.verdict(), "a blank codex pane is still a zombie")
+
     def test_a_missing_window_is_not_a_zombie(self):
         """No window is reconcile's job, not the reaper's."""
         with mock.patch.object(self.mp, "window_exists", return_value=False):
