@@ -54,6 +54,7 @@ class DiscordChatTest(unittest.TestCase):
         self.assertIn("Never share any API key", self.boss[0])
         self.assertIn("trust=community", self.boss[1])
         self.assertIn("--community", self.boss[1])
+        self.assertIn("never run git", self.boss[1])
         self.assertIn("trust=full", self.boss[2])
         self.assertEqual(st["cursor"]["c1"], "5")
 
