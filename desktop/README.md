@@ -37,7 +37,7 @@ CI=true cargo tauri build            # CI=true skips the Finder-layout AppleScri
 ```
 
 Requires the Rust toolchain, `cargo install tauri-cli --version "^2"`, `uv python install 3.13`, and
-`brew install ttyd tmux asciinema` **on the build machine only**.
+`brew install ttyd tmux asciinema` (ttyd only for its libuv, json-c and OpenSSL) plus cmake **on the build machine only**. The carried ttyd itself is built from source by `scripts/build-ttyd.sh`, so its libwebsockets loads no plugin from Homebrew at runtime.
 
 ## Release (signed + notarized DMG)
 

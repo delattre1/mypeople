@@ -81,43 +81,20 @@ vendor_deps() {
   done < <(otool -L "$target" | tail -n +2 | awk '{print $1}')
 }
 
+# ttyd is built, not taken from Homebrew: Homebrew's libwebsockets loads its libuv support as a
+# plugin from Homebrew's own folder, so that ttyd serves nothing on a Mac without Homebrew.
+TTYD_BUILD="$(mktemp -d)"
+"$HERE/build-ttyd.sh" "$TTYD_BUILD"
 for tool in ttyd tmux asciinema; do
-  src="$(command -v "$tool")" || { echo "[bundle] $tool not found on PATH" >&2; exit 1; }
+  if [ "$tool" = ttyd ]; then src="$TTYD_BUILD/ttyd"
+  else src="$(command -v "$tool")" || { echo "[bundle] $tool not found on PATH" >&2; exit 1; }
+  fi
   say "$tool <- $src"
   cp "$src" "$OUT/bin/$tool"
   chmod u+w "$OUT/bin/$tool"
   vendor_deps "$OUT/bin/$tool"
 done
-
-# libwebsockets dlopens its event-loop plugin at runtime, so it never appears in otool -L and the
-# dependency walk above cannot see it. The directory it looks in is compiled into the library --
-# Homebrew's Cellar -- which exists on no other Mac: that is why ttyd started but served nothing on
-# the CEO's Air ("failed to load evlib_uv"). Carry the plugins and point the library at our own lib
-# directory instead.
-for plug in "$(dirname "$(command -v ttyd)")"/../lib/libwebsockets-evlib_*.dylib; do
-  [ -f "$plug" ] || continue
-  base="$(basename "$plug")"
-  say "$base <- $plug"
-  cp "$plug" "$OUT/lib/$base"
-  chmod u+w "$OUT/lib/$base"
-  install_name_tool -id "@executable_path/../lib/$base" "$OUT/lib/$base" 2>/dev/null
-  vendor_deps "$OUT/lib/$base"
-done
-python3 - "$OUT" <<'PY'
-import glob, re, sys
-out = sys.argv[1]
-for lib in glob.glob(out + "/lib/libwebsockets.*.dylib"):
-    blob = open(lib, "rb").read()
-    dirs = [d for d in re.findall(rb"/[\x20-\x7e]{8,120}", blob)
-            if d.endswith(b"/lib") and b"libwebsockets" in d]
-    if not dirs:
-        continue
-    want = b"@executable_path/../lib"          # shorter than any real prefix, so it fits in place
-    for d in dirs:
-        blob = blob.replace(d, want + b"\x00" * (len(d) - len(want)))
-    open(lib, "wb").write(blob)
-    print("[bundle] %s: plugin dir %s -> %s" % (lib.split("/")[-1], dirs[0].decode(), want.decode()))
-PY
+rm -rf "$TTYD_BUILD"
 
 # install_name_tool invalidates the signature it rewrote, and arm64 macOS SIGKILLs any
 # unsigned Mach-O — the binary dies with 137 and prints nothing. Ad-hoc signing makes them
@@ -147,16 +124,7 @@ else
   find "$OUT/bin" "$OUT/python/bin" -type f -perm -u+x -print0 |
     while IFS= read -r -d '' f; do
       file -b "$f" | grep -q Mach-O || continue
-      # ttyd alone gets library validation switched off. Its libwebsockets dlopens an event-loop
-      # plugin (libwebsockets-evlib_uv.dylib) from a directory compiled into the library, i.e.
-      # Homebrew's. Under the hardened runtime a plugin signed by anyone else is refused, and ttyd
-      # dies with "failed to load evlib_uv" before it ever listens -- no terminal tiles at all.
-      if [ "$(basename "$f")" = "ttyd" ] && [ -f "$HERE/../src-tauri/ttyd.entitlements" ]; then
-        codesign --force --timestamp --options runtime \
-                 --entitlements "$HERE/../src-tauri/ttyd.entitlements" --sign "$IDENTITY" "$f"
-      else
-        codesign --force --timestamp --options runtime --sign "$IDENTITY" "$f"
-      fi
+      codesign --force --timestamp --options runtime --sign "$IDENTITY" "$f"
     done
 fi
 
@@ -183,9 +151,13 @@ done
 
 # ttyd --version exits before libwebsockets ever builds its event loop, so the probe above says
 # "runs" for a ttyd that cannot serve a single tile. Start it for real and fetch a page: that is
-# the failure that reached the CEO (signed ttyd, "failed to load evlib_uv", no terminals).
+# the failure that reached the CEO twice (signed ttyd, "failed to load evlib_uv", no terminals).
 port=$((40000 + RANDOM % 20000))
-env -i PATH=/usr/bin:/bin "$OUT/bin/ttyd" -a -p "$port" /bin/echo >"$OUT/.ttyd-probe.log" 2>&1 &
+# With Homebrew hidden, as on most Macs: the build machine has it, so a ttyd that still reaches
+# into /opt/homebrew (a plugin, a dylib) passes here and dies on a stranger's Mac. That is how
+# "failed to load evlib_uv" shipped twice (the CEO's Air, then his second Mac).
+NO_BREW='(version 1)(allow default)(deny file-read* (subpath "/opt/homebrew") (subpath "/usr/local"))'
+env -i PATH=/usr/bin:/bin sandbox-exec -p "$NO_BREW" "$OUT/bin/ttyd" -a -p "$port" /bin/echo >"$OUT/.ttyd-probe.log" 2>&1 &
 probe_pid=$!
 served=""
 for _ in 1 2 3 4 5 6 7 8 9 10; do
