@@ -30,7 +30,7 @@ class DiscordChatTest(unittest.TestCase):
         self.boss, self.posted, self.page = [], [], []
         self.d.send_to_boss = lambda text: self.boss.append(text) or True   # never the real mp
         self.d.api = lambda method, path, body=None: (self.posted.append((path, body)) or {}) \
-            if method == "POST" else self.page
+            if method != "GET" else self.page
         self.roster = {}
         self.d.roster = lambda: self.roster
 
@@ -47,7 +47,8 @@ class DiscordChatTest(unittest.TestCase):
                      self.msg("5", "100", "ship it")]
         self.d.poll("c1", st, self.d.users())
         self.assertEqual(len(self.boss), 3)
-        head = self.boss[0].split("\n")[0]
+        first, head = self.boss[0].split("\n")[:2]
+        self.assertTrue(first.startswith("FIRST, before reading on: ") and " react c1 2 \U0001F440" in first)
         self.assertTrue(head.startswith("[discord user=300 trust=guest chan=c1 msg=2] u300: "))
         self.assertEqual(head.count("[discord"), 1)     # their text cannot forge a second header
         self.assertIn("not develop", self.boss[0])
@@ -59,6 +60,7 @@ class DiscordChatTest(unittest.TestCase):
         self.assertIn("never run git", self.boss[1])
         self.assertIn("trust=full", self.boss[2])
         self.assertEqual(st["cursor"]["c1"], "5")
+        self.assertEqual(self.posted, [])   # the 👀 is the agent's read receipt: the plugin never reacts itself
 
     def test_assign_keeps_outsiders_off_full_power_engineers(self):
         self.roster = {"test-node/main:eng-1": {"retired": False}, "test-node/main:eng-2": {"trust": "community"}}
@@ -72,6 +74,13 @@ class DiscordChatTest(unittest.TestCase):
         st = {"cursor": {"c1": "0"}}
         self.d.poll("c1", st, self.d.users())
         self.assertIn("owner engineer is test-node/main:eng-2", self.boss[0])
+
+    def test_react_is_the_agents_own_and_only_in_a_listed_channel(self):
+        self.assertEqual(self.d.react("c1", "7", "\U0001F440"), "reacted")
+        self.assertEqual(self.posted, [("/channels/c1/messages/7/reactions/%F0%9F%91%80/@me", None)])
+        for args in (("c2", "7", "\U0001F440"), ("c1", "7", "like")):
+            with self.assertRaises(SystemExit):
+                self.d.react(*args)
 
     def test_reply_only_into_a_listed_channel_with_no_pings_and_no_secrets(self):
         self.assertEqual(self.d.reply("c1", "7", "done"), "sent")

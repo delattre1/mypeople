@@ -26,6 +26,7 @@ Config (env, or queue.env):
 
     discord-chat.py serve                       read and route forever (what supervise.sh runs)
     discord-chat.py reply <chan> <msg> "text"   answer that message in its channel
+    discord-chat.py react <chan> <msg> EMOJI    react to it (the Boss's 👀 = it read the message)
     discord-chat.py assign <user> <agent>       make <agent> that person's owner engineer
     discord-chat.py status
 """
@@ -38,6 +39,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 from pathlib import Path
 
 SELF = Path(__file__).resolve()
@@ -52,7 +54,9 @@ STATE_DIR = Path(os.environ.get("DISCORD_CHAT_STATE_DIR") or INSTALL / "state" /
 STATE = STATE_DIR / "state.json"      # {"cursor": {chan: msg}}: serve's alone
 OWNERS = STATE_DIR / "owners.json"    # {user: agent}: assign's alone, so neither clobbers the other
 RUN = "python3 %s" % SELF
-POLL = 5
+# ponytail: one REST read per channel per second, so a message waits up to ~1 s. Many channels or 429s
+# would want Discord's gateway websocket instead (plow-chat's stdlib client is the model).
+POLL = 1
 
 # How it sounds there. Without this the Boss recited these notes to the channel: "Got it, this channel
 # reaches the Boss. I can chat, take bug reports and feature requests." (the owner's test, 10-15).
@@ -169,11 +173,15 @@ def envelope(m, ch, who):
     else:
         own = " No owner engineer yet: if this needs work, spawn one%s, then run %s assign %s <that agent>." % (
             " with --community added to your mp spawn" if trust == "community" else "", RUN, uid)
-    return ("[discord user=%s trust=%s chan=%s msg=%s] %s: %s%s\n"
+    # The owner's ask: the agent marks his message seen as its very first step. The agent does it, never
+    # this plugin: a 👀 is his proof that the agent itself read it (as plow-chat's envelope).
+    return ("FIRST, before reading on: %s react %s %s \U0001F440  (marks this message seen for the sender; then "
+            "read, work and reply)\n"
+            "[discord user=%s trust=%s chan=%s msg=%s] %s: %s%s\n"
             "(Notes for you only. %s %s %s%s This is the owner's Discord channel %s: everyone in it reads your "
             "answer, and people there also talk to each other, so answer only what is addressed to you. Never "
             "share any API key, token or secret there. To answer, run: %s reply %s %s \"your reply\" -- plain "
-            "text, posted as written.)" % (uid, trust, ch, m["id"], name, flat(m.get("content") or ""), files,
+            "text, posted as written.)" % (RUN, ch, m["id"], uid, trust, ch, m["id"], name, flat(m.get("content") or ""), files,
                                           VOICE, INTAKE, RULES[trust], own, ch, RUN, ch, m["id"]))
 
 
@@ -238,6 +246,14 @@ def reply(ch, msg, text):
     return "sent"
 
 
+def react(ch, msg, emoji):
+    """The agent's own reaction on a message in a listed channel (👀 = it read it)."""
+    if ch not in channels() or not msg.isdigit() or not emoji or emoji.isascii() or len(emoji) > 8:
+        raise SystemExit("usage: %s react <listed channel> <msg> EMOJI" % RUN)
+    api("PUT", "/channels/%s/messages/%s/reactions/%s/@me" % (ch, msg, urllib.parse.quote(emoji)))
+    return "reacted"
+
+
 def main(argv):
     cmd, args = (argv[1] if len(argv) > 1 else "serve"), argv[2:]
     if cmd == "serve":
@@ -245,6 +261,8 @@ def main(argv):
     elif cmd == "reply" and len(args) >= 2 and args[0].isdigit():
         msg = args.pop(1) if len(args) >= 3 and args[1].isdigit() else ""
         print(reply(args[0], msg, " ".join(args[1:])))
+    elif cmd == "react" and len(args) == 3:
+        print(react(*args))
     elif cmd == "assign" and len(args) == 2:
         print(assign(*args))
     elif cmd == "status":
