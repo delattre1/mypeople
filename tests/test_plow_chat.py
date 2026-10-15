@@ -425,6 +425,30 @@ class CloudTest(unittest.TestCase):
                                        {"body": pc.WELCOME}, "proxied")])
 
 
+class LabBridgeTest(unittest.TestCase):
+    def test_a_saved_login_names_its_own_server(self):
+        """A cloud VM learns where the owner's WhatsApp lab is from its lab login alone."""
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "creds.json").write_text(json.dumps({"token": "k", "base_url": "https://lab.example/"}))
+            pc = load("plow_chat_lab", "plow-chat/plow-chat.py",
+                      {"PLOW_CHAT_STATE_DIR": d, "PLOW_API_BASE": "https://api.plow.co", "HOST_ID": "h"})
+            self.assertEqual(pc.BASE, "https://lab.example")
+            self.assertIn(f"PLOW_CHAT_STATE_DIR={d} ", pc.RUN, "the Boss's replies must use the same login")
+
+    def test_supervise_runs_the_lab_bridge_only_while_its_login_exists(self):
+        sup = (PLUGINS.parent / "bin" / "supervise.sh").read_text()
+        line = next(x for x in sup.splitlines() if "plow-chat-lab/creds.json" in x)
+        with tempfile.TemporaryDirectory() as idir:
+            run = lambda: subprocess.run(["bash", "-c", f'ensure(){{ echo "$1|$2"; }}; ID={idir}; {line}'],
+                                         capture_output=True, text=True).stdout
+            self.assertEqual("", run())
+            Path(idir, "state", "plow-chat-lab").mkdir(parents=True)
+            Path(idir, "state", "plow-chat-lab", "creds.json").write_text("{}")
+            pat, cmd = run().strip().split("|")
+            self.assertTrue(pat.endswith("plow-chat.py serve lab$"))
+            self.assertIn(f"PLOW_CHAT_STATE_DIR='{idir}/state/plow-chat-lab' exec python3", cmd)
+
+
 class WiringTest(unittest.TestCase):
     def test_supervise_starts_it_only_when_turned_on_and_down_stops_it(self):
         root = PLUGINS.parents[2]

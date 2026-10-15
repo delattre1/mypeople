@@ -55,7 +55,13 @@ BASE = (os.environ.get("PLOW_CHAT_BASE_URL") or os.environ.get("PLOW_API_BASE")
 INSTALL = Path(os.environ.get("INSTALL_DIR") or os.environ.get("MYPEOPLE_HOME")
                or Path.home() / "mypeople")
 STATE_DIR = Path(os.environ.get("PLOW_CHAT_STATE_DIR") or INSTALL / "state" / "plow-chat")
-CREDS = STATE_DIR / "creds.json"          # {"token": ..., "chat_uid": ...}
+CREDS = STATE_DIR / "creds.json"          # {"token": ..., "chat_uid": ..., "base_url"?: ...}
+# A saved login may name its own server: the second bridge supervise.sh runs for a WhatsApp lab
+# (whatsapp-linq-api) learns where the lab is from this one file, so a cloud VM needs nothing else.
+try:
+    BASE = (json.loads(CREDS.read_text()).get("base_url") or BASE).rstrip("/")
+except (OSError, ValueError, AttributeError):
+    pass
 ACTIVATION = STATE_DIR / "activation.json"
 ATTACHMENTS = STATE_DIR / "attachments"   # inbound photos/files, for the Boss to open
 STATE = STATE_DIR / "state.json"          # {"marks": {chat: [created_at, uid]}, "seeded_chats": [...]}

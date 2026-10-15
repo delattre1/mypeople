@@ -92,6 +92,9 @@ while true; do
   [ -n "${INSTAGRAM_COMMENTS:-}" ] && ensure "$ID/plugins/instagram-comments/instagram-comments.py serve$" "exec python3 '$ID/plugins/instagram-comments/instagram-comments.py' serve"
   # Plow Chat: the owner texts the Boss over iMessage. Off until queue.env sets PLOW_CHAT (see the plugin's header).
   [ -n "${PLOW_CHAT:-}" ] && ensure "$ID/plugins/plow-chat/plow-chat.py serve$" "exec python3 '$ID/plugins/plow-chat/plow-chat.py' serve"
+  # A second, labelled bridge for one number on the owner's WhatsApp lab (whatsapp-linq-api): on while
+  # its login exists; that file names the lab's URL and holds the number's own key.
+  [ -f "$ID/state/plow-chat-lab/creds.json" ] && ensure "$ID/plugins/plow-chat/plow-chat.py serve lab$" "PLOW_CHAT_STATE_DIR='$ID/state/plow-chat-lab' exec python3 '$ID/plugins/plow-chat/plow-chat.py' serve lab"
   # Voice call: the owner phones the Boss and talks to it live. Off until queue.env sets VOICE_CALL
   # (see the plugin's header). Needs uv on PATH: it is the one plugin with a dependency (websockets).
   [ -n "${VOICE_CALL:-}" ] && ensure "$ID/plugins/voice-call/voice-call.py serve$" "exec uv run --script '$ID/plugins/voice-call/voice-call.py' serve"
