@@ -459,6 +459,44 @@ def react(chat_uid: str, message_uid: str, kind: str, creds=None) -> dict:
     return data
 
 
+# --- The owner's Mac ---
+
+LATCH = "plow-latch"
+
+
+def connect_latch(creds: dict) -> str:
+    """Give every Claude agent on this machine the owner's Mac through Plow Latch, as cloud MyPlow
+    gets it at boot: Plow names a relay URL for this line, and the line's own credential is what
+    the relay accepts (a Mac has no proxy to add it). User scope, so the Boss and every engineer
+    see it, with Latch's own instructions. Skipped where Claude already reaches a Plow relay (the
+    Mac that runs Latch has its own connector) and where Plow names none."""
+    if not creds.get("cloud"):
+        return "skip: not a line credential"
+    status, me = api("GET", "/v1/agents/cloud/me", token=creds["token"])
+    url = (me or {}).get("mcp_url") if status < 400 else None
+    if not url:
+        return "skip: Plow names no Latch for this line"
+    path = os.path.expanduser("~/.claude.json")
+    try:
+        cfg = json.load(open(path))
+    except (OSError, ValueError):
+        cfg = {}
+    mine = {"type": "http", "url": url, "headers": {"Authorization": f"Bearer {creds['token']}"}}
+    servers = cfg.setdefault("mcpServers", {})
+    if servers.get(LATCH) == mine:
+        return "already connected"
+    scopes = [servers] + [(p or {}).get("mcpServers") or {} for p in (cfg.get("projects") or {}).values()]
+    if any("/v1/relay/devices/" in str((v or {}).get("url", "")) for sc in scopes for k, v in sc.items() if k != LATCH):
+        return "skip: Claude already reaches a Plow relay"
+    servers[LATCH] = mine
+    # A live file for every running session: replace it whole, readable only by its owner.
+    tmp = path + ".tmp"
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return "connected"
+
+
 # --- Activation ---
 
 def mint_activation() -> dict:
@@ -794,7 +832,12 @@ def main():
         }, indent=2))
     elif cmd == "serve":
         creds = load_creds()
-        bridge_loop(creds if creds.get("token") else activation_loop())
+        creds = creds if creds.get("token") else activation_loop()
+        try:
+            log(f"latch: {connect_latch(creds)}")
+        except Exception as e:  # the owner's Mac is a bonus; the bridge runs without it
+            log(f"latch: not connected: {e}")
+        bridge_loop(creds)
     else:
         raise SystemExit(__doc__)
 
