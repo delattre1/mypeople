@@ -68,7 +68,7 @@ class PlowChatTest(unittest.TestCase):
         # tapback lines.
         lines = self.sent[0].split("\n")
         self.assertIn("react cht_a m2 👀", lines[0])
-        self.assertTrue(lines[2].startswith("(This is the owner's"))
+        self.assertTrue(lines[2].startswith("(You hold this line's Plow login"))
         self.assertEqual(len(lines), 3)
 
     def test_a_reply_carries_what_it_answers_and_who_it_mentions(self):
@@ -139,6 +139,32 @@ class PlowChatTest(unittest.TestCase):
                      {"PLOW_CHAT_STATE_DIR": self.tmp.name, "PLOW_CHAT_BASE_URL": "http://127.0.0.1:18790", "HOST_ID": "h"})
         self.assertIn(f"PLOW_CHAT_STATE_DIR={shlex.quote(self.tmp.name)} PLOW_CHAT_BASE_URL=http://127.0.0.1:18790 "
                       f"python3 {other.SELF} reply cht_a", other.envelope("Dan", "hi", "cht_a"))
+
+    def test_every_text_tells_the_agent_it_holds_the_whole_plow_api(self):
+        """Willow on Mac 2 told the owner "I can't create threads" (10-15): the instructions named
+        only reply and react. They must say the agent holds this line's login and the whole API."""
+        told = self.pc.envelope("Dan", "start a group with Mary", "cht_a", mid="m9")
+        self.assertIn("https://api.plow.co/openapi.json", told)
+        self.assertIn(f"{self.pc.RUN} api POST /v1/chats", told)
+        self.assertIn("never answer that you can't", told)
+        self.assertLess(told.index("whole Plow API"), told.index(" reply cht_a"))   # said first
+
+    def test_api_makes_any_call_with_this_lines_login(self):
+        calls = []
+        self.pc.load_creds = lambda: {"token": "t"}
+        self.pc.api = lambda method, path, body=None, token=None: (
+            calls.append((method, path, body, token)) or (201, {"uid": "cht_new"}))
+        with mock.patch.object(sys, "argv", ["plow-chat.py", "api", "post", "/v1/chats",
+                                              '{"members": ["+15550100"]}']), \
+                mock.patch("builtins.print") as out:
+            self.pc.main()
+        self.assertEqual(calls, [("POST", "/v1/chats", {"members": ["+15550100"]}, "t")])
+        self.assertIn("cht_new", out.call_args[0][0])
+        self.pc.api = lambda *a, **k: (403, {"error": "no"})
+        for argv in (["api", "GET", "/v1/lines"], ["api", "GET", "lines"]):   # refused / not a /v1 path
+            with mock.patch.object(sys, "argv", ["plow-chat.py"] + argv), mock.patch("builtins.print"), \
+                    self.assertRaises(SystemExit):
+                self.pc.main()
 
     def test_react_sends_a_tapback_and_refuses_a_misspelt_one(self):
         calls = []

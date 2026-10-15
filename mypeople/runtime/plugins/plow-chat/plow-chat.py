@@ -11,6 +11,8 @@ Usage:
   plow-chat.py reply cht_x "text"     reply in that chat (groups)
   plow-chat.py reply cht_x --file a.jpg "text"   send photos/files too (up to 4)
   plow-chat.py react cht_x msg_y like tapback a message (love, laugh, an emoji, remove...)
+  plow-chat.py api POST /v1/chats '{...}'  any Plow API call with this line's login
+                                     (docs: https://api.plow.co/openapi.json)
   plow-chat.py status                 print activation/bridge state
 
 The Boss is told what plain text loses: the message a text replies to, who it
@@ -171,9 +173,17 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
     # the first line, so it is the first command run, not one noticed mid-work (Boss, 10-05).
     seen = (f"FIRST, before reading on: {RUN} react {chat_uid} {mid} 👀"
             f"  (marks this text seen for the sender; then read, work and reply)\n") if mid else ""
+    # First, because an agent that only hears about reply/react told the owner "I can't create
+    # threads" (10-15): it holds this line's login, and with it the whole API.
+    able = (f"You hold this line's Plow login and with it the whole Plow API (docs: {BASE}/openapi.json). "
+            f"Any call: {RUN} api METHOD /v1/PATH ['JSON body']; e.g. {RUN} api GET /v1/agents/cloud/me "
+            f"(this line and its chats), or {RUN} api POST /v1/chats '{{\"line_uid\": \"ln_...\", "
+            f"\"members\": [\"+1...\"], \"body\": \"first text\", \"idempotency_key\": \"any-unique-id\"}}' "
+            f"to start a new thread or group. Do what the person asks with it; never answer that you "
+            f"can't without trying. ")
     return (
         f"{seen}[plowchat] from {who} in {chat_uid}: {text}{sent}{said}\n"
-        f"(This is the owner's Plow messages line. The owner texts here, and so "
+        f"({able}This is the owner's Plow messages line. The owner texts here, and so "
         f"does anyone they added to this thread. To answer, run: "
         f"{RUN} reply {chat_uid} \"your reply\" — it goes back to that "
         f"same thread, which may be a group. Plain text only, no markdown. To send "
@@ -764,6 +774,14 @@ def main():
                              f"usage: {SELF} react cht_x msg_y like|love|...|EMOJI|remove")
         args = args + ["", "", ""]
         print(json.dumps(react(*args[:3])))
+    elif cmd == "api":
+        if len(args) < 2 or not args[1].startswith("/v1/"):
+            raise SystemExit(f"usage: {SELF} api GET|POST|PUT|PATCH|DELETE /v1/PATH ['JSON body']")
+        status, data = api(args[0].upper(), args[1], json.loads(args[2]) if len(args) > 2 else None,
+                           token=load_creds().get("token"))
+        print(json.dumps(data, indent=2))
+        if status >= 400:
+            raise SystemExit(f"HTTP {status}")
     elif cmd == "status":
         creds, act = load_creds(), read_json(ACTIVATION, {})
         print(json.dumps({
