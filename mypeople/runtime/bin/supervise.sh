@@ -101,6 +101,9 @@ while true; do
   # Discord agent: builders' questions in the listed channels, answered by its own agent. Off until
   # queue.env sets DISCORD_AGENT (see the plugin's header).
   [ -n "${DISCORD_AGENT:-}" ] && ensure "$ID/plugins/discord-agent/discord-agent.py serve$" "exec python3 '$ID/plugins/discord-agent/discord-agent.py' serve"
+  # Discord chat: people in the owner's Discord channel talk to the Boss, and the developers he selects
+  # build with it. Off until queue.env sets DISCORD_CHAT (see the plugin's header).
+  [ -n "${DISCORD_CHAT:-}" ] && ensure "$ID/plugins/discord-chat/discord-chat.py serve$" "exec python3 '$ID/plugins/discord-chat/discord-chat.py' serve"
   # YouTube chat: bridge between the owner's YouTube live chat and MyPlow, both ways. Off until
   # queue.env sets YOUTUBE_CHAT (see the plugin's header).
   [ -n "${YOUTUBE_CHAT:-}" ] && ensure "$ID/plugins/youtube-chat/youtube-chat.mjs serve$" "exec node '$ID/plugins/youtube-chat/youtube-chat.mjs' serve"

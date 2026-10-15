@@ -174,6 +174,14 @@ READMEs, and hands anything about rules, prizes or someone's verification to the
 those pages and write answers; the plugin posts them after its guards. Off switch:
 `touch "$INSTALL_DIR/state/discord-agent/OFF"`.
 
+## Build with people in Discord
+
+Set `DISCORD_CHAT=1`, `DISCORD_BOT_TOKEN` and `DISCORD_CHAT_CHANNEL_IDS` in `queue.env`. Everyone who writes
+in those channels reaches the Boss, which answers there. `DISCORD_CHAT_USERS=<id>:full,<id>` names whose
+words count for more: a plain id is a selected community developer, whose work only an engineer spawned
+with `mp spawn ... --community` may do (no Latch, no secrets, a sandboxed shell that reaches only GitHub
+and the package registries). Anyone else can chat, report bugs and ask for features, but not develop.
+
 In the cloud: `cloud/Dockerfile` builds MyPlow as a Plow cloud agent (1-click from
 [aiworthusing.com/agent-index/myplow](https://aiworthusing.com/agent-index/myplow)). It is a separate MyPlow
 with its own Boss that knows only its own chat; it never reaches the Mac. **Prototype:** at boot it fetches

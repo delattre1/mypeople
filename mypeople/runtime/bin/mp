@@ -479,8 +479,58 @@ def start_recorder(tab, sess, previous=None):
     return None
 
 
+# A --community engineer works for someone outside the team (plugins/discord-chat). dontAsk refuses
+# every tool not allowed here, reads and writes outside its folder included, and no MCP server is
+# loaded (no Latch). Bash runs only inside Claude's macOS sandbox: it reads nothing in the home dir but
+# its folder, reaches no host but GitHub and the package registries, and opens no Unix socket, so no
+# tmux pane either. Proven on Mac 2 (card 53991ce89f): gh token, Keychain, queue.env, ~/.claude.json,
+# :9900, ssh and example.com all refused; GitHub clone, commit, format-patch and pip work.
+COMMUNITY_SETTINGS = {
+    "permissions": {"allow": ["Edit(./**)"],
+                    "deny": ["Read(~/.config/**)", "Read(~/.ssh/**)", "Read(~/.claude.json)",
+                             "Read(~/Library/**)", "WebFetch", "WebSearch"]},
+    "sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False,
+                "autoAllowBashIfSandboxed": True,
+                "filesystem": {"denyRead": ["~"], "allowRead": ["."]},
+                "network": {"allowedDomains": ["github.com", "*.github.com", "*.githubusercontent.com",
+                                               "pypi.org", "files.pythonhosted.org", "registry.npmjs.org"],
+                            "strictAllowlist": True}},
+}
+# The sandbox refuses ~/.gitconfig and any .git/config, so git skips the first and clones with a
+# separate git dir (COMMUNITY_DOC); its commits carry a name that is not the owner's.
+COMMUNITY_GIT = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TEMPLATE_DIR": "/nonexistent",
+                 "GIT_AUTHOR_NAME": "MyPlow community engineer", "GIT_AUTHOR_EMAIL": "noreply@plow.co",
+                 "GIT_COMMITTER_NAME": "MyPlow community engineer", "GIT_COMMITTER_EMAIL": "noreply@plow.co"}
+COMMUNITY_DOC = """# You are a community engineer
+
+You work for a developer outside the team, through the Boss. Your shell runs in a sandbox: it reads
+and writes only this folder and reaches only GitHub and the package registries (pypi, npm). You
+have no board, no mp, no MCP tools and no GitHub login. Report by finishing your turn: the Boss
+reads your last message.
+
+- Clone with a git dir not named .git (the sandbox refuses .git/config):
+  git clone --separate-git-dir=REPO.git https://github.com/OWNER/REPO REPO
+- Hand work back as patch files, never a push: git format-patch origin/HEAD -o ../patches
+  and name the files in your last message. The Boss reviews them and pushes.
+- Public repos only. Never put a key, token or secret in code, a patch or a message.
+"""
+
+
+def community_flags(role_flags):
+    """The role's own settings (its lifecycle hooks) plus the lock, as one --settings JSON."""
+    settings = {}
+    if "--settings" in role_flags:
+        i = role_flags.index("--settings")
+        with open(role_flags[i + 1]) as f:
+            settings = json.load(f)
+        role_flags = role_flags[:i] + role_flags[i + 2:]
+    settings.pop("skipDangerousModePermissionPrompt", None)
+    settings.update(COMMUNITY_SETTINGS)
+    return role_flags + ["--settings", json.dumps(settings)]
+
+
 def build_launch(aid, cwd, boss_id, is_master, model, backend, resume_session=None,
-                 role_bundle=None):
+                 role_bundle=None, community=False):
     exports = {
         "PATH": "%s/.local/bin:%s/bin:%s" % (os.path.expanduser("~"), INSTALL_DIR, os.environ.get("PATH", "/usr/bin")),
         "AGENT_ID": aid,
@@ -507,9 +557,19 @@ def build_launch(aid, cwd, boss_id, is_master, model, backend, resume_session=No
         prefix += " -u BOSS_ID"  # top-level agent must not inherit a leaked boss
     else:
         exports["BOSS_ID"] = boss_id
+    if community:
+        # None of the tmux server's env (queue.env's secrets, the ssh agent): only what it runs on.
+        # Its hooks read the queue secret from queue.env themselves, outside its sandbox.
+        prefix = "env -i"
+        exports.pop("QUEUE_SECRET")
+        exports.update({k: os.environ[k] for k in ("HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR",
+                                                   "MYPEOPLE_CONFIG_PATH") if os.environ.get(k)})
+        exports.update(COMMUNITY_GIT)
+        role_flags = community_flags(role_flags)
     envstr = envq(**exports)
     if backend == "claude":
-        agent = "claude --dangerously-skip-permissions"
+        agent = ("claude --permission-mode dontAsk --strict-mcp-config --mcp-config '{\"mcpServers\": {}}'"
+                 if community else "claude --dangerously-skip-permissions")
         if role_flags:
             agent += " " + " ".join(shlex.quote(f) for f in role_flags)
         if "--settings" not in role_flags:
@@ -561,6 +621,7 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
     owner_task_id = ""
     temporary = False
     record_flag = False
+    community = False
     i = 1
     while i < len(argv):
         a = argv[i]
@@ -585,6 +646,8 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
             temporary = True
         elif a == "--record":
             record_flag = True
+        elif a == "--community":
+            community = True
         i += 1
     if temporary and owner_task_id:
         print("ERROR: --owner-task and --temporary are mutually exclusive", file=sys.stderr); return 2
@@ -615,6 +678,15 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
     if backend not in VALID_BACKENDS:
         print("ERROR: unsupported backend %r; choose claude, codex or grok" % backend, file=sys.stderr)
         return 2
+    community_root = os.path.join(INSTALL_DIR, "run", "community")
+    if community and (is_master or backend != "claude"):
+        print("ERROR: --community is for a claude engineer: only Claude's sandbox is proven to hold it",
+              file=sys.stderr)
+        return 2
+    if community and cwd and not os.path.realpath(cwd).startswith(os.path.realpath(community_root) + os.sep):
+        print("ERROR: a --community engineer works in its own folder under %s, never in %s"
+              % (community_root, cwd), file=sys.stderr)
+        return 2
     boss_id = full_aid(boss) if (boss_given and boss.strip()) else ""
     if not is_master and model is None:
         # queue.env as it is NOW beats this process's env: the Boss spawns with the env it was
@@ -624,6 +696,9 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
         model = {"claude": pinned.get("DEFAULT_CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
                  "codex": pinned.get("DEFAULT_CODEX_MODEL") or DEFAULT_CODEX_MODEL,
                  "grok": pinned.get("DEFAULT_GROK_MODEL") or DEFAULT_GROK_MODEL}.get(backend) or None
+    if not is_local(aid) and community:
+        print("ERROR: --community spawns only on this node", file=sys.stderr)
+        return 2
     if not is_local(aid):
         ok, result = remote_task("spawn", aid, {
             "backend": backend, "cwd": cwd or "", "boss": boss_id,
@@ -636,8 +711,12 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
         return 2
     _, sess, tab = C.parse_agent_id(aid)
     if cwd is None:
-        cwd = os.path.join(INSTALL_DIR, "run", "boss" if is_master else "eng")
+        cwd = os.path.join(community_root, tab) if community else \
+            os.path.join(INSTALL_DIR, "run", "boss" if is_master else "eng")
     os.makedirs(cwd, exist_ok=True)
+    if community:
+        with open(os.path.join(cwd, "CLAUDE.md"), "w") as f:
+            f.write(COMMUNITY_DOC)
     if backend == "claude":
         pretrust(cwd)
     elif backend == "grok":
@@ -673,7 +752,7 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
                  role_bundle["bundle_path"]))
 
     launch = build_launch(aid, cwd, boss_id, is_master, model, backend,
-                          resume_session=resume_session, role_bundle=role_bundle)
+                          resume_session=resume_session, role_bundle=role_bundle, community=community)
     # audit spawn_cmd string (model pinned so /agents shows exact per-engineer model)
     parts = ["mp", "spawn", aid, "--backend", backend]
     if boss_id:
@@ -692,6 +771,8 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
         parts += ["--temporary"]
     if record_flag or recording_enabled_global():
         parts += ["--record"]
+    if community:
+        parts += ["--community"]
     spawn_cmd = " ".join(shlex.quote(x) for x in parts)
 
     e = tmux_env()
@@ -765,6 +846,7 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
                    "backend": backend, "boss_id": boss_id, "cwd": cwd, "spawn_cmd": spawn_cmd,
                    "model": (model or ""), "is_master": is_master, "retired": False,
                    "lifecycle": lifecycle, "owner_task_id": owner_task_id,
+                   "trust": "community" if community else "",
                    "session_id": session_id,
                    "record": do_record,
                    "summary": prior.get("summary", ""),
@@ -1053,6 +1135,8 @@ def do_revive(argv):
         args += ["--owner-task", rr["owner_task_id"]]
     elif rr.get("lifecycle") == "temporary":
         args += ["--temporary"]
+    if rr.get("trust") == "community":
+        args += ["--community"]   # a revive never hands an outsider's engineer its powers back
     # Pin the exact recorded ref+digest so a restored agent cannot silently come back under a
     # different doctrine than the one it died with. A node that updates itself in place (the cloud
     # image sets MP_REVIVE_FOLLOWS_REGISTRY=1) changes doctrine ON PURPOSE: there the revive resumes
@@ -1148,6 +1232,8 @@ def spawn_args_from_record(aid, rr):
         args += ["--owner-task", rr["owner_task_id"]]
     elif rr.get("lifecycle") == "temporary":
         args += ["--temporary"]
+    if rr.get("trust") == "community":
+        args += ["--community"]
     if rr.get("model"):
         args += ["--model", rr["model"]]
     return args
@@ -1687,7 +1773,8 @@ def do_cron(argv):
 USAGE = {
     "status": "usage: mp status",
     "spawn": "usage: mp spawn <agent_id> [--backend claude|codex|grok] [--cwd PATH] [--boss <id>] "
-             "[--master] [--model <id>] [--role boss|engineer] [--owner-task <todo_id>|--temporary] [--record]",
+             "[--master] [--model <id>] [--role boss|engineer] [--owner-task <todo_id>|--temporary] [--record] "
+             "[--community]",
     "send": SEND_USAGE,
     "peek": "usage: mp peek <agent_id>",
     "kill": "usage: mp kill <agent_id> [--reason ...]",

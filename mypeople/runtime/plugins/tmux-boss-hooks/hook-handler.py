@@ -12,7 +12,9 @@ except Exception:
 AGENT_ID = os.environ.get("AGENT_ID", "")
 BOSS_ID = os.environ.get("BOSS_ID", "")
 QUEUE_URL = os.environ.get("QUEUE_URL", "")
-SECRET = os.environ.get("QUEUE_SECRET", "")
+# A --community engineer is launched without it (its sandboxed shell must not see it); its hooks run
+# outside that sandbox and read it from queue.env instead.
+SECRET = os.environ.get("QUEUE_SECRET", "") or (C.CFG.get("QUEUE_SECRET", "") if C else "")
 BACKEND = os.environ.get("MYPEOPLE_BACKEND", "claude")
 STATUS_DIR = os.path.join(INSTALL_DIR, "status")
 KEYWORDS = ["plan", "approve", "queue", "mp", "autonomous", "verify", "fire-and-forget"]
