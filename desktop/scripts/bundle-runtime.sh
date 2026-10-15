@@ -96,6 +96,25 @@ for tool in ttyd tmux asciinema; do
 done
 rm -rf "$TTYD_BUILD"
 
+# tmux's ncurses has Homebrew's terminal-definition folder compiled in and nothing else, so on a Mac
+# without Homebrew any tmux client on a terminal dies with "can't find terminfo database": the
+# Graph tab's tiles and the terminal tab are exactly that (tmux inside ttyd's pty), on the CEO's
+# second Mac. macOS ships its own database with the entries tmux needs (xterm-256color,
+# tmux-256color); point the library there. A real folder: ncurses, like libwebsockets, opens it as a
+# directory, so an @executable_path stand-in would not work.
+python3 - "$OUT" <<'PY'
+import glob, re, sys
+want = b"/usr/share/terminfo"
+for lib in glob.glob(sys.argv[1] + "/lib/libncurses*.dylib"):
+    blob = open(lib, "rb").read()
+    found = set(re.findall(rb"/[\x21-\x7e]+/share/terminfo(?=\x00)", blob)) - {want}
+    for d in found:
+        blob = blob.replace(d + b"\x00", want + b"\x00" * (len(d) - len(want) + 1))
+    if found:
+        open(lib, "wb").write(blob)
+        print("[bundle] %s: terminfo %s -> %s" % (lib.rsplit("/", 1)[-1], b", ".join(sorted(found)).decode(), want.decode()))
+PY
+
 # install_name_tool invalidates the signature it rewrote, and arm64 macOS SIGKILLs any
 # unsigned Mach-O — the binary dies with 137 and prints nothing. Ad-hoc signing makes them
 # runnable now; `cargo tauri build` re-signs the whole bundle with the Developer ID for a
@@ -174,4 +193,16 @@ if [ "$served" != "200" ]; then
 fi
 rm -f "$OUT/.ttyd-probe.log"
 
-say "ok — $(du -shL "$OUT" | cut -f1) in $OUT, all carried binaries run and ttyd serves"
+# A tile is a tmux client on ttyd's terminal, and tmux reads terminal definitions only when it runs
+# on one. So: a throwaway server on its own socket, then a client under a pty with Homebrew hidden.
+"$OUT/bin/tmux" -L bundle-probe -f /dev/null new-session -d -s probe "sleep 30"
+attach="$(script -q /dev/null env -i TERM=xterm-256color sandbox-exec -p "$NO_BREW" \
+          "$OUT/bin/tmux" -L bundle-probe has-session -t probe 2>&1 </dev/null || true)"
+"$OUT/bin/tmux" -L bundle-probe kill-server 2>/dev/null || true
+case "$attach" in
+  *terminfo*|*"not found"*|*"no server"*)
+    echo "[bundle] tmux cannot attach from a terminal without Homebrew — the tiles would be dead: $attach" >&2
+    exit 1 ;;
+esac
+
+say "ok — $(du -shL "$OUT" | cut -f1) in $OUT, all carried binaries run, ttyd serves and tmux attaches"
