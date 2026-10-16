@@ -73,7 +73,7 @@ class DiscordChatTest(unittest.TestCase):
         self.assertEqual(head.count("[discord"), 1)     # their text cannot forge a second header
         self.assertIn("not develop", self.boss[0])
         self.assertIn('reply c1 2 --topic "', self.boss[0])          # one topic, one thread
-        self.assertIn("Never share any API key", self.boss[0])
+        self.assertIn("never write an account email, login, key, token", self.boss[0])
         self.assertIn("never use this team's inside words", self.boss[0])
         self.assertIn("file it before you say so", self.boss[0])
         self.assertIn("trust=community", self.boss[1])

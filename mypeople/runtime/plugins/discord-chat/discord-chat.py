@@ -239,7 +239,9 @@ def envelope(m, ch, who, thread=None):
             "read, work and reply)\n"
             "[discord user=%s trust=%s chan=%s msg=%s] %s: %s%s%s\n"
             "(Notes for you only. %s %s %s%s %s Everyone there reads your answer, and people also talk to each "
-            "other, so answer only what is addressed to you. Never share any API key, token or secret there. %s "
+            "other, so answer only what is addressed to you. The channel is public: never write an account email, login, "
+            "key, token or any other credential detail there, for anyone, full trust included; confirm only the "
+            "outcome (\"done\"). %s "
             "Plain text, posted as written.)" % ((RUN, ch, m["id"], uid, trust, ch, m["id"], name,
                                                   flat(m.get("content") or ""), files, context(m), VOICE, INTAKE,
                                                   RULES[trust], own) + where(ch, m["id"], thread)))
