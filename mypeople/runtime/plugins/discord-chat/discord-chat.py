@@ -2,8 +2,8 @@
 """Discord chat plugin: people in the owner's Discord channel talk to the Boss, the way his Plow Chat
 groups do over iMessage (plugins/plow-chat), and the developers he selects build with it.
 
-The listed channels are read every few seconds. Every human message there reaches the Boss as one
-line, with the sender's trust stamped by this plugin, never taken from the text:
+The listed channels, and the threads open in them, are read every second. Every human message there
+reaches the Boss as one line, with the sender's trust stamped by this plugin, never taken from the text:
 
     [discord user=<id> trust=<full|community|guest> chan=<id> msg=<id>] <name>: <text>
 
@@ -13,8 +13,10 @@ line, with the sender's trust stamped by this plugin, never taken from the text:
     work. `assign` refuses any other engineer.
   - guest: everyone else. They can chat with the agent to test it, report bugs and ask for features,
     but they cannot develop or get a PR shipped, and `assign` refuses them an engineer.
-The Boss answers with `reply`, only into a listed channel, and each reply passes discord-agent's post
-filter (no token, local path or private repo). It keeps one owner engineer per person with `assign`.
+The Boss answers with `reply`, one topic per thread: a request said in the channel itself is answered
+in a thread `reply --topic` opens on it, and work on it goes on there, so the channel stays a list of
+requests. Each reply passes discord-agent's post filter (no token, local path or private repo). It
+keeps one owner engineer per person with `assign`.
 Discord's client, the one-line flattener and that filter all come from discord-agent.
 
 Config (env, or queue.env):
@@ -25,7 +27,8 @@ Config (env, or queue.env):
     DISCORD_CHAT_USERS=1234:full,5678           # selected Discord user ids; no suffix = community
 
     discord-chat.py serve                       read and route forever (what supervise.sh runs)
-    discord-chat.py reply <chan> <msg> "text"   answer that message in its channel
+    discord-chat.py reply <chan> <msg> --topic "a few words" "text"   answer a request in a thread on it
+    discord-chat.py reply <thread> <msg> "text"                      answer inside a thread
     discord-chat.py react <chan> <msg> EMOJI    react to it (the Boss's 👀 = it read the message)
     discord-chat.py assign <user> <agent>       make <agent> that person's owner engineer
     discord-chat.py status
@@ -58,6 +61,8 @@ RUN = "python3 %s" % SELF
 # would want Discord's gateway websocket instead (plow-chat's stdlib client is the model).
 POLL = 1
 ME = ""     # the bot's own user id, set by serve(): its messages are "your message" to the agent
+STARTED = time.time()
+THREADS_EVERY = 10     # seconds between listings of the threads open in the listed channels
 
 # How it sounds there. Without this the Boss recited these notes to the channel: "Got it, this channel
 # reaches the Boss. I can chat, take bug reports and feature requests." (the owner's test, 10-15).
@@ -104,6 +109,37 @@ def users():
 
 def channels():
     return [c.strip() for c in cfg("DISCORD_CHAT_CHANNEL_IDS").split(",") if c.strip()]
+
+
+def open_to(ch):
+    """A listed channel, or a thread in one: the only places this plugin posts or reacts."""
+    if ch in channels():
+        return True
+    try:
+        return ch.isdigit() and api("GET", "/channels/%s" % ch).get("parent_id") in channels()
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def threads(st):
+    """{thread id: name} of the active threads in the listed channels, listed again every THREADS_EVERY
+    seconds: each request's thread, and any thread people open there themselves."""
+    if time.time() - st.get("threads_at", 0) >= THREADS_EVERY:
+        listed, guilds = channels(), st.setdefault("guilds", {})
+        for ch in listed:
+            if ch not in guilds:
+                guilds[ch] = api("GET", "/channels/%s" % ch)["guild_id"]
+        st["threads"] = {t["id"]: t.get("name") or "" for g in {guilds[c] for c in listed}
+                         for t in api("GET", "/guilds/%s/threads/active" % g).get("threads") or []
+                         if t.get("parent_id") in listed}
+        st["threads_at"] = time.time()
+    return st.get("threads", {})
+
+
+def since_start():
+    """The snowflake of the moment this plugin started: a channel or thread read for the first time is read
+    from there, so nothing said before replays and a thread opened later loses nothing."""
+    return str((int(STARTED * 1000) - 1420070400000) << 22)
 
 
 def read_json(p, default):
@@ -183,7 +219,7 @@ def context(m):
     return "".join("\n(%s)" % line for line in lines)
 
 
-def envelope(m, ch, who):
+def envelope(m, ch, who, thread=None):
     a = m["author"]
     uid = a["id"]
     trust = who.get(uid, "guest")
@@ -202,11 +238,22 @@ def envelope(m, ch, who):
     return ("FIRST, before reading on: %s react %s %s \U0001F440  (marks this message seen for the sender; then "
             "read, work and reply)\n"
             "[discord user=%s trust=%s chan=%s msg=%s] %s: %s%s%s\n"
-            "(Notes for you only. %s %s %s%s This is the owner's Discord channel %s: everyone in it reads your "
-            "answer, and people there also talk to each other, so answer only what is addressed to you. Never "
-            "share any API key, token or secret there. To answer, run: %s reply %s %s \"your reply\" -- plain "
-            "text, posted as written.)" % (RUN, ch, m["id"], uid, trust, ch, m["id"], name, flat(m.get("content") or ""), files, context(m),
-                                          VOICE, INTAKE, RULES[trust], own, ch, RUN, ch, m["id"]))
+            "(Notes for you only. %s %s %s%s %s Everyone there reads your answer, and people also talk to each "
+            "other, so answer only what is addressed to you. Never share any API key, token or secret there. %s "
+            "Plain text, posted as written.)" % ((RUN, ch, m["id"], uid, trust, ch, m["id"], name,
+                                                  flat(m.get("content") or ""), files, context(m), VOICE, INTAKE,
+                                                  RULES[trust], own) + where(ch, m["id"], thread)))
+
+
+# The owner's ask (10-16): one topic, one thread, so the channel is not spammed and stays readable.
+def where(ch, mid, thread):
+    if thread is not None:
+        return ('This is the thread "%s" in the owner\'s Discord channel.' % flat(thread)[:100],
+                'To answer, run: %s reply %s %s "your reply" -- it stays in this thread.' % (RUN, ch, mid))
+    return ("This is the owner's Discord channel itself.",
+            'One topic, one thread: answer a request said here only inside a thread on it, which this opens: '
+            '%s reply %s %s --topic "a few words naming the request" "your reply". Keep working on it in that '
+            'thread; a new request gets its own.' % (RUN, ch, mid))
 
 
 def send_to_boss(text):
@@ -217,19 +264,18 @@ def send_to_boss(text):
 
 
 def poll(ch, st, who):
-    """Route a channel's new human messages. The first look at a channel only records its newest
-    message, so turning this on replays no backlog."""
+    """Route a channel's or thread's new human messages, from where it was last read, or from the
+    plugin's start the first time (since_start)."""
     cur = st.setdefault("cursor", {})
     if ch not in cur:
-        newest = api("GET", "/channels/%s/messages?limit=1" % ch) or []
-        cur[ch] = newest[0]["id"] if newest else "0"
+        cur[ch] = since_start()
         return
     msgs = sorted(api("GET", "/channels/%s/messages?after=%s&limit=50" % (ch, cur[ch])) or [],
                   key=lambda m: int(m["id"]))
     for m in msgs:
         a = m.get("author") or {}
         if not a.get("bot") and ((m.get("content") or "").strip() or m.get("attachments")):
-            if not send_to_boss(envelope(m, ch, who)):
+            if not send_to_boss(envelope(m, ch, who, st.get("threads", {}).get(ch))):
                 return      # cursor stays: retried next pass
             log("routed %s from %s (%s)" % (m["id"], a.get("id"), who.get(a.get("id"), "guest")))
         cur[ch] = m["id"]
@@ -243,7 +289,7 @@ def serve():
         st = read_json(STATE, {})
         try:
             who = users()
-            for ch in channels():
+            for ch in channels() + list(threads(st)):
                 poll(ch, st, who)
         except (OSError, ValueError, KeyError, urllib.error.URLError) as e:
             log("pass failed: %s" % e)
@@ -253,28 +299,41 @@ def serve():
 
 
 # ---------------------------------------------------------------- outbound
-def reply(ch, msg, text):
-    """Post into a listed channel, never anywhere else, and never a secret."""
-    if ch not in channels():
-        raise SystemExit("refused: %s is not a listed channel" % ch)
+def reply(ch, msg, text, topic=""):
+    """Post in a thread of a listed channel, never anywhere else, and never a secret. A request said in
+    the channel itself is answered in a thread opened on it: one topic, one thread."""
+    if not open_to(ch):
+        raise SystemExit("refused: %s is neither a listed channel nor a thread in one" % ch)
     text = text.strip()
     if not text:
         raise SystemExit("refused: empty reply")
     if SECRETISH.search(text):
         raise SystemExit("refused: it looks like a token, a local path or a private repo, and people outside "
                          "the team read this channel. Nothing was sent; rewrite it without that.")
+    if ch in channels():
+        if not (msg and topic.strip()):
+            raise SystemExit('refused: in the channel itself, answer inside a thread on their message: %s reply %s '
+                             '<msg> --topic "a few words" "text". Nothing was sent.' % (RUN, ch))
+        try:
+            ch = api("POST", "/channels/%s/messages/%s/threads" % (ch, msg),
+                     {"name": flat(topic)[:100], "auto_archive_duration": 1440})["id"]
+        except urllib.error.HTTPError as e:
+            if e.code != 400:
+                raise
+            ch = msg    # it has a thread already, and a thread opened on a message takes that message's id
+        msg = ""        # the thread shows the message it answers at its top
     for i in range(0, len(text), 2000):
         body = {"content": text[i:i + 2000], "allowed_mentions": {"parse": []}}
         if i == 0 and msg:
             body["message_reference"] = {"message_id": msg, "channel_id": ch, "fail_if_not_exists": False}
         api("POST", "/channels/%s/messages" % ch, body)
-    return "sent"
+    return "sent in %s" % ch
 
 
 def react(ch, msg, emoji):
-    """The agent's own reaction on a message in a listed channel (👀 = it read it)."""
-    if ch not in channels() or not msg.isdigit() or not emoji or emoji.isascii() or len(emoji) > 8:
-        raise SystemExit("usage: %s react <listed channel> <msg> EMOJI" % RUN)
+    """The agent's own reaction on a message in a listed channel or its threads (👀 = it read it)."""
+    if not msg.isdigit() or not emoji or emoji.isascii() or len(emoji) > 8 or not open_to(ch):
+        raise SystemExit("usage: %s react <listed channel or thread> <msg> EMOJI" % RUN)
     api("PUT", "/channels/%s/messages/%s/reactions/%s/@me" % (ch, msg, urllib.parse.quote(emoji)))
     return "reacted"
 
@@ -284,14 +343,19 @@ def main(argv):
     if cmd == "serve":
         serve()
     elif cmd == "reply" and len(args) >= 2 and args[0].isdigit():
+        topic = ""
+        if "--topic" in args:
+            i = args.index("--topic")
+            topic, args = (args[i + 1] if i + 1 < len(args) else ""), args[:i] + args[i + 2:]
         msg = args.pop(1) if len(args) >= 3 and args[1].isdigit() else ""
-        print(reply(args[0], msg, " ".join(args[1:])))
+        print(reply(args[0], msg, " ".join(args[1:]), topic))
     elif cmd == "react" and len(args) == 3:
         print(react(*args))
     elif cmd == "assign" and len(args) == 2:
         print(assign(*args))
     elif cmd == "status":
-        print(json.dumps({"channels": channels(), "users": users(), "cursor": read_json(STATE, {}).get("cursor"),
+        print(json.dumps({"channels": channels(), "threads": read_json(STATE, {}).get("threads"), "users": users(),
+                          "cursor": read_json(STATE, {}).get("cursor"),
                           "owners": read_json(OWNERS, {})}, indent=2))
     else:
         raise SystemExit(__doc__)

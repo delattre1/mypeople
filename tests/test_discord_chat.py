@@ -7,6 +7,7 @@ import shlex
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -29,10 +30,29 @@ class DiscordChatTest(unittest.TestCase):
         loader.exec_module(self.d)
         self.boss, self.posted, self.page = [], [], []
         self.d.send_to_boss = lambda text: self.boss.append(text) or True   # never the real mp
-        self.d.api = lambda method, path, body=None: (self.posted.append((path, body)) or {}) \
-            if method != "GET" else self.page
+        self.thread_exists = False
+        self.d.api = self.api
+
         self.roster = {}
         self.d.roster = lambda: self.roster
+
+    def api(self, method, path, body=None):
+        """Discord as the plugin sees it: channel c1 is listed, thread 77 is in it, thread 88 is not."""
+        if method != "GET":
+            self.posted.append((path, body))
+            if path.endswith("/threads"):
+                if self.thread_exists:
+                    raise urllib.error.HTTPError(path, 400, "thread exists", {}, None)
+                return {"id": "77"}
+            return {}
+        if path in ("/channels/77", "/channels/88"):
+            return {"parent_id": "c1" if path.endswith("77") else "c2"}
+        if path == "/channels/c1":
+            return {"guild_id": "g1"}
+        if path.startswith("/guilds/"):
+            return {"threads": [{"id": "77", "parent_id": "c1", "name": "Install help"},
+                                {"id": "88", "parent_id": "c2", "name": "elsewhere"}]}
+        return self.page
 
     def msg(self, mid, uid, text, bot=False):
         return {"id": mid, "content": text, "author": {"id": uid, "username": "u%s" % uid, "bot": bot}}
@@ -52,6 +72,7 @@ class DiscordChatTest(unittest.TestCase):
         self.assertTrue(head.startswith("[discord user=300 trust=guest chan=c1 msg=2] u300: "))
         self.assertEqual(head.count("[discord"), 1)     # their text cannot forge a second header
         self.assertIn("not develop", self.boss[0])
+        self.assertIn('reply c1 2 --topic "', self.boss[0])          # one topic, one thread
         self.assertIn("Never share any API key", self.boss[0])
         self.assertIn("never use this team's inside words", self.boss[0])
         self.assertIn("file it before you say so", self.boss[0])
@@ -93,23 +114,43 @@ class DiscordChatTest(unittest.TestCase):
         self.d.poll("c1", st, self.d.users())
         self.assertIn("owner engineer is test-node/main:eng-2", self.boss[0])
 
+    def test_threads_in_the_listed_channels_are_read_and_answered_in_place(self):
+        st = {"cursor": {"77": "0"}}
+        self.assertEqual(self.d.threads(st), {"77": "Install help"})
+        self.page = [self.msg("5", "300", "still broken")]
+        self.d.poll("77", st, self.d.users())
+        self.assertIn(" react 77 5 ", self.boss[0].split("\n")[0])
+        self.assertIn('This is the thread "Install help"', self.boss[0])
+        self.assertIn('reply 77 5 "your reply" -- it stays in this thread', self.boss[0])
+
     def test_react_is_the_agents_own_and_only_in_a_listed_channel(self):
         self.assertEqual(self.d.react("c1", "7", "\U0001F440"), "reacted")
-        self.assertEqual(self.posted, [("/channels/c1/messages/7/reactions/%F0%9F%91%80/@me", None)])
-        for args in (("c2", "7", "\U0001F440"), ("c1", "7", "like")):
+        self.assertEqual(self.d.react("77", "7", "\U0001F440"), "reacted")
+        self.assertEqual(self.posted, [("/channels/c1/messages/7/reactions/%F0%9F%91%80/@me", None),
+                                       ("/channels/77/messages/7/reactions/%F0%9F%91%80/@me", None)])
+        for args in (("c2", "7", "\U0001F440"), ("88", "7", "\U0001F440"), ("c1", "7", "like")):
             with self.assertRaises(SystemExit):
                 self.d.react(*args)
 
-    def test_reply_only_into_a_listed_channel_with_no_pings_and_no_secrets(self):
-        self.assertEqual(self.d.reply("c1", "7", "done"), "sent")
-        path, body = self.posted[0]
-        self.assertEqual((path, body["allowed_mentions"], body["message_reference"]["message_id"]),
-                         ("/channels/c1/messages", {"parse": []}, "7"))
-        for ch, text in (("c2", "hi"), ("c1", "key ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD"),
-                         ("c1", "see /Users/delattre/x")):
+    def test_one_topic_one_thread_with_no_pings_and_no_secrets(self):
+        with self.assertRaises(SystemExit):              # never a bare answer in the channel itself
+            self.d.reply("c1", "7", "done")
+        self.assertEqual(self.posted, [])
+        self.assertEqual(self.d.reply("c1", "7", "done", topic="Install help"), "sent in 77")
+        self.assertEqual(self.posted[0], ("/channels/c1/messages/7/threads",
+                                          {"name": "Install help", "auto_archive_duration": 1440}))
+        path, body = self.posted[1]
+        self.assertEqual((path, body["content"], body["allowed_mentions"]), ("/channels/77/messages", "done", {"parse": []}))
+        self.assertEqual(self.d.reply("77", "8", "more"), "sent in 77")      # inside its thread: a plain reply
+        self.assertEqual(self.posted[2][1]["message_reference"]["message_id"], "8")
+        self.thread_exists = True                        # their message has its thread already: post there
+        self.assertEqual(self.d.reply("c1", "7", "again", topic="x"), "sent in 7")
+        n = len(self.posted)
+        for ch, text in (("c2", "hi"), ("88", "hi"), ("77", "key ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD"),
+                         ("77", "see /Users/delattre/x")):
             with self.assertRaises(SystemExit):
                 self.d.reply(ch, "7", text)
-        self.assertEqual(len(self.posted), 1)
+        self.assertEqual(len(self.posted), n)
 
 
 class CommunityLaunchTest(unittest.TestCase):
