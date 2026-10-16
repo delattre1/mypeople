@@ -57,6 +57,7 @@ RUN = "python3 %s" % SELF
 # ponytail: one REST read per channel per second, so a message waits up to ~1 s. Many channels or 429s
 # would want Discord's gateway websocket instead (plow-chat's stdlib client is the model).
 POLL = 1
+ME = ""     # the bot's own user id, set by serve(): its messages are "your message" to the agent
 
 # How it sounds there. Without this the Boss recited these notes to the channel: "Got it, this channel
 # reaches the Boss. I can chat, take bug reports and feature requests." (the owner's test, 10-15).
@@ -159,6 +160,29 @@ def assign(uid, aid):
 
 
 # ---------------------------------------------------------------- inbound
+def speaker(author):
+    if author.get("id") == ME:
+        return "you"
+    return flat(author.get("global_name") or author.get("username") or "someone")[:40]
+
+
+def context(m):
+    """What plain text loses, as plow-chat tells the Boss: the message this one replies to, and who it tags."""
+    lines = []
+    ref = m.get("referenced_message")
+    if ref:
+        who = speaker(ref.get("author") or {})
+        text = flat(ref.get("content") or "")
+        text = (text[:500] + "…" if len(text) > 500 else text) or "(a file or embed)"
+        lines.append("in reply to %s message %s: \"%s\"" % ("your" if who == "you" else who + "'s", ref.get("id"), text))
+    elif m.get("message_reference"):
+        lines.append("in reply to a message that is gone")
+    tags = [speaker(u) for u in m.get("mentions") or []]
+    if tags:
+        lines.append("mentions: " + ", ".join(dict.fromkeys(tags)))
+    return "".join("\n(%s)" % line for line in lines)
+
+
 def envelope(m, ch, who):
     a = m["author"]
     uid = a["id"]
@@ -177,11 +201,11 @@ def envelope(m, ch, who):
     # this plugin: a 👀 is his proof that the agent itself read it (as plow-chat's envelope).
     return ("FIRST, before reading on: %s react %s %s \U0001F440  (marks this message seen for the sender; then "
             "read, work and reply)\n"
-            "[discord user=%s trust=%s chan=%s msg=%s] %s: %s%s\n"
+            "[discord user=%s trust=%s chan=%s msg=%s] %s: %s%s%s\n"
             "(Notes for you only. %s %s %s%s This is the owner's Discord channel %s: everyone in it reads your "
             "answer, and people there also talk to each other, so answer only what is addressed to you. Never "
             "share any API key, token or secret there. To answer, run: %s reply %s %s \"your reply\" -- plain "
-            "text, posted as written.)" % (RUN, ch, m["id"], uid, trust, ch, m["id"], name, flat(m.get("content") or ""), files,
+            "text, posted as written.)" % (RUN, ch, m["id"], uid, trust, ch, m["id"], name, flat(m.get("content") or ""), files, context(m),
                                           VOICE, INTAKE, RULES[trust], own, ch, RUN, ch, m["id"]))
 
 
@@ -212,7 +236,8 @@ def poll(ch, st, who):
 
 
 def serve():
-    api("GET", "/users/@me")    # a dead token fails here; supervise.sh restarts us
+    global ME
+    ME = api("GET", "/users/@me")["id"]    # a dead token fails here; supervise.sh restarts us
     log("up, routing %s to %s" % (", ".join(channels()), BOSS))
     while True:
         st = read_json(STATE, {})
