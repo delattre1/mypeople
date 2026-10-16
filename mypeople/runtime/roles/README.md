@@ -35,7 +35,8 @@ of them in one version. A registry flip leaves every running agent of that role 
   repos).
 - `mp-system` 3.0.0 (live install only): the split that moves agent control out of the shared skill
   into `mp-boss-manager`.
-- `mp cron` (5.22.12, packaged in 5.22.56): add to "Supported agent operations":
-  `mp cron add "<cron>" <session:agent> "<message>" --card <card_id>` / `mp cron ls` /
-  `mp cron rm <id>`. Schedule a message to any agent, yourself included, instead of writing your own
-  timer loop. Each run arrives as a `[cron <id>]` package and is reported as one comment on the card.
+- `mp cron` (5.22.12; reply channel in 5.22.57): add to "Supported agent operations":
+  `mp cron add "<cron>" <session:agent> "<task>" --for <name> --reply "<reply command>"` /
+  `mp cron set <id> --reply "..."` / `mp cron ls` / `mp cron rm <id>`. Schedule a message to any agent,
+  yourself included, instead of writing your own timer loop. A request that came from a chat names
+  that chat's reply command, so each run answers the person where they asked.

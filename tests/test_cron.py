@@ -62,7 +62,7 @@ class CronTests(unittest.TestCase):
         sends = []
         replies = []
 
-        def fake_fire(sid, s, due):
+        def fake_fire(s):
             sends.append(s["message"])
             return replies.pop(0)
 
@@ -89,39 +89,30 @@ class CronTests(unittest.TestCase):
             with open(mp.CRON_LOG) as f:
                 self.assertEqual(len(f.read().splitlines()), 3)
 
-    def test_a_run_says_who_sent_it_and_where_to_report(self):
+    def test_a_run_names_who_set_it_and_how_to_reply_to_them(self):
         s = {"when": "0 * * * *", "agent": "main:eng-1", "message": "run the test scan",
-             "card": "c0ffee1234", "by": "test-node/main:Boss"}
-        pkg = self.mp.cron_package("a1", s, datetime(2026, 10, 16, 15, 0))
-        self.assertTrue(pkg.startswith('[cron a1] scheduled by test-node/main:Boss ("0 * * * *"), '
-                                       'run 2026-10-16 15:00'), pkg)
-        self.assertIn(": run the test scan\n", pkg)
-        self.assertIn('mp comment c0ffee1234 "cron a1: <what you did>"', pkg)
-        self.assertIn("mp cron rm a1", pkg)
-        # A schedule from before cards were required still says where it came from.
-        legacy = self.mp.cron_package("b2", dict(s, card=None), datetime(2026, 10, 16, 15, 0))
-        self.assertTrue(legacy.startswith("[cron b2] scheduled by"))
-        self.assertNotIn("mp comment", legacy)
+             "for": "Dana", "reply": 'chat.py reply cht_x "your reply"'}
+        self.assertEqual(self.mp.cron_package(s),
+                         "[cronjob] Task Dana set up: run the test scan\n"
+                         'When done, reply to Dana here: chat.py reply cht_x "your reply"')
+        # A schedule made without either still says it is a cronjob, and no reply line is invented.
+        self.assertEqual(self.mp.cron_package({"message": "scan"}),
+                         "[cronjob] Task the owner set up: scan")
 
-    def test_add_needs_a_card_that_exists_and_posts_the_job_on_it(self):
+    def test_reply_channel_saved_at_add_and_changeable_later(self):
         mp = self.mp
-        posted = []
         with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(mp, "CRON_PATH", os.path.join(d, "cron.json")), \
-                mock.patch.object(mp, "do_comment", lambda a: posted.append(a) or self.card_rc):
-            add = ["add", "0 * * * *", "main:eng-1", "run the test scan"]
-            self.assertEqual(mp.do_cron(add), 2)                       # no --card
-            self.card_rc = 1
-            self.assertEqual(mp.do_cron(add + ["--card", "nope"]), 1)  # card refused the comment
-            self.assertEqual(mp.C.read_json(mp.CRON_PATH, {}), {})
-            self.card_rc = 0
-            self.assertEqual(mp.do_cron(add + ["--card", "c0ffee1234"]), 0)
+                mock.patch.object(mp, "CRON_PATH", os.path.join(d, "cron.json")):
+            self.assertEqual(mp.do_cron(["add", "0 * * * *", "main:eng-1", "run the test scan",
+                                         "--for", "Dana", "--reply", "chat.py reply cht_x"]), 0)
             (sid, s), = mp.C.read_json(mp.CRON_PATH).items()
-            self.assertEqual((s["card"], s["message"]), ("c0ffee1234", "run the test scan"))
-            self.assertEqual(posted[-1][0], "c0ffee1234")
-            self.assertIn("cron %s scheduled" % sid, posted[-1][1])
-            self.assertEqual(mp.do_cron(["rm", sid]), 0)
-            self.assertEqual(posted[-1], ["c0ffee1234", "cron %s removed: no more runs" % sid])
+            self.assertEqual((s["message"], s["for"], s["reply"]),
+                             ("run the test scan", "Dana", "chat.py reply cht_x"))
+            self.assertEqual(mp.do_cron(["set", sid, "--reply", "wa.py reply chat_y"]), 0)
+            s = mp.C.read_json(mp.CRON_PATH)[sid]
+            self.assertEqual((s["for"], s["reply"]), ("Dana", "wa.py reply chat_y"))
+            self.assertEqual(mp.do_cron(["set", "nope", "--for", "x"]), 1)
+            self.assertEqual(mp.do_cron(["set", sid]), 2)                # nothing to change
 
     def test_never_fires_for_a_minute_before_the_schedule_existed(self):
         parsed = self.mp.cron_parse("0 * * * *")

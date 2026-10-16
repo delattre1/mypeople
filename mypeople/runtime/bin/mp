@@ -1620,10 +1620,11 @@ CRON_LOG = os.path.join(INSTALL_DIR, "logs", "cron.log")
 CRON_RETRY_MIN = 10
 CRON_ALIASES = {"@hourly": "0 * * * *", "@daily": "0 0 * * *", "@weekly": "0 0 * * 0"}
 CRON_RANGES = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
-CRON_USAGE = ('usage: mp cron add "<minute hour day month weekday>" <session:agent> "<message>" '
-              '--card <card_id>\n'
+CRON_USAGE = ('usage: mp cron add "<minute hour day month weekday>" <session:agent> "<task>" '
+              '[--for <name>] [--reply "<reply command>"]\n'
               '         (standard cron or @hourly/@daily/@weekly, in this machine\'s local time;\n'
-              '          the agent reports each run on the card, where the owner reads it)\n'
+              '          --for is who asked, --reply how to answer them in the channel they asked from)\n'
+              '       mp cron set <id> [--for <name>] [--reply "<reply command>"]\n'
               '       mp cron ls\n'
               '       mp cron rm <id>')
 
@@ -1678,33 +1679,37 @@ def cron_due(parsed, created, now):
     return None
 
 
-def cron_package(sid, s, due):
-    """What the agent receives. The bare text alone left nobody knowing who sent it or what was
-    done (CEO 10-16: "this message was sent by, reply to it doing X"). So the run says where it
-    came from, and how to answer: one comment on the schedule's card, where the owner reads it."""
-    run = due.strftime("%Y-%m-%d %H:%M ") + time.strftime("%Z")
-    head = "[cron %s] scheduled by %s (\"%s\"), run %s: %s" % (
-        sid, s.get("by") or "the owner", s["when"], run, s["message"])
-    card = s.get("card")
-    report = (" Do what it asks, then report what you did, with links, as ONE comment on card %s: "
-              "mp comment %s \"cron %s: <what you did>\". The owner reads each run's result there."
-              % (card, card, sid)) if card else ""
-    return "%s\n(A MyPlow schedule sent this, not a person typing now.%s mp cron rm %s stops it.)" % (
-        head, report, sid)
+def cron_package(s):
+    """What the agent receives (CEO 10-16): who set the task up, and how to answer them in the
+    channel they asked from, saved when the schedule was made."""
+    who = s.get("for") or "the owner"
+    reply = ("\nWhen done, reply to %s here: %s" % (who, s["reply"])) if s.get("reply") else ""
+    return "[cronjob] Task %s set up: %s%s" % (who, s["message"], reply)
 
 
-def cron_fire(sid, s, due):
+def cron_fire(s):
     """Run `mp send` with the schedule's package. It goes on stdin, so no argv rule or length
-    limit can mangle it; AGENT_ID is dropped because the reply goes to the card, not to a sender."""
+    limit can mangle it; AGENT_ID is dropped because the answer goes to --reply, not to a sender."""
     env = dict(os.environ)
     env.pop("AGENT_ID", None)
     try:
         r = subprocess.run([sys.executable, os.path.abspath(__file__), "send", s["agent"]],
-                           input=cron_package(sid, s, due), capture_output=True, text=True,
-                           timeout=180, env=env)
+                           input=cron_package(s), capture_output=True, text=True, timeout=180,
+                           env=env)
         return r.returncode, (r.stdout.strip() or r.stderr.strip())[-200:]
     except subprocess.TimeoutExpired:
         return 124, "timed out"
+
+
+def _cron_flags(rest):
+    """Pull --for/--reply <value> out of argv: ({field: value}, the remaining args)."""
+    got = {}
+    for flag, field in (("--for", "for"), ("--reply", "reply")):
+        if flag in rest:
+            i = rest.index(flag)
+            got[field] = rest[i + 1] if i + 1 < len(rest) else ""
+            rest = rest[:i] + rest[i + 2:]
+    return got, rest
 
 
 def cron_tick(now):
@@ -1722,7 +1727,7 @@ def cron_tick(now):
         key, rec = due.strftime("%Y-%m-%d %H:%M"), state.get(sid) or {}
         if rec.get("sent") == key:
             continue
-        rc, out = cron_fire(sid, s, due)
+        rc, out = cron_fire(s)
         state[sid] = dict(rec, last=key, result=out, sent=key if rc == 0 else rec.get("sent"))
         changed.add(sid)
         os.makedirs(os.path.dirname(CRON_LOG), exist_ok=True)
@@ -1734,14 +1739,10 @@ def cron_tick(now):
 
 
 def do_cron(argv):
-    """mp cron add|ls|rm|serve — schedules that each run one `mp send` (card 0176b7cafd)."""
+    """mp cron add|set|ls|rm|serve — schedules that each run one `mp send` (card 0176b7cafd)."""
     from datetime import datetime
     sub, rest = (argv[0], argv[1:]) if argv else ("", [])
-    card = ""
-    if sub == "add" and "--card" in rest:
-        i = rest.index("--card")
-        card = rest[i + 1] if i + 1 < len(rest) else ""
-        rest = rest[:i] + rest[i + 2:]
+    flags, rest = _cron_flags(rest)
     if sub == "add" and len(rest) >= 3:
         when, agent, msg = rest[0], rest[1], " ".join(rest[2:]).strip()
         try:
@@ -1754,40 +1755,36 @@ def do_cron(argv):
                   % agent, file=sys.stderr); return 2
         if not msg:
             print(CRON_USAGE, file=sys.stderr); return 2
-        # The card is where each run's report lands; without one nobody sees what a run did.
-        if not card:
-            print("ERROR: add --card <card_id>: each run is reported on that card", file=sys.stderr)
-            return 2
         sid = os.urandom(4).hex()
-        # Posted before the schedule exists, so a card that does not exist refuses the add, and the
-        # card shows the job itself above every run's report.
-        if do_comment([card, "cron %s scheduled: \"%s\" -> mp send %s \"%s\" (each run is reported "
-                             "here; mp cron rm %s stops it)" % (sid, when, agent, msg, sid)]) != 0:
-            return 1
         schedules = C.read_json_tracked(CRON_PATH, {}) or {}
-        schedules[sid] = {"when": when, "agent": agent, "message": msg, "card": card,
-                          "created": time.time(),
-                          "by": os.environ.get("AGENT_ID", "").strip() or "CEO"}
+        schedules[sid] = dict(flags, when=when, agent=agent, message=msg, created=time.time(),
+                              by=os.environ.get("AGENT_ID", "").strip() or "CEO")
         C.write_json_merged(CRON_PATH, schedules)
-        print("cron %s: %s -> mp send %s %s" % (sid, when, agent, shlex.quote(msg)))
+        print("cron %s: %s -> mp send %s %s"
+              % (sid, when, agent, shlex.quote(cron_package(schedules[sid]))))
+        return 0
+    if sub == "set" and len(rest) == 1 and flags:
+        schedules = C.read_json_tracked(CRON_PATH, {}) or {}
+        if rest[0] not in schedules:
+            print("ERROR: no schedule %s (mp cron ls)" % rest[0], file=sys.stderr); return 1
+        schedules[rest[0]] = dict(schedules[rest[0]], **flags)
+        C.write_json_merged(CRON_PATH, schedules)
+        print("cron %s now sends: %s" % (rest[0], shlex.quote(cron_package(schedules[rest[0]]))))
         return 0
     if sub == "rm" and len(rest) == 1:
         schedules = C.read_json_tracked(CRON_PATH, {}) or {}
-        gone = schedules.pop(rest[0], None)
-        if gone is None:
+        if schedules.pop(rest[0], None) is None:
             print("ERROR: no schedule %s (mp cron ls)" % rest[0], file=sys.stderr); return 1
         C.write_json_merged(CRON_PATH, schedules)
         print("removed %s" % rest[0])
-        if gone.get("card"):
-            do_comment([gone["card"], "cron %s removed: no more runs" % rest[0]])
         return 0
     if sub == "ls" and not rest:
         state = C.read_json(CRON_STATE_PATH, {}) or {}
         for sid, s in sorted((C.read_json(CRON_PATH, {}) or {}).items()):
             rec = state.get(sid) or {}
-            print("%s  %-14s %-16s card %-10s last: %s %s  by %s\n          %s"
-                  % (sid, s["when"], s["agent"], s.get("card") or "-", rec.get("last", "never"),
-                     rec.get("result", ""), s.get("by", ""), shlex.quote(s["message"])))
+            print("%s  %-14s %-16s last: %s %s  by %s\n          %s"
+                  % (sid, s["when"], s["agent"], rec.get("last", "never"), rec.get("result", ""),
+                     s.get("by", ""), shlex.quote(cron_package(s))))
         return 0
     if sub == "serve" and not rest:
         import fcntl
