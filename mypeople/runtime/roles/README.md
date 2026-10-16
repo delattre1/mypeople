@@ -22,3 +22,20 @@ NOT teach agent control.
 Every role must include `mp-system` as a required startup skill. Resolution is fail-closed:
 unknown roles, escaping references, missing files, invalid manifests, or digest drift abort before a
 tmux window or roster entry is created.
+
+## Pending changes
+
+Shared-skill edits that no profile uses yet. The next merged `mypeople-system` version must carry all
+of them in one version. A registry flip leaves every running agent of that role unable to revive
+(`locked role drift`) until it is killed and respawned, so one flip, ordered by the Boss.
+
+- `mypeople-system` 2.4.0 (this repo): MyPeople is renamed MyPlow in the skill text.
+- `mypeople-system` 2.5.0 (live install only): a "Roadmap rules" section (`First asked:` line on
+  filed requests, `Fixes plow-pbc/<repo>#N` in PRs, `Shipped:` comment on requests fixed in private
+  repos).
+- `mp-system` 3.0.0 (live install only): the split that moves agent control out of the shared skill
+  into `mp-boss-manager`.
+- `mp cron` (5.22.12, packaged in 5.22.56): add to "Supported agent operations":
+  `mp cron add "<cron>" <session:agent> "<message>" --card <card_id>` / `mp cron ls` /
+  `mp cron rm <id>`. Schedule a message to any agent, yourself included, instead of writing your own
+  timer loop. Each run arrives as a `[cron <id>]` package and is reported as one comment on the card.
