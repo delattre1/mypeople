@@ -132,7 +132,8 @@ def claude_consent_settings():
     path = os.path.join(INSTALL_DIR, "run", "claude-consent.settings.json")
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        C.write_json(path, {"skipDangerousModePermissionPrompt": True})
+        C.write_json(path, {"skipDangerousModePermissionPrompt": True,
+                            "deniedMcpServers": mprole.CLAUDE_DENIED_MCP})
         return path
     except OSError:
         return None

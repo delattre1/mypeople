@@ -4,7 +4,9 @@
 Claude Code retries a dropped MCP server ~5 times over ~31s, then gives up for the life of the
 session. Latch installs its updates when it quits and nothing reopens it, so after the 10-01 update
 (off 3h22m) every running agent silently lost Latch until a human typed /mcp. This watcher sees
-Latch come back and types `/mcp reconnect all` into each Claude agent's window, only when IDLE.
+Latch come back and types `/mcp reconnect <relay server>` into each Claude agent's window, only
+when IDLE. Never `/mcp reconnect all`: that retries EVERY failed server, and a retried 1Password MCP
+is one more macOS "MyPlow would like to access data from other apps" prompt (card 70a20b5dcf).
 
 Latch is UP when an MCP `ping` through the Plow relay (the URL + key the agents use, read from
 ~/.claude.json) answers with a result. A reconnect is owed to every live Claude agent when Latch
@@ -54,7 +56,7 @@ IDLE_SECONDS = float(os.environ.get("LATCH_RECONNECT_IDLE_SECONDS", "20"))
 LATCH_PROCESS = os.environ.get("LATCH_RECONNECT_PROCESS", r"Plow Latch\.app/Contents/MacOS/Plow Latch$")
 LATCH_APP = Path(os.environ.get("LATCH_RECONNECT_APP", "/Applications/Plow Latch.app"))
 RELAUNCH_AFTER = float(os.environ.get("LATCH_RECONNECT_RELAUNCH_AFTER", "60"))
-COMMAND = "/mcp reconnect all"
+COMMAND = "/mcp reconnect %s"
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 # A dimmed span (SGR 2) up to its reset: how the composer draws a suggestion, never typed text.
 DIM = re.compile(r"\x1b\[2m.*?(?:\x1b\[(?:0|22)?m|$)")
@@ -72,8 +74,8 @@ def tmux(*args):
     return subprocess.run(["tmux", *args], env=env, capture_output=True, text=True)
 
 
-def relay_servers():
-    """(url, auth) of every Plow-relay MCP server any agent project uses. Read per tick, so a
+def relay_entries():
+    """(name, url, auth) of every Plow-relay MCP server any agent project uses. Read per tick, so a
     new or removed connector needs no restart. The key is used, never logged."""
     try:
         cfg = json.loads(CLAUDE_JSON.read_text())
@@ -81,13 +83,14 @@ def relay_servers():
         return []
     scopes = [cfg.get("mcpServers") or {}]
     scopes += [(p or {}).get("mcpServers") or {} for p in (cfg.get("projects") or {}).values()]
-    out = {}
-    for scope in scopes:
-        for s in scope.values():
-            url = (s or {}).get("url") or ""
-            if s.get("type") == "http" and "/v1/relay/devices/" in url:
-                out[url] = (s.get("headers") or {}).get("Authorization", "")
-    return list(out.items())
+    return [(name, s["url"], (s.get("headers") or {}).get("Authorization", ""))
+            for scope in scopes for name, s in scope.items()
+            if (s or {}).get("type") == "http" and "/v1/relay/devices/" in (s.get("url") or "")]
+
+
+def relay_servers():
+    """(url, auth) of each distinct relay, to ping."""
+    return list({url: auth for _, url, auth in relay_entries()}.items())
 
 
 def ping(url, auth):
@@ -187,19 +190,20 @@ def why_busy(aid, st=None, now=None, panes=None):
 
 
 def reconnect(aid):
-    """Type the reconnect into an idle agent. True when typed."""
-    panes = live_panes()
-    if why_busy(aid, panes=panes):
-        return False
-    pane = panes[target(aid)][0]
-    # One tmux invocation for text + Enter, so no other client's keys land between them.
-    r = tmux("send-keys", "-t", pane, "-l", COMMAND, ";", "send-keys", "-t", pane, "Enter")
-    if r.returncode != 0:
-        log(f"{aid}: send-keys failed: {r.stderr.strip()[:120]}")
-        return False
-    time.sleep(4)
-    tail = [ln for ln in tmux("capture-pane", "-p", "-t", pane).stdout.splitlines() if "Reconnected" in ln]
-    log(f"{aid}: reconnected ({tail[-1].strip()[:100] if tail else 'no result line seen'})")
+    """Type a reconnect of each relay server into an idle agent. True when typed."""
+    for name in sorted({name for name, _, _ in relay_entries()}):
+        panes = live_panes()  # re-checked per command: a message may land in between
+        if why_busy(aid, panes=panes):
+            return False
+        pane = panes[target(aid)][0]
+        # One tmux invocation for text + Enter, so no other client's keys land between them.
+        r = tmux("send-keys", "-t", pane, "-l", COMMAND % name, ";", "send-keys", "-t", pane, "Enter")
+        if r.returncode != 0:
+            log(f"{aid}: send-keys failed: {r.stderr.strip()[:120]}")
+            return False
+        time.sleep(4)
+        tail = [ln for ln in tmux("capture-pane", "-p", "-t", pane).stdout.splitlines() if "⎿" in ln and name in ln]
+        log(f"{aid}: reconnected {name} ({tail[-1].strip()[:100] if tail else 'no result line seen'})")
     return True
 
 

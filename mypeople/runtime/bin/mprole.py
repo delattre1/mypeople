@@ -16,6 +16,11 @@ Python 3 stdlib only. No QUEUE_SECRET or auth bytes ever land in a role file / a
 import os, re, io, json, hashlib
 
 BOSS_DOCTRINE_URI = "mypeople://boss-doctrine"
+# MCP servers a claude agent never starts. 1Password's MCP opens 1Password's app-group container,
+# and under MyPlow macOS then asks "MyPlow would like to access data from other apps" for EVERY
+# new process (an App Data grant lives one process): a prompt per spawn and per /mcp reconnect
+# (card 70a20b5dcf). Agents read secrets through `op` and the service account instead.
+CLAUDE_DENIED_MCP = [{"serverName": "1password"}]
 
 
 class RoleError(ValueError):
@@ -338,7 +343,8 @@ def materialize_role(item, aid, backend, bundle_root):
         # ORs skipDangerousModePermissionPrompt across user/local/flag/policy settings before it
         # decides whether to block on the Bypass Permissions modal, so declaring it here makes a
         # role-mounted spawn self-sufficient even if ~/.claude was never seeded (card 293fc81898).
-        overlay = {"skipDangerousModePermissionPrompt": True, "hooks": hooks}
+        overlay = {"skipDangerousModePermissionPrompt": True, "deniedMcpServers": CLAUDE_DENIED_MCP,
+                   "hooks": hooks}
         _write_ro(settings_path, json.dumps(overlay, indent=2))
     elif backend == "codex":
         for s in item["skills"]:

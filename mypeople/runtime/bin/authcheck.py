@@ -129,9 +129,11 @@ def claude_probe(timeout=90, runner=None):
     # Not an agent turn: without AGENT_ID the lifecycle hooks stay silent, so a probe run from an
     # agent's shell (the test suite) never writes that agent's status or pings the Boss "PONG".
     env = {k: v for k, v in os.environ.items() if k != "AGENT_ID"}
+    # No MCP servers: a PONG needs none, and the operator's 1Password MCP under MyPlow is one macOS
+    # "would like to access data from other apps" prompt per probe, every 15 min (card 70a20b5dcf).
     try:
-        r = run(["claude", "-p", PROBE_PROMPT], capture_output=True, text=True, timeout=timeout,
-                env=env)
+        r = run(["claude", "-p", PROBE_PROMPT, "--strict-mcp-config", "--mcp-config", '{"mcpServers": {}}'],
+                capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return UNKNOWN, "auth probe timed out after %ss" % timeout
     except OSError as exc:

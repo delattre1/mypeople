@@ -56,6 +56,9 @@ class LatchReconnectTest(unittest.TestCase):
         self.m.time.sleep = lambda s: None
         self.tmux = FakeTmux()
         self.m.tmux = self.tmux
+        self.m.CLAUDE_JSON = Path(self.tmp.name) / "claude.json"  # never the operator's real one
+        self.m.CLAUDE_JSON.write_text(json.dumps({"projects": {"/p": {"mcpServers": {"plow": {
+            "type": "http", "url": "https://api.plow.co/v1/relay/devices/abc/mcp"}}}}}))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -98,7 +101,9 @@ class LatchReconnectTest(unittest.TestCase):
     def test_text_and_enter_go_in_one_tmux_call(self):
         self.assertTrue(self.m.reconnect(self.agent("ok")))
         (call,) = self.tmux.sent
-        self.assertEqual(call, ("send-keys", "-t", "%0", "-l", "/mcp reconnect all", ";",
+        # the relay by name, never `all`: that also retries 1Password's MCP, one macOS App Data
+        # prompt per agent per release (card 70a20b5dcf)
+        self.assertEqual(call, ("send-keys", "-t", "%0", "-l", "/mcp reconnect plow", ";",
                                 "send-keys", "-t", "%0", "Enter"))
 
     def test_latch_back_after_outage_reconnects_idle_now_busy_later(self):

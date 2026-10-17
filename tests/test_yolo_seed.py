@@ -152,7 +152,10 @@ class RoleBundleOverlayTests(unittest.TestCase):
                     self.assertIn("--settings", words, "no consent file on this launch")
                     self.assertEqual(words.count("--settings"), 1, "claude takes one --settings")
                     with open(words[words.index("--settings") + 1]) as f:
-                        self.assertTrue(json.load(f)["skipDangerousModePermissionPrompt"])
+                        settings = json.load(f)
+                    self.assertTrue(settings["skipDangerousModePermissionPrompt"])
+                    # 1Password's MCP under MyPlow = a macOS App Data prompt per process (70a20b5dcf)
+                    self.assertIn({"serverName": "1password"}, settings["deniedMcpServers"])
 
     def test_overlay_declares_the_consent(self):
         with tempfile.TemporaryDirectory() as td:

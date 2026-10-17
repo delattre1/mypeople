@@ -159,6 +159,15 @@ class VerdictTests(unittest.TestCase):
         self.assertNotIn("AGENT_ID", envs[0])
         self.assertIn("PATH", envs[0])
 
+    def test_probe_starts_no_mcp_servers(self):
+        """Every 15 min the probe started the operator's 1Password MCP, and under MyPlow each one
+        is a macOS 'would like to access data from other apps' prompt (card 70a20b5dcf)."""
+        argvs = []
+        A.claude_probe(runner=lambda argv, **k: argvs.append(argv) or completed("PONG"))
+        argv = argvs[0]
+        self.assertIn("--strict-mcp-config", argv)
+        self.assertEqual(json.loads(argv[argv.index("--mcp-config") + 1]), {"mcpServers": {}})
+
 
 class FirstrunGateTests(unittest.TestCase):
     """The regression itself: `loggedIn: true` is no longer enough."""
