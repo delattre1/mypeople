@@ -535,7 +535,10 @@ def build_launch(aid, cwd, boss_id, is_master, model, backend, resume_session=No
         "PATH": "%s/.local/bin:%s/bin:%s" % (os.path.expanduser("~"), INSTALL_DIR, os.environ.get("PATH", "/usr/bin")),
         "AGENT_ID": aid,
         "QUEUE_URL": QUEUE_URL,
-        "QUEUE_SECRET": SECRET,
+        # Never QUEUE_SECRET: this string is the launch command, which ps shows every user. The agent
+        # gets the secret from the tmux server's env (supervise.sh sources queue.env), and mp and the
+        # hooks read queue.env through this path.
+        "MYPEOPLE_CONFIG_PATH": C.CONFIG_PATH,
         "HOST_ID": HOST_ID,
         "INSTALL_DIR": INSTALL_DIR,
         "MYPEOPLE_BACKEND": backend,
@@ -561,9 +564,8 @@ def build_launch(aid, cwd, boss_id, is_master, model, backend, resume_session=No
         # None of the tmux server's env (queue.env's secrets, the ssh agent): only what it runs on.
         # Its hooks read the queue secret from queue.env themselves, outside its sandbox.
         prefix = "env -i"
-        exports.pop("QUEUE_SECRET")
-        exports.update({k: os.environ[k] for k in ("HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR",
-                                                   "MYPEOPLE_CONFIG_PATH") if os.environ.get(k)})
+        exports.update({k: os.environ[k] for k in ("HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR")
+                        if os.environ.get(k)})
         exports.update(COMMUNITY_GIT)
         role_flags = community_flags(role_flags)
     envstr = envq(**exports)

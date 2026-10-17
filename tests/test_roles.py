@@ -299,6 +299,19 @@ class RoleLaunchTests(unittest.TestCase):
             self.assertIn("grok --permission-mode bypassPermissions", launch)
             self.assertIn("MYPEOPLE_ROLE_DIGEST=%s" % bundle["digest"], launch)
 
+    def test_no_launch_command_carries_the_queue_secret(self):
+        """The launch command is in every process listing: the secret must never be in it, in any mode."""
+        with tempfile.TemporaryDirectory() as td:
+            mp = load_mp(td)
+            for backend in ("claude", "codex", "grok"):
+                for aid, boss, master, community in (("t/main:Boss", "", True, False),
+                                                     ("t/main:eng", "t/main:Boss", False, False),
+                                                     ("t/main:guest", "t/main:Boss", False, True)):
+                    launch = mp.build_launch(aid, td, boss, master, "m", backend, community=community)
+                    self.assertNotIn("QUEUE_SECRET", launch, (backend, aid))
+                    self.assertNotIn("=secret", launch, (backend, aid))  # load_mp's secret value
+                    self.assertIn("MYPEOPLE_CONFIG_PATH=", launch, (backend, aid))
+
     def test_legacy_launch_is_untouched_without_a_role(self):
         with tempfile.TemporaryDirectory() as td:
             mp = load_mp(td)
