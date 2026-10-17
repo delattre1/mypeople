@@ -5,7 +5,6 @@ shortcut, so a refactor that drops either shows up here.
 """
 from pathlib import Path
 import json
-import re
 import shutil
 import subprocess
 import unittest

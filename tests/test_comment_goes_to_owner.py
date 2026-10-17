@@ -4,7 +4,6 @@ It used to ping only the Boss, so every word the CEO said waited for a whole age
 reached the person doing the work: measured on his own card, a median of 18s and a worst case of
 439s. The board knows the owner, so it delivers first and tells the Boss it already did.
 """
-import os
 import tempfile
 import unittest
 from unittest import mock

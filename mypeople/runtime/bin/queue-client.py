@@ -2,7 +2,7 @@
 """MyPlow queue-client (INNER plane): heartbeat + re-announce agents + task poll->tmux relay.
 Owns the durable roster (run/roster.json) and re-announces live agents every heartbeat so a
 server restart / false-prune self-heals within one cycle. Python stdlib only."""
-import os, sys, json, time, subprocess, threading, urllib.parse
+import os, sys, time, subprocess, threading, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpcommon as C

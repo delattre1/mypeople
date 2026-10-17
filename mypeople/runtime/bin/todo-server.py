@@ -381,7 +381,7 @@ def mp_send(agent, message):
     try:
         r = subprocess.run([mp, "send", agent, message], capture_output=True, text=True, timeout=25)
         rc = r.returncode
-    except Exception as e:
+    except Exception:
         rc = -1
         r = None
     try:

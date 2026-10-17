@@ -39,7 +39,6 @@ kbd{font:500 10.5px/1 var(--mono);color:var(--faint);border:1px solid var(--dark
    stops short of it, so the page spends no height on chrome. */
 .wrap{position:relative;z-index:1;padding:18px 24px 120px;}   /* fills the window: no fixed column width */
 .subt{font:400 12px/1.4 var(--mono);color:var(--faint);}
-.eyebrow{margin:0;font:500 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
 
 /* ---- add ---- */
 .addbar{display:flex;gap:8px;align-items:center;height:44px;margin:0 190px 28px 0;   /* clears the fixed Board/Graph nav, which reaches 190px into the wrap's content */
@@ -293,7 +292,6 @@ body.modal-shown #modal{transform:none}
   display:flex;align-items:center;gap:6px;font:500 12.5px/1 var(--sans);box-shadow:0 10px 30px rgba(0,0,0,.45);opacity:0;transform:translateY(6px);pointer-events:none;transition:opacity .16s,transform .16s var(--ease)}
 .jump.show{opacity:1;transform:none;pointer-events:auto}
 .jump:hover{background:#2f2f2c}
-.proofregion{}
 .proof-broken{border:1px solid rgba(255,59,48,.3);border-radius:10px;padding:12px 14px;background:rgba(255,59,48,.07);font-family:var(--sans);font-size:13px;line-height:1.5;color:#ffb4ae}
 .proof-broken b{display:block;margin-bottom:4px;color:#ffd0cc}
 .proof-broken code{font-family:var(--mono,monospace);font-size:12px;word-break:break-all;opacity:.85;}
@@ -556,7 +554,6 @@ const tsMs=v=>{ let n=Number(v)||0; return n<1e12 ? n*1000 : n; };
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
 const STATE_NAMES={working:"Working",review:"Needs your review",blocked:"Blocked",done:"Done",cancelled:"Cancelled",recurring:"Recurring"};
-function stateLabel(s){ return s==="review"?"review (CEO)":(s||"").replace(/_/g," "); }
 function latestAgentComment(task){
   return Math.max(0,...(task.comments||[]).filter(c=>c.by!=="CEO").map(c=>{let n=Number(c.ts)||0;return n<1e12?n*1000:n;}));
 }

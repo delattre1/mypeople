@@ -9,7 +9,6 @@ string every time -- real truncation varies with the text, operator error repeat
 import importlib.machinery
 import importlib.util
 import io
-import os
 from pathlib import Path
 import sys
 import unittest

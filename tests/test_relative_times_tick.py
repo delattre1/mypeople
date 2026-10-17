@@ -6,7 +6,6 @@ This runs the SHIPPED relTime()/refreshRelTimes() from todos.html in node with a
 """
 from pathlib import Path
 import json
-import re
 import shutil
 import subprocess
 import unittest

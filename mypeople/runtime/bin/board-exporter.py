@@ -5,7 +5,7 @@ board; never runs git in the live tree. Carries the <50%-shrink quarantine guard
 
 Usage: board-exporter.py            # daemon: watch + export
        board-exporter.py --once     # single export pass (for tests)"""
-import os, sys, json, time, subprocess, hashlib
+import os, sys, json, time, subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpcommon as C

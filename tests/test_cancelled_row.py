@@ -6,7 +6,6 @@ says so three ways: a grey disc with an x (the twin of done's green disc with a 
 title, and the word.
 """
 from pathlib import Path
-import re
 import unittest
 
 BOARD = (Path(__file__).resolve().parents[1] / "mypeople" / "runtime" / "bin" / "todos.html").read_text()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MyPlow shared helpers: config, auth/session, json io, tmux delivery, http proxy.
 Python 3 stdlib only."""
-import os, sys, json, hmac, hashlib, base64, time, socket, subprocess, threading, urllib.request, urllib.parse
+import os, json, hmac, hashlib, base64, time, socket, subprocess, urllib.request, urllib.parse
 import re
 import mimetypes
 import shlex, signal
