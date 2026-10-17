@@ -146,7 +146,7 @@ def materialize(install):
     # as unchecked-hash .pyc (5.21.31, so the signed bundle stays sealed), which Python never checks
     # against the source: copied in here, they kept every daemon on the app's mpcommon after 5.22.0
     # replaced mpcommon.py beside them. Imports rebuild a cache from the .py that is actually here.
-    for sub in ("bin", "plugins", "plans", "verify", "config", "roles"):
+    for sub in ("bin", "plugins", "verify", "config", "roles"):
         src = os.path.join(rt, sub)
         if os.path.isdir(src):
             shutil.copytree(src, os.path.join(install, sub), dirs_exist_ok=True,
@@ -172,7 +172,7 @@ def materialize(install):
     # adds, so a retired page would survive every upgrade forever as a file the product no longer
     # serves. Removing it here is what makes "removed" true on an upgraded install, not just a
     # fresh one.
-    for gone in ("bin/wall.html", "boss-CLAUDE.md"):
+    for gone in ("bin/wall.html", "boss-CLAUDE.md", "plans/boss-claude.md"):
         try:
             os.remove(os.path.join(install, *gone.split("/")))
         except OSError:
@@ -194,7 +194,7 @@ def materialize(install):
     # cannot hide behind it: `mp status` names any file that no longer matches (card 8f490e73e5).
     # roles/registry.json is merged above and rewritten by role publishing, so it is not code we own.
     files = {}
-    for sub in ("bin", "plugins", "plans", "verify", "config", "roles"):
+    for sub in ("bin", "plugins", "verify", "config", "roles"):
         for root, dirs, names in os.walk(os.path.join(rt, sub)):
             dirs[:] = [d for d in dirs if d not in ("__pycache__", "node_modules")]
             for name in names:
