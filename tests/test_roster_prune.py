@@ -6,8 +6,6 @@ turn `mp revive <long-dead-agent>` from "deliberately retired; not respawning" i
 second Boss. These tests pin that every key survives and only restore-only payload is dropped.
 """
 import glob
-import importlib.machinery
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -16,6 +14,7 @@ import tempfile
 import time
 import unittest
 from unittest import mock
+import sandbox
 unittest.mock = mock
 
 
@@ -25,15 +24,7 @@ DAY = 86400
 
 
 def load_prune():
-    sys.path.insert(0, str(BIN))
-    try:
-        loader = importlib.machinery.SourceFileLoader("roster_prune", str(BIN / "roster-prune.py"))
-        spec = importlib.util.spec_from_loader("roster_prune", loader)
-        m = importlib.util.module_from_spec(spec)
-        loader.exec_module(m)
-        return m
-    finally:
-        sys.path.remove(str(BIN))
+    return sandbox.load_file(BIN / "roster-prune.py", "roster_prune")
 
 
 class PrunableTests(unittest.TestCase):

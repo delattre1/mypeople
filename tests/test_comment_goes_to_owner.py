@@ -8,14 +8,14 @@ import tempfile
 import unittest
 from unittest import mock
 
-from test_board_store import load_module
+import sandbox
 
 
 class CommentDeliveryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.srv = load_module(self.tmp.name, "todo-server.py", "ts_deliver_%d" % id(self))
+        self.srv = sandbox.load(self.tmp.name, "todo-server.py")
         self.sent = []
 
         def fake_send(agent, message):

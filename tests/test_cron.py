@@ -5,36 +5,22 @@ a busy agent inside the window, never re-sends a delivered minute, and never fir
 that passed before the schedule existed.
 """
 from datetime import datetime
-import importlib.machinery
-import importlib.util
 import os
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 from unittest import mock
+import sandbox
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "mypeople" / "runtime" / "bin"
 
 
-def load_mp():
-    sys.path.insert(0, str(BIN))
-    try:
-        loader = importlib.machinery.SourceFileLoader("mp_cli_cron", str(BIN / "mp"))
-        spec = importlib.util.spec_from_loader("mp_cli_cron", loader)
-        module = importlib.util.module_from_spec(spec)
-        loader.exec_module(module)
-        return module
-    finally:
-        sys.path.remove(str(BIN))
-
-
 class CronTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.mp = load_mp()
+        cls.mp = sandbox.load_file(BIN / "mp", "mp_cli_cron")
 
     def match(self, expr, *ymdhm):
         return self.mp.cron_match(self.mp.cron_parse(expr), datetime(*ymdhm))

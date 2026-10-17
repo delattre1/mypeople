@@ -4,44 +4,18 @@ tmux_send_message was mocked by every other test, so its submit behaviour was ne
 here -- which is how an unconditional second Enter survived. These tests drive the real function
 with tmux stubbed at subprocess level.
 """
-import importlib.machinery
-import importlib.util
 import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 import tempfile
 import unittest
 from unittest import mock
+import sandbox
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "mypeople" / "runtime" / "bin"
-
-
-def load_mpcommon(home):
-    config = Path(home) / "queue.env"
-    config.write_text(
-        'export INSTALL_DIR="%s"\n'
-        'export HOST_ID="test-node"\n'
-        'export QUEUE_URL="http://127.0.0.1:9900"\n' % (Path(home) / "state"),
-        encoding="utf-8",
-    )
-    env = {"HOME": str(home), "MYPEOPLE_CONFIG_PATH": str(config),
-           "MYPEOPLE_HOME": str(Path(home) / "state"), "HOST_ID": "test-node",
-           "QUEUE_URL": "http://127.0.0.1:9900"}
-    with mock.patch.dict(os.environ, env, clear=False):
-        sys.modules.pop("mpcommon", None)
-        sys.path.insert(0, str(BIN))
-        try:
-            loader = importlib.machinery.SourceFileLoader("mpcommon", str(BIN / "mpcommon.py"))
-            spec = importlib.util.spec_from_loader("mpcommon", loader)
-            module = importlib.util.module_from_spec(spec)
-            loader.exec_module(module)
-            return module
-        finally:
-            sys.path.remove(str(BIN))
 
 
 class FakeTmux:
@@ -83,7 +57,7 @@ class TmuxSendMessageTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.C = load_mpcommon(self.tmp.name)
+        self.C = sandbox.load(self.tmp.name, "mpcommon.py")
 
     def send(self, message, pane_text=""):
         fake = FakeTmux(pane_text)

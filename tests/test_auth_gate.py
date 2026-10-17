@@ -22,6 +22,7 @@ import unittest
 from unittest import mock
 
 from mypeople import firstrun
+import sandbox
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "mypeople" / "runtime" / "bin"
@@ -29,15 +30,7 @@ BIN = ROOT / "mypeople" / "runtime" / "bin"
 HOUR_MS = 3600 * 1000.0
 
 
-def load_authcheck():
-    loader = importlib.machinery.SourceFileLoader("authcheck_under_test", str(BIN / "authcheck.py"))
-    spec = importlib.util.spec_from_loader("authcheck_under_test", loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
-
-
-A = load_authcheck()
+A = sandbox.load_file(BIN / "authcheck.py", "authcheck_under_test")
 
 
 def write_creds(dirpath, **oauth):

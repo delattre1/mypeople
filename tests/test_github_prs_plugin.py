@@ -3,13 +3,12 @@
 Without it an engineer opens a PR, asks for a review, and never hears the verdict. These tests
 drive the plugin's logic with GitHub, the board and `mp send` stubbed, so nothing leaves the box.
 """
-import importlib.machinery
-import importlib.util
 import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+import sandbox
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "mypeople" / "runtime" / "plugins" / "github-prs" / "github-prs.py"
@@ -17,13 +16,8 @@ PR = "https://github.com/acme/app/pull/8"
 
 
 def load(state_dir):
-    with mock.patch.dict(os.environ, {"GITHUB_PRS_STATE_DIR": state_dir, "HOST_ID": "node",
-                                      "GITHUB_PRS_AUTHOR": "fleet"}):
-        loader = importlib.machinery.SourceFileLoader("github_prs_%d" % id(state_dir), str(PLUGIN))
-        spec = importlib.util.spec_from_loader(loader.name, loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
-        return mod
+    return sandbox.load_file(PLUGIN, "github_prs_%d" % id(state_dir), {
+        "GITHUB_PRS_STATE_DIR": state_dir, "HOST_ID": "node", "GITHUB_PRS_AUTHOR": "fleet"})
 
 
 def ev(key, body="looks good", kind="comment", user="reviewer", state=""):

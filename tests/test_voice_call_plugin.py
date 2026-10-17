@@ -8,8 +8,6 @@ a pause, never over him, talking over the voice stops it, a slow Boss gets one "
 "still on it" and one offer to text, and the latency check measures the gap it claims to.
 """
 import array
-import importlib.machinery
-import importlib.util
 import io
 import json
 import os
@@ -21,17 +19,13 @@ from unittest import mock
 import urllib.error
 import urllib.request
 import wave
+import sandbox
 
 PLUGINS = Path(__file__).resolve().parents[1] / "mypeople" / "runtime" / "plugins"
 
 
 def load(env):
-    with mock.patch.dict(os.environ, env):
-        loader = importlib.machinery.SourceFileLoader("voice_call", str(PLUGINS / "voice-call/voice-call.py"))
-        spec = importlib.util.spec_from_loader("voice_call", loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
-    return mod
+    return sandbox.load_file(PLUGINS / "voice-call/voice-call.py", "voice_call", env)
 
 
 OWNER = "+15555550123"  # synthetic: this repo is public

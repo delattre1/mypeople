@@ -6,8 +6,6 @@ websocket (card 5b125624f8), so the same holds across a dropped socket.
 """
 import base64
 import hashlib
-import importlib.machinery
-import importlib.util
 from datetime import timedelta
 import json
 import os
@@ -22,17 +20,13 @@ import threading
 import time
 import unittest
 from unittest import mock
+import sandbox
 
 PLUGINS = Path(__file__).resolve().parents[1] / "mypeople" / "runtime" / "plugins"
 
 
 def load(name, rel, env):
-    with mock.patch.dict(os.environ, env):
-        loader = importlib.machinery.SourceFileLoader(name, str(PLUGINS / rel))
-        spec = importlib.util.spec_from_loader(name, loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
-    return mod
+    return sandbox.load_file(PLUGINS / rel, name, env)
 
 
 class PlowChatTest(unittest.TestCase):

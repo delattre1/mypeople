@@ -4,58 +4,11 @@ The failure this guards against is silent: `mp proof` accepted a local path, the
 "proof attached", the card stored it, and the page rendered <img src="file:///...">, which no
 browser will load from an http origin. Every layer said success and the CEO saw nothing.
 """
-import importlib.machinery
-import importlib.util
-import os
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 from unittest import mock
-
-
-ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / "mypeople" / "runtime" / "bin"
-
-
-def load_module(home, filename, modname):
-    config = Path(home) / "queue.env"
-    config.write_text(
-        'export INSTALL_DIR="%s"\n'
-        'export HOST_ID="test-node"\n'
-        'export QUEUE_URL="http://127.0.0.1:9900"\n'
-        'export QUEUE_SECRET="secret"\n'
-        'export TTYD_PORT="7681"\n'
-        'export HUD_PORT="9900"\n'
-        'export TODO_PORT="9933"\n'
-        'export TTYD_BROWSER_PORT="7681"\n'
-        'export DEFAULT_BACKEND="claude"\n'
-        'export DEFAULT_ENG_MODEL="claude-opus-4-8"\n'
-        'export DEFAULT_CLAUDE_MODEL="claude-opus-4-8"\n'
-        'export DEFAULT_CODEX_MODEL=""\n' % (Path(home) / "state"),
-        encoding="utf-8",
-    )
-    state = str(Path(home) / "state")
-    os.makedirs(state, exist_ok=True)
-    # Live env overrides the config file, so MYPEOPLE_CONFIG_PATH alone is not isolation.
-    with mock.patch.dict(os.environ, {
-        "HOME": str(home),
-        "MYPEOPLE_CONFIG_PATH": str(config),
-        "MYPEOPLE_HOME": state,
-        "INSTALL_DIR": state,
-    }, clear=False):
-        sys.modules.pop("mpcommon", None)
-        sys.path.insert(0, str(BIN))
-        try:
-            loader = importlib.machinery.SourceFileLoader(modname, str(BIN / filename))
-            spec = importlib.util.spec_from_loader(modname, loader)
-            module = importlib.util.module_from_spec(spec)
-            loader.exec_module(module)
-            resolved = getattr(module, "INSTALL_DIR", state)
-            assert resolved == state, "test escaped isolation: INSTALL_DIR=%s" % resolved
-            return module
-        finally:
-            sys.path.remove(str(BIN))
+import sandbox
 
 
 class UnservableProofUrlTests(unittest.TestCase):
@@ -64,7 +17,7 @@ class UnservableProofUrlTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        cls.srv = load_module(cls.tmp.name, "todo-server.py", "todo_server_proof")
+        cls.srv = sandbox.load(cls.tmp.name, "todo-server.py")
 
     @classmethod
     def tearDownClass(cls):
@@ -103,8 +56,8 @@ class MultipartRoundTripTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        cls.srv = load_module(cls.tmp.name, "todo-server.py", "todo_server_mp")
-        cls.common = load_module(cls.tmp.name, "mpcommon.py", "mpcommon_mp")
+        cls.srv = sandbox.load(cls.tmp.name, "todo-server.py")
+        cls.common = sandbox.load(cls.tmp.name, "mpcommon.py")
 
     @classmethod
     def tearDownClass(cls):
@@ -157,7 +110,7 @@ class LocalProofPathTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        cls.mp = load_module(cls.tmp.name, "mp", "mp_proof")
+        cls.mp = sandbox.load(cls.tmp.name, "mp")
 
     @classmethod
     def tearDownClass(cls):

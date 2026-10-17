@@ -12,14 +12,14 @@ import tempfile
 import unittest
 from unittest import mock
 
-from test_board_store import load_module
+import sandbox
 
 
 class TmuxWindowSizesTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.srv = load_module(self.tmp.name, "todo-server.py", "ts_graph_batch")
+        self.srv = sandbox.load(self.tmp.name, "todo-server.py")
 
     def _run(self, stdout, returncode=0):
         """Patch subprocess.run and capture how many times tmux was called."""

@@ -6,13 +6,11 @@ literal string "--by Y" and discarded the real body on stdin nothing read, while
 Several agents lost most of a day to it, and the tell was that the recipient got the SAME
 string every time -- real truncation varies with the text, operator error repeats verbatim.
 """
-import importlib.machinery
-import importlib.util
 import io
 from pathlib import Path
-import sys
 import unittest
 from unittest import mock
+import sandbox
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,22 +18,10 @@ BIN = ROOT / "mypeople" / "runtime" / "bin"
 AGENT = "test-node/main:eng-1"
 
 
-def load_mp():
-    sys.path.insert(0, str(BIN))
-    try:
-        loader = importlib.machinery.SourceFileLoader("mp_cli_argv", str(BIN / "mp"))
-        spec = importlib.util.spec_from_loader("mp_cli_argv", loader)
-        module = importlib.util.module_from_spec(spec)
-        loader.exec_module(module)
-        return module
-    finally:
-        sys.path.remove(str(BIN))
-
-
 class SendArgvTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.mp = load_mp()
+        cls.mp = sandbox.load_file(BIN / "mp", "mp_cli_argv")
 
     def send(self, argv, stdin_text=None, tty=True):
         """Run do_send with the transport stubbed. Returns (rc, delivered_message, stderr)."""

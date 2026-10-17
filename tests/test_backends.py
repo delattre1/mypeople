@@ -1,5 +1,3 @@
-import importlib.machinery
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -11,54 +9,11 @@ import unittest
 from unittest import mock
 
 from mypeople import firstrun
+from sandbox import load as load_mp
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / "mypeople" / "runtime" / "bin"
 HANDLER = ROOT / "mypeople" / "runtime" / "plugins" / "tmux-boss-hooks" / "hook-handler.py"
-
-
-def load_mp(home):
-    config = Path(home) / "queue.env"
-    config.write_text(
-        'export INSTALL_DIR="%s"\n'
-        'export HOST_ID="test-node"\n'
-        'export QUEUE_URL="http://127.0.0.1:9900"\n'
-        'export QUEUE_SECRET="secret"\n'
-        'export TTYD_PORT="7681"\n'
-        'export DEFAULT_BACKEND="claude"\n'
-        'export DEFAULT_ENG_MODEL="claude-opus-4-8"\n'
-        'export DEFAULT_CLAUDE_MODEL="claude-opus-4-8"\n'
-        'export DEFAULT_CODEX_MODEL=""\n'
-        'export DEFAULT_GROK_MODEL=""\n' % (Path(home) / "state"),
-        encoding="utf-8",
-    )
-    # mpcommon lets the ambient process env OVERRIDE the config file, so every mypeople key must be
-    # pinned explicitly here (same reason as tests/test_roles.py). Without this the suite inherits a
-    # developer's live HOST_ID/QUEUE_URL, decides these test agent_ids are REMOTE, and dispatches
-    # real tasks at their running queue -- which has already left a `test-node/main:eng-1` fossil in
-    # a live roster. QUEUE_URL points at a closed port so a regression can never reach a live daemon.
-    with mock.patch.dict(os.environ, {
-        "HOME": str(home),
-        "MYPEOPLE_CONFIG_PATH": str(config),
-        "MYPEOPLE_HOME": str(Path(home) / "state"),
-        "INSTALL_DIR": str(Path(home) / "state"),
-        "HOST_ID": "test-node",
-        "QUEUE_URL": "http://127.0.0.1:1",
-        "QUEUE_SECRET": "secret",
-        "DEFAULT_BACKEND": "claude",
-    }, clear=False):
-        sys.modules.pop("mpcommon", None)
-        sys.path.insert(0, str(BIN))
-        try:
-            name = "mypeople_test_mp_%s" % id(home)
-            loader = importlib.machinery.SourceFileLoader(name, str(BIN / "mp"))
-            spec = importlib.util.spec_from_loader(name, loader)
-            module = importlib.util.module_from_spec(spec)
-            loader.exec_module(module)
-            return module
-        finally:
-            sys.path.remove(str(BIN))
 
 
 class GrokAuthTests(unittest.TestCase):

@@ -1,48 +1,16 @@
-import importlib.machinery
-import importlib.util
 import json
 import os
 from pathlib import Path
 import signal
-import sys
 import tempfile
 import unittest
 from unittest import mock
+import sandbox
 
 
-ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / "mypeople" / "runtime" / "bin"
-
-
-def load_runtime(name, filename, home):
-    config = Path(home) / "queue.env"
-    state = Path(home) / "state"
-    config.write_text(
-        'export INSTALL_DIR="%s"\n'
-        'export HOST_ID="test-node"\n'
-        'export QUEUE_URL="http://127.0.0.1:9900"\n'
-        'export QUEUE_SECRET="secret"\n'
-        'export TTYD_PORT="7681"\n'
-        'export DEFAULT_ENG_MODEL="claude-opus-4-8"\n'
-        'export HEARTBEAT_INTERVAL="10"\n' % state,
-        encoding="utf-8",
-    )
-    env = {"HOME": str(home), "MYPEOPLE_CONFIG_PATH": str(config),
-           "MYPEOPLE_HOME": str(state), "INSTALL_DIR": str(state),
-           "HOST_ID": "test-node", "QUEUE_URL": "http://127.0.0.1:9900",
-           "QUEUE_SECRET": "secret", "TTYD_PORT": "7681",
-           "DEFAULT_ENG_MODEL": "claude-opus-4-8", "HEARTBEAT_INTERVAL": "10"}
-    with mock.patch.dict(os.environ, env, clear=False):
-        sys.modules.pop("mpcommon", None)
-        sys.path.insert(0, str(BIN))
-        try:
-            loader = importlib.machinery.SourceFileLoader(name, str(BIN / filename))
-            spec = importlib.util.spec_from_loader(name, loader)
-            module = importlib.util.module_from_spec(spec)
-            loader.exec_module(module)
-            return module
-        finally:
-            sys.path.remove(str(BIN))
+def load_runtime(filename, home):
+    return sandbox.load(home, filename, TTYD_PORT="7681", DEFAULT_ENG_MODEL="claude-opus-4-8",
+                        HEARTBEAT_INTERVAL="10")
 
 
 class RecorderOptInTests(unittest.TestCase):
@@ -62,7 +30,7 @@ class RecorderOptInTests(unittest.TestCase):
     def load(self):
         # MYPEOPLE_RECORD is read at CALL time, so tests set it around the call, not the import.
         with mock.patch.dict(os.environ, {"MYPEOPLE_RECORD": ""}, clear=False):
-            return load_runtime("mp_optin_%s" % id(self.home), "mp", self.home)
+            return load_runtime("mp", self.home)
 
     def test_recording_is_off_by_default(self):
         mp = self.load()
@@ -116,7 +84,7 @@ class RecorderOptInTests(unittest.TestCase):
 class RecorderLifecycleTests(unittest.TestCase):
     def test_pid_fallback_terms_validated_attach_child_first(self):
         with tempfile.TemporaryDirectory() as td:
-            common = load_runtime("test_recorder_common", "mpcommon.py", td)
+            common = load_runtime("mpcommon.py", td)
             ident = common.recorder_identity("main", "eng-1", "test-node")
             metadata = dict(ident, pid=4242, server_pid=99)
             with mock.patch.object(common, "current_recorder", return_value=None), \
@@ -134,7 +102,7 @@ class RecorderLifecycleTests(unittest.TestCase):
 
     def test_mismatched_metadata_cannot_signal_reused_pid(self):
         with tempfile.TemporaryDirectory() as td:
-            common = load_runtime("test_recorder_reuse", "mpcommon.py", td)
+            common = load_runtime("mpcommon.py", td)
             metadata = {"pid": 4242, "target": "mc-main:someone-else",
                         "cast": str(Path(td) / "unrelated.cast")}
             with mock.patch.object(common, "current_recorder", return_value=None), \
@@ -145,7 +113,7 @@ class RecorderLifecycleTests(unittest.TestCase):
 
     def test_explicit_kill_reaps_recorder_without_tmux_session_kill(self):
         with tempfile.TemporaryDirectory() as td:
-            mp = load_runtime("test_recorder_mp", "mp", td)
+            mp = load_runtime("mp", td)
             aid = "test-node/main:eng-1"
             metadata = dict(mp.C.recorder_identity("main", "eng-1", "test-node"), pid=4242)
             Path(mp.ROSTER_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -169,7 +137,7 @@ class RecorderLifecycleTests(unittest.TestCase):
 
     def test_natural_window_loss_reaps_before_retirement(self):
         with tempfile.TemporaryDirectory() as td:
-            queue = load_runtime("test_recorder_queue", "queue-client.py", td)
+            queue = load_runtime("queue-client.py", td)
             aid = "test-node/main:eng-1"
             metadata = dict(queue.C.recorder_identity("main", "eng-1", "test-node"), pid=4242)
             Path(queue.ROSTER_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -192,7 +160,7 @@ class RecorderLifecycleTests(unittest.TestCase):
         """#39: the heartbeat probed from a stale read, then wrote "died-no-window" over an
         `mp kill` made meanwhile; that reason is accidental, so reconcile revived the agent."""
         with tempfile.TemporaryDirectory() as td:
-            queue = load_runtime("test_recorder_kill_race", "queue-client.py", td)
+            queue = load_runtime("queue-client.py", td)
             aid = "test-node/main:eng-1"
             Path(queue.ROSTER_PATH).parent.mkdir(parents=True, exist_ok=True)
             Path(queue.ROSTER_PATH).write_text(json.dumps({aid: {
@@ -212,7 +180,7 @@ class RecorderLifecycleTests(unittest.TestCase):
 
     def test_socket_generation_change_reaps_old_pid_and_backfills_current(self):
         with tempfile.TemporaryDirectory() as td:
-            queue = load_runtime("test_recorder_generation", "queue-client.py", td)
+            queue = load_runtime("queue-client.py", td)
             aid = "test-node/main:eng-1"
             old = dict(queue.C.recorder_identity("main", "eng-1", "test-node"), pid=4242,
                        server_pid=10)

@@ -5,16 +5,14 @@ until something reopens it, so agents silently ran without Latch for days (card 
 These tests drive the watcher with tmux, the relay and the status files stubbed: it must type
 only into idle agents, never mid-turn or over a half-typed message.
 """
-import importlib.machinery
-import importlib.util
 import json
-import os
 from pathlib import Path
 import re
 import tempfile
 import time
 import unittest
 from unittest import mock
+import sandbox
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "mypeople" / "runtime" / "plugins" / "latch-reconnect" / "latch-reconnect.py"
@@ -22,12 +20,8 @@ IDLE_PANE = "● done.\n✻ Worked for 2s\n────\n❯ \n────\n  �
 
 
 def load(install):
-    with mock.patch.dict(os.environ, {"INSTALL_DIR": install, "HOST_ID": "node"}):
-        loader = importlib.machinery.SourceFileLoader("latch_reconnect_%d" % id(install), str(PLUGIN))
-        spec = importlib.util.spec_from_loader(loader.name, loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
-        return mod
+    return sandbox.load_file(PLUGIN, "latch_reconnect_%d" % id(install),
+                             {"INSTALL_DIR": install, "HOST_ID": "node"})
 
 
 class FakeTmux:

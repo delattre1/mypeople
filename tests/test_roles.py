@@ -4,77 +4,36 @@ Covers the contract that `mp spawn --role boss|engineer` composes a versioned, d
 bundle (personality + Skills + hooks + toolset + policy), mounts it through each backend's own
 native mechanism, and that no path can yield a Boss without one.
 """
-import importlib.machinery
-import importlib.util
 import json
 import os
 from pathlib import Path
 import shlex
-import sys
 import tempfile
 import tomllib
 import unittest
 from unittest import mock
 
 from mypeople import firstrun
+import sandbox
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / "mypeople" / "runtime" / "bin"
 ROLES = ROOT / "mypeople" / "runtime" / "roles"
 
 
 def load_mp(home):
-    """Load the packaged mp as a module, pointed at a throwaway INSTALL_DIR."""
+    """Load the packaged mp in a sandbox, with the role store pointed at the packaged one."""
+    module = sandbox.load(home)
     state = Path(home) / "state"
-    config = Path(home) / "queue.env"
-    config.write_text(
-        'export INSTALL_DIR="%s"\n'
-        'export HOST_ID="test-node"\n'
-        'export QUEUE_URL="http://127.0.0.1:9900"\n'
-        'export QUEUE_SECRET="secret"\n'
-        'export TTYD_PORT="7681"\n'
-        'export DEFAULT_BACKEND="claude"\n'
-        'export DEFAULT_ENG_MODEL="claude-opus-4-8"\n'
-        'export DEFAULT_CLAUDE_MODEL="claude-opus-4-8"\n'
-        'export DEFAULT_CODEX_MODEL=""\n'
-        'export DEFAULT_GROK_MODEL=""\n' % state,
-        encoding="utf-8",
-    )
-    # mpcommon lets the ambient process env OVERRIDE the config file, so every mypeople key must be
-    # pinned explicitly here. Without this the suite inherits a developer's live HOST_ID/QUEUE_URL,
-    # decides these test agent_ids are REMOTE, and dispatches spawn tasks at their real queue.
-    # QUEUE_URL points at a closed port so a regression can never reach a live daemon.
-    with mock.patch.dict(os.environ, {
-        "HOME": str(home),
-        "MYPEOPLE_CONFIG_PATH": str(config),
-        "MYPEOPLE_HOME": str(state),
-        "INSTALL_DIR": str(state),
-        "HOST_ID": "test-node",
-        "QUEUE_URL": "http://127.0.0.1:1",
-        "QUEUE_SECRET": "secret",
-        "DEFAULT_BACKEND": "claude",
-    }, clear=False):
-        sys.modules.pop("mpcommon", None)
-        sys.modules.pop("mprole", None)
-        sys.path.insert(0, str(BIN))
-        try:
-            name = "mypeople_test_mp_roles_%s" % id(home)
-            loader = importlib.machinery.SourceFileLoader(name, str(BIN / "mp"))
-            spec = importlib.util.spec_from_loader(name, loader)
-            module = importlib.util.module_from_spec(spec)
-            loader.exec_module(module)
-            # point the role store at the packaged one; bundles go to the throwaway install
-            module.ROLE_DIR = str(ROLES)
-            module.ROLE_BUNDLE_DIR = str(state / "run" / "role-bundles")
-            boss_doc = state / "mp-boss-doctrine.md"
-            boss_doc.parent.mkdir(parents=True, exist_ok=True)
-            boss_doc.write_text("# Boss doctrine\nDrive the team off the board.\n",
-                                encoding="utf-8")
-            module.BOSS_DOC = str(boss_doc)
-            return module
-        finally:
-            sys.path.remove(str(BIN))
+    # point the role store at the packaged one; bundles go to the throwaway install
+    module.ROLE_DIR = str(ROLES)
+    module.ROLE_BUNDLE_DIR = str(state / "run" / "role-bundles")
+    boss_doc = state / "mp-boss-doctrine.md"
+    boss_doc.parent.mkdir(parents=True, exist_ok=True)
+    boss_doc.write_text("# Boss doctrine\nDrive the team off the board.\n",
+                        encoding="utf-8")
+    module.BOSS_DOC = str(boss_doc)
+    return module
 
 
 def setUpModule():

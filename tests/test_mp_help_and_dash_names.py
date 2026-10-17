@@ -3,35 +3,21 @@
 mp took the first argument literally: `mp spawn --help` started a real Claude agent named --help,
 `mp kill --help` retired a roster entry of that name, and `mp ensure-boss --help` ran ensure-boss.
 """
-import importlib.machinery
-import importlib.util
 import io
 from pathlib import Path
-import sys
 import unittest
 from unittest import mock
+import sandbox
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "mypeople" / "runtime" / "bin"
 
 
-def load_mp():
-    sys.path.insert(0, str(BIN))
-    try:
-        loader = importlib.machinery.SourceFileLoader("mp_cli_help", str(BIN / "mp"))
-        spec = importlib.util.spec_from_loader("mp_cli_help", loader)
-        module = importlib.util.module_from_spec(spec)
-        loader.exec_module(module)
-        return module
-    finally:
-        sys.path.remove(str(BIN))
-
-
 class HelpAndDashNameTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.mp = load_mp()
+        cls.mp = sandbox.load_file(BIN / "mp", "mp_cli_help")
 
     def test_help_on_every_verb_prints_usage_and_runs_nothing(self):
         mp = self.mp

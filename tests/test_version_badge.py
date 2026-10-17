@@ -16,31 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 import mypeople  # noqa: E402
 from mypeople import firstrun  # noqa: E402
-
-BIN = ROOT / "mypeople" / "runtime" / "bin"
-
-
-def load_mpcommon(install):
-    """Import mpcommon the way a daemon does: standalone, off INSTALL_DIR, not as part of the
-    package. Re-imported per test because CFG/version are resolved at import time."""
-    env_keys = ("INSTALL_DIR", "MYPEOPLE_CONFIG_PATH", "MYPEOPLE_VERSION")
-    saved = {k: os.environ.get(k) for k in env_keys}
-    os.environ["INSTALL_DIR"] = install
-    # never let a developer's real ~/.config/mypeople/queue.env leak into the test
-    os.environ["MYPEOPLE_CONFIG_PATH"] = os.path.join(install, "config", "queue.env")
-    os.environ.pop("MYPEOPLE_VERSION", None)
-    sys.path.insert(0, str(BIN))
-    sys.modules.pop("mpcommon", None)
-    try:
-        import mpcommon
-        return mpcommon
-    finally:
-        sys.path.remove(str(BIN))
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+from sandbox import load_mpcommon_standalone as load_mpcommon
 
 
 class VersionStampTests(unittest.TestCase):

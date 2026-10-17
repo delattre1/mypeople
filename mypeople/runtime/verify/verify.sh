@@ -20,7 +20,6 @@ FAILS=(); PASSES=0
 CREATED=()
 pass(){ PASSES=$((PASSES+1)); echo "PASS $1"; }
 fail(){ FAILS+=("$1"); echo "FAIL $1"; }
-chk(){ if [ "$1" = "1" ] || [ "$1" = "0" -a "${3:-}" = "invert" ]; then :; fi; }
 jqget(){ python3 -c "import sys,json;d=json.load(sys.stdin);print($1)" 2>/dev/null; }
 
 cleanup(){

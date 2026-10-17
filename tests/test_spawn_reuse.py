@@ -10,58 +10,10 @@ These tests pin the three outcomes of the liveness check, because the cost is as
 directions: a false "it's fine" reinstates the silent no-op, and a false "it's broken" kills a
 healthy agent mid-turn.
 """
-import importlib.machinery
-import importlib.util
-import os
-from pathlib import Path
-import sys
 import tempfile
 import unittest
 from unittest import mock
-
-
-ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / "mypeople" / "runtime" / "bin"
-
-
-def load_mp(home):
-    state = Path(home) / "state"
-    config = Path(home) / "queue.env"
-    config.write_text(
-        'export INSTALL_DIR="%s"\n'
-        'export HOST_ID="test-node"\n'
-        'export QUEUE_URL="http://127.0.0.1:1"\n'
-        'export QUEUE_SECRET="secret"\n'
-        'export TTYD_PORT="7681"\n'
-        'export DEFAULT_BACKEND="claude"\n'
-        'export DEFAULT_ENG_MODEL="claude-opus-4-8"\n'
-        'export DEFAULT_CLAUDE_MODEL="claude-opus-4-8"\n'
-        'export DEFAULT_CODEX_MODEL=""\n'
-        'export DEFAULT_GROK_MODEL=""\n' % state,
-        encoding="utf-8",
-    )
-    with mock.patch.dict(os.environ, {
-        "HOME": str(home),
-        "MYPEOPLE_CONFIG_PATH": str(config),
-        "MYPEOPLE_HOME": str(state),
-        "INSTALL_DIR": str(state),
-        "HOST_ID": "test-node",
-        "QUEUE_URL": "http://127.0.0.1:1",
-        "QUEUE_SECRET": "secret",
-        "DEFAULT_BACKEND": "claude",
-    }, clear=False):
-        sys.modules.pop("mpcommon", None)
-        sys.modules.pop("mprole", None)
-        sys.path.insert(0, str(BIN))
-        try:
-            name = "mypeople_test_spawnmp_%s" % id(home)
-            loader = importlib.machinery.SourceFileLoader(name, str(BIN / "mp"))
-            spec = importlib.util.spec_from_loader(name, loader)
-            module = importlib.util.module_from_spec(spec)
-            loader.exec_module(module)
-            return module
-        finally:
-            sys.path.remove(str(BIN))
+from sandbox import load as load_mp
 
 
 class Proc:

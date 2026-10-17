@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from mypeople import firstrun  # noqa: E402
+from sandbox import load_mpcommon_standalone as load_mpcommon
 
 BIN = ROOT / "mypeople" / "runtime" / "bin"
 
@@ -36,27 +37,6 @@ def with_auth(*live):
         _codex_authenticated=mock.Mock(return_value="codex" in live),
         _grok_authenticated=mock.Mock(return_value="grok" in live),
     )
-
-
-def load_mpcommon(install):
-    """Import mpcommon the way a daemon does: standalone, off INSTALL_DIR."""
-    env_keys = ("INSTALL_DIR", "MYPEOPLE_CONFIG_PATH", "MYPEOPLE_VERSION")
-    saved = {k: os.environ.get(k) for k in env_keys}
-    os.environ["INSTALL_DIR"] = install
-    os.environ["MYPEOPLE_CONFIG_PATH"] = os.path.join(install, "config", "queue.env")
-    os.environ.pop("MYPEOPLE_VERSION", None)
-    sys.path.insert(0, str(BIN))
-    sys.modules.pop("mpcommon", None)
-    try:
-        import mpcommon
-        return mpcommon
-    finally:
-        sys.path.remove(str(BIN))
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
 
 
 class EnsureWithoutLoginTests(unittest.TestCase):

@@ -5,13 +5,12 @@ Instagram, docker and the clock are stubbed, so nothing leaves the box.
 """
 import hashlib
 import hmac
-import importlib.machinery
-import importlib.util
 import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+import sandbox
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "mypeople" / "runtime" / "plugins" / "instagram-comments" / "instagram-comments.py"
@@ -20,12 +19,7 @@ ENV = {"INSTAGRAM_APP_SECRET": "appsecret", "INSTAGRAM_VERIFY_TOKEN": "vt", "INS
 
 
 def load(state_dir):
-    with mock.patch.dict(os.environ, dict(ENV, INSTAGRAM_COMMENTS_STATE_DIR=state_dir)):
-        loader = importlib.machinery.SourceFileLoader("ig_%d" % id(state_dir), str(PLUGIN))
-        spec = importlib.util.spec_from_loader(loader.name, loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
-        return mod
+    return sandbox.load_file(PLUGIN, "ig_%d" % id(state_dir), dict(ENV, INSTAGRAM_COMMENTS_STATE_DIR=state_dir))
 
 
 def push(*comments):

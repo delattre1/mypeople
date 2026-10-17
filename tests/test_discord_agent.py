@@ -1,22 +1,17 @@
 """Discord agent plugin: the guards that stand between a steerable agent and a public channel."""
-import importlib.machinery
-import importlib.util
 import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+import sandbox
 
 PLUGIN = Path(__file__).resolve().parents[1] / "mypeople/runtime/plugins/discord-agent/discord-agent.py"
 
 
 def load(env):
-    with mock.patch.dict(os.environ, env):
-        loader = importlib.machinery.SourceFileLoader("discord_agent", str(PLUGIN))
-        mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("discord_agent", loader))
-        loader.exec_module(mod)
-    return mod
+    return sandbox.load_file(PLUGIN, "discord_agent", env)
 
 
 class GuardTest(unittest.TestCase):
@@ -203,7 +198,6 @@ class GuardTest(unittest.TestCase):
             self.d.poll_channel("c1", self.st, "me")
         deliver.assert_not_called()
         self.assertEqual(self.st["cursor"]["c1"], "99")
-
 
 
 @unittest.skipUnless(shutil.which("tmux"), "needs tmux")

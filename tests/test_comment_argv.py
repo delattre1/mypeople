@@ -8,14 +8,12 @@ reads stdin and DOES parse --by; mp send does neither.
 
 --by is the only flag mp comment has, and it must keep working.
 """
-import importlib.machinery
-import importlib.util
 import io
 import os
 from pathlib import Path
-import sys
 import unittest
 from unittest import mock
+import sandbox
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,22 +22,10 @@ CARD = "abc1234567"
 AGENT = "test-node/main:eng-1"
 
 
-def load_mp():
-    sys.path.insert(0, str(BIN))
-    try:
-        loader = importlib.machinery.SourceFileLoader("mp_cli_comment", str(BIN / "mp"))
-        spec = importlib.util.spec_from_loader("mp_cli_comment", loader)
-        m = importlib.util.module_from_spec(spec)
-        loader.exec_module(m)
-        return m
-    finally:
-        sys.path.remove(str(BIN))
-
-
 class CommentArgvTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.mp = load_mp()
+        cls.mp = sandbox.load_file(BIN / "mp", "mp_cli_comment")
 
     def comment(self, argv, stdin_text=None, tty=True):
         """Run do_comment with the HTTP post stubbed. Returns (rc, posted_payload, stderr)."""

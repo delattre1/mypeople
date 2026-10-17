@@ -2,14 +2,14 @@
 import tempfile
 import unittest
 
-from test_board_store import load_module
+import sandbox
 
 
 class CommentDeleteTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.srv = load_module(self.tmp.name, "todo-server.py", "ts_cdel_%d" % id(self))
+        self.srv = sandbox.load(self.tmp.name, "todo-server.py")
         self.board = {"tasks": {"c1": {"id": "c1", "comments": [
             {"id": "a1", "by": "test-node/main:eng-7", "body": "mine"},
             {"id": "b2", "by": "CEO", "body": "his"}]}}}
