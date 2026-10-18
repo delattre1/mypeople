@@ -76,9 +76,16 @@ MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 # proxy integration that adds the key, so the key never enters the VM; on a Mac, TYPESAFE_API_KEY.
 ROUTER = os.environ.get("PLOW_CHAT_ROUTER", "")
 JEV_URL = os.environ.get("TYPESAFE_URL") or "https://api.typesafe.ai/v1/systemone"
-ROUTE_ASK = ("A person texts one WhatsApp chat answered by several AI agents. Which agent should get this message? "
-             "If the message names one of the agents, pick that agent. "
-             "The context says who answered last; it only matters when the message has no topic of its own.")
+# Tuned on 23 multi-turn conversations (74/74) and 12 hard cases x3 (36/36): follow-ups, topic switches, vague lines,
+# agents named mid-chat or in a greeting, and requests that refer back to another agent's answer.
+ROUTE_ASK = ("A person texts one WhatsApp chat answered by several AI agents, as in a group chat. Which agent should get "
+             "this message? If it calls an agent by name, even in a greeting (hey coach, chef?, Mailer, ...), pick that "
+             "agent. If it asks for one agent's kind of work (an email, a recipe, a workout), pick that agent, even "
+             "mid-conversation and even when it refers back to what another agent just said. If it asks about this "
+             "system, which agents exist, or making, changing or retiring an agent, pick Boss. Only if it has no topic of "
+             "its own and names no agent (a greeting, ok, thanks, yes, and?, more, why?, what can you do?): pick the agent "
+             "who answered in the last few minutes, or Boss when none did.")
+FOLLOW_MINUTES = float(os.environ.get("PLOW_CHAT_FOLLOW_MINUTES", "30"))  # an older answer no longer counts as the conversation
 SPEAKER = re.compile(r"([A-Z][A-Za-z0-9]{1,19}): ")  # each agent's prompt starts its replies with its name
 # A pass over every chat runs on each (re)connect, every SWEEP_SECONDS on a live socket (Plow's
 # events are best-effort, so a frame can go missing), and every POLL_SECONDS while the socket is
@@ -275,11 +282,14 @@ def note_tapbacks(msgs: list, chat_uid: str, seed: bool = True) -> int:
 
 
 def role_about(role: str) -> str:
-    """What an agent does, from its role (name@version -> roles/profiles/<name>/<version>.json -> its personality)."""
+    """What an agent does, from its role (name@version -> roles/profiles/<name>/<version>.json): the profile's
+    one-line metadata.description, else its personality text."""
     try:
         key, version = role.split("@", 1)
-        ref = json.loads((INSTALL / "roles" / "profiles" / key / f"{version}.json").read_text())["spec"]["personalityRef"]
-        text = (INSTALL / "roles" / ref).read_text()
+        profile = json.loads((INSTALL / "roles" / "profiles" / key / f"{version}.json").read_text())
+        if (profile.get("metadata") or {}).get("description"):
+            return str(profile["metadata"]["description"])[:600]
+        text = (INSTALL / "roles" / profile["spec"]["personalityRef"]).read_text()
     except (OSError, ValueError, KeyError, TypeError):
         return ""
     return " ".join(ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#"))[:600]
@@ -292,9 +302,10 @@ def live_agents() -> dict:
             for aid, role in re.findall(r"^(\S+:\S+)\s+\[alive\s*\]\s+(\S+)", out, re.M) if aid.startswith(f"{HOST_ID}/")}
 
 
-def pick_agent(text: str, message: dict, last: str = "") -> str:
-    """The one routing decision: which live agent gets this text. `last` (who answered last: the name the chat's
-    latest reply starts with) is context only. Anything unsure or broken goes to the Boss."""
+def pick_agent(text: str, message: dict, last: str = "", minutes=None, last_reply: str = "") -> str:
+    """The one routing decision: which live agent gets this text. Who answered last (the name the chat's latest
+    reply starts with), how many minutes ago and what they said are context only. Anything unsure or broken goes
+    to the Boss."""
     if ROUTER != "jev":
         return BOSS_AGENT
     try:
@@ -306,6 +317,10 @@ def pick_agent(text: str, message: dict, last: str = "") -> str:
         state = {"message": text[:2000]}
         if last in agents:
             state["last_answered_by"] = last
+            if minutes is not None:
+                state["minutes_since_that_answer"] = round(minutes, 1)
+            if last_reply:
+                state["that_answer"] = last_reply[:300]
         quoted = ((message.get("reply_to") or {}).get("message") or {}).get("body")
         if quoted:
             state["replying_to"] = quoted[:500]
@@ -363,7 +378,21 @@ def order(message: dict) -> list:
     return [ts, message.get("uid") or ""]
 
 
-def route_message(message: dict, chat: str = "", last: str = "") -> str:
+def conversation(answer, message) -> tuple:
+    """(who answered last, minutes before this text, what they said) while that answer is recent, else ()."""
+    if not answer:
+        return ()
+    try:
+        at = lambda m: datetime.fromisoformat((m.get("created_at") or "").replace("Z", "+00:00"))
+        minutes = (at(message) - at(answer)).total_seconds() / 60
+    except (ValueError, TypeError):
+        minutes = None  # no readable times: who answered last still counts
+    if minutes is not None and minutes > FOLLOW_MINUTES:
+        return ()
+    return SPEAKER.match(answer["body"]).group(1), minutes, answer["body"]
+
+
+def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
     """Deliver one inbound message in `chat` (the one being polled) to the Boss, exactly once."""
     if message.get("direction") != "inbound":
         return "skip: outbound"
@@ -401,7 +430,7 @@ def route_message(message: dict, chat: str = "", last: str = "") -> str:
             notes.append(f"could not download {a.get('filename') or 'attachment'}: {e}")
     with STATE_LOCK:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
-    target = pick_agent(text, message, last)
+    target = pick_agent(text, message, *last)
     if send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid), target):
         if taps:
             with STATE_LOCK:
@@ -684,11 +713,11 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
             except SystemExit as e:  # a failed hello must not take the bridge down
                 log(f"welcome not sent: {e}")
         return 0
-    routed, last = 0, ""
+    routed, last = 0, None
     for m in sorted(msgs, key=order):
         if m.get("direction") == "outbound" and (named := SPEAKER.match(m.get("body") or "")):
-            last = named.group(1)  # who answered last, for the router
-        r = route_message(m, chat_uid, last)
+            last = m  # who answered last, for the router
+        r = route_message(m, chat_uid, conversation(last, m))
         if not r.startswith("skip"):
             log(r)
         if r.startswith("ERROR"):

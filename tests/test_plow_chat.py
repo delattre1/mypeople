@@ -375,9 +375,14 @@ class PlowChatTest(unittest.TestCase):
         self.assertEqual(sent, ["h/main:Chef", "h/main:Chef"])
         self.assertEqual(list(asked[-1]["questions"]), ["agent"], "one decision, never a second question")
         self.assertEqual(asked[0]["state"], {"message": "what can I cook?"})
-        self.assertEqual(asked[-1]["state"], {"message": "and for dinner?", "last_answered_by": "Chef"},
-                         "who answered last = the name the latest reply starts with")
-        self.assertIn("names one of the agents", asked[-1]["questions"]["agent"]["instructions"])
+        self.assertEqual(asked[-1]["state"], {"message": "and for dinner?", "last_answered_by": "Chef", "that_answer": "Chef: rice!"},
+                         "who answered last = the name the latest reply starts with; what they said is context too")
+        # A conversation is recent answers only: minutes count, and an answer older than the window is no context.
+        at = lambda minute: f"2026-10-18T21:{minute:02d}:00Z"
+        reply = {"direction": "outbound", "body": "Chef: Yep, I'm here!", "created_at": at(24)}
+        self.assertEqual(self.pc.conversation(reply, {"created_at": at(25)}), ("Chef", 1.0, "Chef: Yep, I'm here!"))
+        self.assertEqual(self.pc.conversation(dict(reply, created_at="2026-10-18T20:00:00Z"), {"created_at": at(25)}), ())
+        self.assertIn("calls an agent by name", asked[-1]["questions"]["agent"]["instructions"])
         self.assertEqual(set(asked[-1]["questions"]["agent"]["criteria"]), {"Boss", "Chef"})
         with mock.patch.object(self.pc.subprocess, "run", return_value=status), \
                 mock.patch.object(self.pc.urllib.request, "urlopen", side_effect=OSError("down")):
