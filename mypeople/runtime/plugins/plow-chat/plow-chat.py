@@ -39,6 +39,7 @@ import http.client
 import json
 import mimetypes
 import os
+import re
 import shlex
 import socket
 import ssl
@@ -70,6 +71,13 @@ STATE = STATE_DIR / "state.json"          # {"marks": {chat: [created_at, uid]},
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
+# PLOW_CHAT_ROUTER=jev: one JEV decision picks which live agent (mp status) gets each text; the last agent and
+# the quoted message are context only. Off, everything goes to the Boss. In an exehome VM, TYPESAFE_URL is the
+# proxy integration that adds the key, so the key never enters the VM; on a Mac, TYPESAFE_API_KEY.
+ROUTER = os.environ.get("PLOW_CHAT_ROUTER", "")
+JEV_URL = os.environ.get("TYPESAFE_URL") or "https://api.typesafe.ai/v1/systemone"
+ROUTE_ASK = ("A person texts one WhatsApp chat answered by several AI agents. Which agent should get this message? "
+             "The context says who answered last; it only matters when the message has no topic of its own.")
 # A pass over every chat runs on each (re)connect, every SWEEP_SECONDS on a live socket (Plow's
 # events are best-effort, so a frame can go missing), and every POLL_SECONDS while the socket is
 # down or a text waits on the Boss.
@@ -264,9 +272,59 @@ def note_tapbacks(msgs: list, chat_uid: str, seed: bool = True) -> int:
     return len(news)
 
 
-def send_to_boss(message: str) -> bool:
+def role_about(role: str) -> str:
+    """What an agent does, from its role (name@version -> roles/profiles/<name>/<version>.json -> its personality)."""
     try:
-        r = subprocess.run([sys.executable, MP_BIN, "send", BOSS_AGENT, message],
+        key, version = role.split("@", 1)
+        ref = json.loads((INSTALL / "roles" / "profiles" / key / f"{version}.json").read_text())["spec"]["personalityRef"]
+        text = (INSTALL / "roles" / ref).read_text()
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+    return " ".join(ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#"))[:600]
+
+
+def live_agents() -> dict:
+    """{name: (agent id, what it does)} for this host's live agents: the router's candidates. Created = in, retired = out."""
+    out = subprocess.run([sys.executable, MP_BIN, "status"], capture_output=True, text=True, timeout=15).stdout
+    return {aid.rsplit(":", 1)[1]: (aid, role_about(role))
+            for aid, role in re.findall(r"^(\S+:\S+)\s+\[alive\s*\]\s+(\S+)", out, re.M) if aid.startswith(f"{HOST_ID}/")}
+
+
+def pick_agent(text: str, chat: str, message: dict) -> str:
+    """The one routing decision: which live agent gets this text. Anything unsure or broken goes to the Boss."""
+    if ROUTER != "jev":
+        return BOSS_AGENT
+    with STATE_LOCK:
+        last = read_json(STATE, {}).get("last_agent", {}).get(chat)
+    try:
+        agents = live_agents()
+        if not text:  # a photo or voice note has nothing to classify: it stays with whoever had the chat
+            return agents[last][0] if last in agents else BOSS_AGENT
+        if len(agents) < 2:
+            return BOSS_AGENT
+        state = {"message": text[:2000]}
+        if last in agents:
+            state["last_answered_by"] = last
+        quoted = ((message.get("reply_to") or {}).get("message") or {}).get("body")
+        if quoted:
+            state["replying_to"] = quoted[:500]
+        body = {"state": state, "model": "jev-latest", "questions": {"agent": {
+            "type": "choice", "instructions": ROUTE_ASK, "criteria": {n: about or n for n, (_, about) in agents.items()}}}}
+        headers = {"Content-Type": "application/json"}
+        if os.environ.get("TYPESAFE_API_KEY"):
+            headers["Authorization"] = "Bearer " + os.environ["TYPESAFE_API_KEY"]
+        req = urllib.request.Request(JEV_URL, data=json.dumps(body).encode(), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            choice = json.load(r)["answers"]["agent"]["choice"]
+    except Exception as e:  # noqa: BLE001 - a router that fails must never lose the text
+        log(f"router: {type(e).__name__}: {e}; to the Boss")
+        return BOSS_AGENT
+    return agents[choice][0] if choice in agents else BOSS_AGENT
+
+
+def send_to_agent(message: str, agent: str = BOSS_AGENT) -> bool:
+    try:
+        r = subprocess.run([sys.executable, MP_BIN, "send", agent, message],
                            capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"ERROR mp send: {e}")
@@ -342,13 +400,16 @@ def route_message(message: dict, chat: str = "") -> str:
             notes.append(f"could not download {a.get('filename') or 'attachment'}: {e}")
     with STATE_LOCK:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
-    if send_to_boss(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid)):
-        if taps:
-            with STATE_LOCK:
-                st = read_json(STATE, {})
-                st["pending_tapbacks"] = [t for t in st.get("pending_tapbacks", []) if t not in taps]
-                write_json(STATE, st)
-        return f"ROUTE {chat_uid} {who}: {text[:60]}"
+    target = pick_agent(text, chat_uid, message)
+    if send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid), target):
+        name = target.rsplit(":", 1)[1]
+        with STATE_LOCK:
+            st = read_json(STATE, {})
+            st["pending_tapbacks"] = [t for t in st.get("pending_tapbacks", []) if t not in taps]
+            if ROUTER:
+                st.setdefault("last_agent", {})[chat_uid] = name
+            write_json(STATE, st)
+        return f"ROUTE {chat_uid} {who}{f' -> {name}' if ROUTER else ''}: {text[:60]}"
     with STATE_LOCK:  # release the claim so the next pass retries it
         st = read_json(STATE, {})
         marks = st.setdefault("marks", {})

@@ -6,6 +6,7 @@ websocket (card 5b125624f8), so the same holds across a dropped socket.
 """
 import base64
 import hashlib
+import io
 from datetime import timedelta
 import json
 import os
@@ -38,7 +39,7 @@ class PlowChatTest(unittest.TestCase):
                       "created_at": "1"}]
         self.pc.api = lambda method, path, body=None, token=None: (200, {"data": self.msgs})
         self.sent = []
-        self.pc.send_to_boss = lambda m: self.sent.append(m) or True
+        self.pc.send_to_agent = lambda m, agent=None: self.sent.append(m) or True
         self.creds = {"token": "t", "chat_uid": "cht_a"}
 
     def tearDown(self):
@@ -338,16 +339,57 @@ class PlowChatTest(unittest.TestCase):
         self.assertLess(o("2026-10-14T13:09:05Z"), o("2026-10-14T13:09:05.056Z"))
         self.assertLess(o("2026-10-14T13:09:05.056Z"), o("2026-10-14T13:09:05.056001+00:00"))
 
+    def test_the_router_sends_each_text_to_the_live_agent_jev_picks_and_anything_unsure_to_the_boss(self):
+        """PLOW_CHAT_ROUTER=jev: one decision, which live agent gets the text; the last agent is only context."""
+        self.assertEqual(self.pc.pick_agent("hi", "cht_a", {}), "h/main:Boss", "off unless asked for: the Boss")
+        self.pc.ROUTER = "jev"
+        self.pc.INSTALL = Path(self.tmp.name) / "install"
+        roles = self.pc.INSTALL / "roles"
+        (roles / "profiles" / "agent-chef").mkdir(parents=True)
+        (roles / "personalities" / "agent-chef").mkdir(parents=True)
+        (roles / "profiles" / "agent-chef" / "1.0.0.json").write_text(
+            json.dumps({"spec": {"personalityRef": "personalities/agent-chef/1.0.0.md"}}))
+        (roles / "personalities" / "agent-chef" / "1.0.0.md").write_text("# Who you are\n\nYou are Chef, a cooking assistant.\n")
+        status = mock.Mock(stdout="== agents ==\nagent  state  role  status\n"
+                                  "h/main:Boss       [alive ] boss@6.10.0        idle boss=\n"
+                                  "h/main:Chef       [alive ] agent-chef@1.0.0   idle boss=h/main:Boss\n"
+                                  "h/main:Old        [dead  ] agent-old@1.0.0    -\n"
+                                  "other/main:Boss   [alive ] boss@6.10.0        idle boss=\n")
+        asked, sent = [], []
+
+        def jev(req, timeout):
+            asked.append(json.loads(req.data))
+            return io.BytesIO(json.dumps({"answers": {"agent": {"choice": "Chef", "confidence": 0.9}}}).encode())
+
+        self.pc.send_to_agent = lambda m, agent=None: sent.append(agent) or True
+        with mock.patch.object(self.pc.subprocess, "run", return_value=status), \
+                mock.patch.object(self.pc.urllib.request, "urlopen", jev):
+            agents = self.pc.live_agents()
+            self.assertEqual(set(agents), {"Boss", "Chef"}, "only this host's live agents: created = in, retired = out")
+            self.assertEqual(agents["Chef"][1], "You are Chef, a cooking assistant.")
+            self.pc.poll_chat(self.creds, "cht_a")
+            for uid, body, ts in (("m2", "what can I cook?", "2"), ("m3", "and for dinner?", "3")):
+                self.msgs.append({"uid": uid, "direction": "inbound", "body": body, "chat_uid": "cht_a", "created_at": ts})
+                self.pc.poll_chat(self.creds, "cht_a")
+        self.assertEqual(sent, ["h/main:Chef", "h/main:Chef"])
+        self.assertEqual(list(asked[-1]["questions"]), ["agent"], "one decision, never a second question")
+        self.assertEqual(asked[-1]["state"], {"message": "and for dinner?", "last_answered_by": "Chef"})
+        self.assertEqual(set(asked[-1]["questions"]["agent"]["criteria"]), {"Boss", "Chef"})
+        with mock.patch.object(self.pc.subprocess, "run", return_value=status), \
+                mock.patch.object(self.pc.urllib.request, "urlopen", side_effect=OSError("down")):
+            self.assertEqual(self.pc.pick_agent("hello?", "cht_a", {}), "h/main:Boss", "JEV down: the Boss, never lost")
+            self.assertEqual(self.pc.pick_agent("", "cht_a", {}), "h/main:Chef", "a photo stays with whoever had the chat")
+
     def test_failed_delivery_is_retried(self):
         self.pc.poll_chat(self.creds, "cht_a")
         self.msgs.append({"uid": "m2", "direction": "inbound", "body": "hi",
                           "chat_uid": "cht_a", "created_at": "2"})
-        self.pc.send_to_boss = lambda m: False
+        self.pc.send_to_agent = lambda m, agent=None: False
         self.pc.STARTED -= 300  # a bridge that has been up a while
         with mock.patch.object(self.pc, "send_message") as warn:
             self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), -1)  # still waiting
         warn.assert_called_once()  # the sender hears it did not land
-        self.pc.send_to_boss = lambda m: self.sent.append(m) or True
+        self.pc.send_to_agent = lambda m, agent=None: self.sent.append(m) or True
         self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
 
     def test_a_text_that_lands_while_the_boss_comes_back_is_not_warned_about(self):
@@ -356,7 +398,7 @@ class PlowChatTest(unittest.TestCase):
         now = self.pc.datetime.now(self.pc.timezone.utc)
         self.msgs.append({"uid": "m2", "direction": "inbound", "body": "codename?",
                           "chat_uid": "cht_a", "created_at": now.isoformat()})
-        self.pc.send_to_boss = lambda m: False
+        self.pc.send_to_agent = lambda m, agent=None: False
         with mock.patch.object(self.pc, "send_message") as warn:
             self.pc.poll_chat(self.creds, "cht_a")
             self.pc.poll_chat(self.creds, "cht_a")
@@ -368,7 +410,7 @@ class PlowChatTest(unittest.TestCase):
             self.pc.poll_chat(self.creds, "cht_a")
             self.pc.poll_chat(self.creds, "cht_a")
         warn.assert_called_once()  # overdue: told once, not on every pass
-        self.pc.send_to_boss = lambda m: self.sent.append(m) or True
+        self.pc.send_to_agent = lambda m, agent=None: self.sent.append(m) or True
         self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
 
 
