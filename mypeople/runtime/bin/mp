@@ -556,7 +556,9 @@ def build_launch(aid, cwd, boss_id, is_master, model, backend, resume_session=No
         # backend, which rejects them -- the agent would die at launch with the role "mounted".
         role_flags = {"claude": mprole.claude_flags, "codex": mprole.codex_flags,
                       "grok": mprole.grok_flags}[backend](role_bundle)
-    prefix = "env"
+    # The window inherits the tmux server's env, where MyPlow.app's PYTHONPATH (its bundled, older
+    # `mypeople`) shadows the installed CLI for everything the agent runs (card 70a20b5dcf).
+    prefix = "env -u PYTHONPATH"
     if is_master:
         prefix += " -u BOSS_ID"  # top-level agent must not inherit a leaked boss
     else:

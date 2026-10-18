@@ -47,5 +47,47 @@ class ReleasedGuardTests(unittest.TestCase):
         self.assertFalse(self.released(), "8064953 read 5.21.17 too; the tag names d7961d3 only")
 
 
+FAKE_UV = """#!/bin/sh
+echo "$*" >> "$UV_CALLS"
+case "$1 $2" in
+  "tool list") [ -n "$CLI_VERSION" ] && printf 'mypeople v%s\\n- mypeople\\n' "$CLI_VERSION" ;;
+  "build -q") d=""; while [ $# -gt 0 ]; do [ "$1" = --out-dir ] && d="$2"; shift; done
+              touch "$d/mypeople-9.9.9-py3-none-any.whl" ;;
+esac
+exit 0
+"""
+
+
+@unittest.skipUnless(shutil.which("git") and shutil.which("make"), "needs git and make")
+class CliRefreshTests(unittest.TestCase):
+    """`make live` reinstalls the `mypeople` CLI boss-supervisor runs when it is not this release:
+    a 5.14.0 copy nobody refreshed kept an auth probe that started the 1Password MCP, one macOS
+    App Data prompt per release (card 70a20b5dcf)."""
+
+    setUp = ReleasedGuardTests.setUp
+
+    def cli(self, installed):
+        sh(self.d, "git", "tag", "v9.9.9")
+        bin_dir = Path(self.d, "fakebin")
+        bin_dir.mkdir(exist_ok=True)
+        (bin_dir / "uv").write_text(FAKE_UV)
+        (bin_dir / "uv").chmod(0o755)
+        calls = Path(self.d, "calls")
+        calls.write_text("")
+        env = {"PATH": "%s:/usr/bin:/bin" % bin_dir, "UV_CALLS": str(calls), "CLI_VERSION": installed,
+               "HOME": self.d}
+        r = subprocess.run(["make", "-s", "cli"], cwd=self.d, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return [c for c in calls.read_text().splitlines() if c.startswith("tool install")]
+
+    def test_a_stale_cli_is_reinstalled_from_this_release(self):
+        (install,) = self.cli("5.14.0")
+        self.assertRegex(install, r"^tool install -q --force \S+/mypeople-9\.9\.9-py3-none-any\.whl$")
+
+    def test_a_current_or_absent_cli_is_left_alone(self):
+        self.assertEqual(self.cli("9.9.9"), [])
+        self.assertEqual(self.cli(""), [], "no CLI = no login gate; a release must not add one")
+
+
 if __name__ == "__main__":
     unittest.main()

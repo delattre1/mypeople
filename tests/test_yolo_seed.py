@@ -149,6 +149,8 @@ class RoleBundleOverlayTests(unittest.TestCase):
                                              is_master, None, "claude", role_bundle=bundle)
                     words = shlex.split(launch)
                     self.assertIn("--dangerously-skip-permissions", words)
+                    # never the tmux env's MyPlow.app PYTHONPATH (its older bundled mypeople)
+                    self.assertEqual(words[:3], ["env", "-u", "PYTHONPATH"])
                     self.assertIn("--settings", words, "no consent file on this launch")
                     self.assertEqual(words.count("--settings"), 1, "claude takes one --settings")
                     with open(words[words.index("--settings") + 1]) as f:

@@ -2,7 +2,7 @@
 # images from 0.3.2 source).
 VERSION := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' mypeople/__init__.py)
 
-.PHONY: wheel image verify clean live app released cloud
+.PHONY: wheel image verify clean live app released cloud cli
 
 wheel:
 	uv build --wheel --out-dir dist
@@ -32,7 +32,19 @@ released:
 	  { echo "uncommitted changes under mypeople/ would ship as v$(VERSION)" >&2; exit 1; }
 
 APP_RT := /Applications/MyPlow.app/Contents/Resources/runtime
-live: released
+# boss-supervisor's login gate runs the `mypeople` on PATH, a separate `uv tool` install that no
+# release touched: it sat at 5.14.0 with an auth probe that started the 1Password MCP, one macOS
+# "access data from other apps" prompt per release (card 70a20b5dcf). Reinstall it from this
+# release whenever its version differs; a node without it (no gate) is left without it.
+cli: released
+	@v="$$(env -u PYTHONPATH uv tool list 2>/dev/null | sed -n 's/^mypeople v//p')"; \
+	if [ -n "$$v" ] && [ "$$v" != "$(VERSION)" ]; then \
+	  d="$$(mktemp -d)" && env -u PYTHONPATH uv build -q --wheel --out-dir "$$d" && \
+	  env -u PYTHONPATH uv tool install -q --force "$$d"/mypeople-$(VERSION)-*.whl && \
+	  echo "[myplow] mypeople CLI $$v -> $(VERSION)"; \
+	fi
+
+live: released cli
 	env -i HOME="$$HOME" USER="$$USER" LOGNAME="$$LOGNAME" SHELL="$$SHELL" TMPDIR="$$TMPDIR" \
 	  LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 SSH_AUTH_SOCK="$$SSH_AUTH_SOCK" \
 	  PATH="$(APP_RT)/bin:$(APP_RT)/python/bin:$$HOME/.local/bin:$$HOME/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \

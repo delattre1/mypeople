@@ -8,6 +8,10 @@ set -u
 # defaults to 256, which can strand every live tile in ttyd's reconnect screen under normal fleets.
 ulimit -n "${MYPEOPLE_NOFILE_LIMIT:-8192}" 2>/dev/null || true
 source "${MYPEOPLE_CONFIG_PATH:-$HOME/.config/mypeople/queue.env}" 2>/dev/null || true
+# MyPlow.app points PYTHONPATH at its bundled package for its own python. Inherited by the daemons,
+# it put the app's older `mypeople` ahead of the installed CLI in the Boss's login gate (card
+# 70a20b5dcf); the runtime itself imports from bin/ and never needs it.
+case "${PYTHONPATH:-}" in *.app/Contents/Resources/runtime/pylib*) unset PYTHONPATH ;; esac
 ID="${INSTALL_DIR:-$HOME/mypeople}"
 export PATH="$HOME/.local/bin:$ID/bin:$PATH"
 export LANG="${LANG:-C.UTF-8}" LC_ALL="${LC_ALL:-C.UTF-8}"
