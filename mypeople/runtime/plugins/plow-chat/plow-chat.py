@@ -77,7 +77,9 @@ MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 ROUTER = os.environ.get("PLOW_CHAT_ROUTER", "")
 JEV_URL = os.environ.get("TYPESAFE_URL") or "https://api.typesafe.ai/v1/systemone"
 ROUTE_ASK = ("A person texts one WhatsApp chat answered by several AI agents. Which agent should get this message? "
+             "If the message names one of the agents, pick that agent. "
              "The context says who answered last; it only matters when the message has no topic of its own.")
+SPEAKER = re.compile(r"([A-Z][A-Za-z0-9]{1,19}): ")  # each agent's prompt starts its replies with its name
 # A pass over every chat runs on each (re)connect, every SWEEP_SECONDS on a live socket (Plow's
 # events are best-effort, so a frame can go missing), and every POLL_SECONDS while the socket is
 # down or a text waits on the Boss.
@@ -290,12 +292,11 @@ def live_agents() -> dict:
             for aid, role in re.findall(r"^(\S+:\S+)\s+\[alive\s*\]\s+(\S+)", out, re.M) if aid.startswith(f"{HOST_ID}/")}
 
 
-def pick_agent(text: str, chat: str, message: dict) -> str:
-    """The one routing decision: which live agent gets this text. Anything unsure or broken goes to the Boss."""
+def pick_agent(text: str, message: dict, last: str = "") -> str:
+    """The one routing decision: which live agent gets this text. `last` (who answered last: the name the chat's
+    latest reply starts with) is context only. Anything unsure or broken goes to the Boss."""
     if ROUTER != "jev":
         return BOSS_AGENT
-    with STATE_LOCK:
-        last = read_json(STATE, {}).get("last_agent", {}).get(chat)
     try:
         agents = live_agents()
         if not text:  # a photo or voice note has nothing to classify: it stays with whoever had the chat
@@ -362,7 +363,7 @@ def order(message: dict) -> list:
     return [ts, message.get("uid") or ""]
 
 
-def route_message(message: dict, chat: str = "") -> str:
+def route_message(message: dict, chat: str = "", last: str = "") -> str:
     """Deliver one inbound message in `chat` (the one being polled) to the Boss, exactly once."""
     if message.get("direction") != "inbound":
         return "skip: outbound"
@@ -400,16 +401,14 @@ def route_message(message: dict, chat: str = "") -> str:
             notes.append(f"could not download {a.get('filename') or 'attachment'}: {e}")
     with STATE_LOCK:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
-    target = pick_agent(text, chat_uid, message)
+    target = pick_agent(text, message, last)
     if send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid), target):
-        name = target.rsplit(":", 1)[1]
-        with STATE_LOCK:
-            st = read_json(STATE, {})
-            st["pending_tapbacks"] = [t for t in st.get("pending_tapbacks", []) if t not in taps]
-            if ROUTER:
-                st.setdefault("last_agent", {})[chat_uid] = name
-            write_json(STATE, st)
-        return f"ROUTE {chat_uid} {who}{f' -> {name}' if ROUTER else ''}: {text[:60]}"
+        if taps:
+            with STATE_LOCK:
+                st = read_json(STATE, {})
+                st["pending_tapbacks"] = [t for t in st.get("pending_tapbacks", []) if t not in taps]
+                write_json(STATE, st)
+        return f"ROUTE {chat_uid} {who}{' -> ' + target.rsplit(':', 1)[1] if ROUTER else ''}: {text[:60]}"
     with STATE_LOCK:  # release the claim so the next pass retries it
         st = read_json(STATE, {})
         marks = st.setdefault("marks", {})
@@ -685,9 +684,11 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
             except SystemExit as e:  # a failed hello must not take the bridge down
                 log(f"welcome not sent: {e}")
         return 0
-    routed = 0
+    routed, last = 0, ""
     for m in sorted(msgs, key=order):
-        r = route_message(m, chat_uid)
+        if m.get("direction") == "outbound" and (named := SPEAKER.match(m.get("body") or "")):
+            last = named.group(1)  # who answered last, for the router
+        r = route_message(m, chat_uid, last)
         if not r.startswith("skip"):
             log(r)
         if r.startswith("ERROR"):

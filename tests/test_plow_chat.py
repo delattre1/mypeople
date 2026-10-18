@@ -341,7 +341,7 @@ class PlowChatTest(unittest.TestCase):
 
     def test_the_router_sends_each_text_to_the_live_agent_jev_picks_and_anything_unsure_to_the_boss(self):
         """PLOW_CHAT_ROUTER=jev: one decision, which live agent gets the text; the last agent is only context."""
-        self.assertEqual(self.pc.pick_agent("hi", "cht_a", {}), "h/main:Boss", "off unless asked for: the Boss")
+        self.assertEqual(self.pc.pick_agent("hi", {}), "h/main:Boss", "off unless asked for: the Boss")
         self.pc.ROUTER = "jev"
         self.pc.INSTALL = Path(self.tmp.name) / "install"
         roles = self.pc.INSTALL / "roles"
@@ -368,17 +368,21 @@ class PlowChatTest(unittest.TestCase):
             self.assertEqual(set(agents), {"Boss", "Chef"}, "only this host's live agents: created = in, retired = out")
             self.assertEqual(agents["Chef"][1], "You are Chef, a cooking assistant.")
             self.pc.poll_chat(self.creds, "cht_a")
-            for uid, body, ts in (("m2", "what can I cook?", "2"), ("m3", "and for dinner?", "3")):
-                self.msgs.append({"uid": uid, "direction": "inbound", "body": body, "chat_uid": "cht_a", "created_at": ts})
+            for uid, way, body, ts in (("m2", "inbound", "what can I cook?", "2"), ("m3", "outbound", "Chef: rice!", "3"),
+                                       ("m4", "inbound", "and for dinner?", "4")):
+                self.msgs.append({"uid": uid, "direction": way, "body": body, "chat_uid": "cht_a", "created_at": ts})
                 self.pc.poll_chat(self.creds, "cht_a")
         self.assertEqual(sent, ["h/main:Chef", "h/main:Chef"])
         self.assertEqual(list(asked[-1]["questions"]), ["agent"], "one decision, never a second question")
-        self.assertEqual(asked[-1]["state"], {"message": "and for dinner?", "last_answered_by": "Chef"})
+        self.assertEqual(asked[0]["state"], {"message": "what can I cook?"})
+        self.assertEqual(asked[-1]["state"], {"message": "and for dinner?", "last_answered_by": "Chef"},
+                         "who answered last = the name the latest reply starts with")
+        self.assertIn("names one of the agents", asked[-1]["questions"]["agent"]["instructions"])
         self.assertEqual(set(asked[-1]["questions"]["agent"]["criteria"]), {"Boss", "Chef"})
         with mock.patch.object(self.pc.subprocess, "run", return_value=status), \
                 mock.patch.object(self.pc.urllib.request, "urlopen", side_effect=OSError("down")):
-            self.assertEqual(self.pc.pick_agent("hello?", "cht_a", {}), "h/main:Boss", "JEV down: the Boss, never lost")
-            self.assertEqual(self.pc.pick_agent("", "cht_a", {}), "h/main:Chef", "a photo stays with whoever had the chat")
+            self.assertEqual(self.pc.pick_agent("hello?", {}, "Chef"), "h/main:Boss", "JEV down: the Boss, never lost")
+            self.assertEqual(self.pc.pick_agent("", {}, "Chef"), "h/main:Chef", "a photo stays with whoever answered last")
 
     def test_failed_delivery_is_retried(self):
         self.pc.poll_chat(self.creds, "cht_a")
