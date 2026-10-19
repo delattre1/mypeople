@@ -15,8 +15,9 @@ reaches the Boss as one line, with the sender's trust stamped by this plugin, ne
     but they cannot develop or get a PR shipped, and `assign` refuses them an engineer.
 The Boss answers with `reply`, one topic per thread: a request said in the channel itself is answered
 in a thread `reply --topic` opens on it, and work on it goes on there, so the channel stays a list of
-requests. Each reply passes discord-agent's post filter (no token, local path or private repo). It
-keeps one owner engineer per person with `assign`.
+requests. Each reply passes discord-agent's post filter (no token, local path or private repo), and so
+does the text of any file it attaches (`--file`, up to 4). It keeps one owner engineer per person with
+`assign`.
 Discord's client, the one-line flattener and that filter all come from discord-agent.
 
 Config (env, or queue.env):
@@ -29,6 +30,7 @@ Config (env, or queue.env):
     discord-chat.py serve                       read and route forever (what supervise.sh runs)
     discord-chat.py reply <chan> <msg> --topic "a few words" "text"   answer a request in a thread on it
     discord-chat.py reply <thread> <msg> "text"                      answer inside a thread
+    discord-chat.py reply <thread> <msg> --file a.png "text"         attach a file (--file again: up to 4)
     discord-chat.py react <chan> <msg> EMOJI    react to it (the Boss's 👀 = it read the message)
     discord-chat.py assign <user> <agent>       make <agent> that person's owner engineer
     discord-chat.py status
@@ -63,6 +65,7 @@ POLL = 1
 ME = ""     # the bot's own user id, set by serve(): its messages are "your message" to the agent
 STARTED = time.time()
 THREADS_EVERY = 10     # seconds between listings of the threads open in the listed channels
+MAX_FILES = 4          # files one reply may attach
 
 # How it sounds there. Without this the Boss recited these notes to the channel: "Got it, this channel
 # reaches the Boss. I can chat, take bug reports and feature requests." (the owner's test, 10-15).
@@ -242,9 +245,9 @@ def envelope(m, ch, who, thread=None):
             "other, so answer only what is addressed to you. The channel is public: never write an account email, login, "
             "key, token or any other credential detail there, for anyone, full trust included; confirm only the "
             "outcome (\"done\"). %s "
-            "Plain text, posted as written.)" % ((RUN, ch, m["id"], uid, trust, ch, m["id"], name,
-                                                  flat(m.get("content") or ""), files, context(m), VOICE, INTAKE,
-                                                  RULES[trust], own) + where(ch, m["id"], thread)))
+            "Plain text, posted as written; to attach a file, add --file <path> to that reply, up to %d.)"
+            % ((RUN, ch, m["id"], uid, trust, ch, m["id"], name, flat(m.get("content") or ""), files, context(m),
+                VOICE, INTAKE, RULES[trust], own) + where(ch, m["id"], thread) + (MAX_FILES,)))
 
 
 # The owner's ask (10-16): one topic, one thread, so the channel is not spammed and stays readable.
@@ -301,9 +304,30 @@ def serve():
 
 
 # ---------------------------------------------------------------- outbound
-def reply(ch, msg, text, topic=""):
+def attachments(files):
+    """The files a reply attaches, checked before anything is sent: at most MAX_FILES, each a file, and
+    the text of a text file passes the same filter as the reply (a log or a config can hold a token).
+    An image or other binary has no text to read."""
+    files = [Path(f).expanduser() for f in files]
+    if len(files) > MAX_FILES:
+        raise SystemExit("refused: at most %d files per reply. Nothing was sent." % MAX_FILES)
+    for f in files:
+        if not f.is_file():
+            raise SystemExit("refused: %s is not a file. Nothing was sent." % f)
+        try:
+            words = f.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            words = ""
+        if SECRETISH.search(words):
+            raise SystemExit("refused: %s looks like it holds a token, a local path or a private repo, and people "
+                             "outside the team read this channel. Nothing was sent." % f.name)
+    return files
+
+
+def reply(ch, msg, text, topic="", files=()):
     """Post in a thread of a listed channel, never anywhere else, and never a secret. A request said in
-    the channel itself is answered in a thread opened on it: one topic, one thread."""
+    the channel itself is answered in a thread opened on it: one topic, one thread. Its files ride on
+    its first message."""
     if not open_to(ch):
         raise SystemExit("refused: %s is neither a listed channel nor a thread in one" % ch)
     text = text.strip()
@@ -312,6 +336,7 @@ def reply(ch, msg, text, topic=""):
     if SECRETISH.search(text):
         raise SystemExit("refused: it looks like a token, a local path or a private repo, and people outside "
                          "the team read this channel. Nothing was sent; rewrite it without that.")
+    files = attachments(files)
     if ch in channels():
         if not (msg and topic.strip()):
             raise SystemExit('refused: in the channel itself, answer inside a thread on their message: %s reply %s '
@@ -328,7 +353,7 @@ def reply(ch, msg, text, topic=""):
         body = {"content": text[i:i + 2000], "allowed_mentions": {"parse": []}}
         if i == 0 and msg:
             body["message_reference"] = {"message_id": msg, "channel_id": ch, "fail_if_not_exists": False}
-        api("POST", "/channels/%s/messages" % ch, body)
+        api("POST", "/channels/%s/messages" % ch, body, files if i == 0 else ())
     return "sent in %s" % ch
 
 
@@ -349,8 +374,15 @@ def main(argv):
         if "--topic" in args:
             i = args.index("--topic")
             topic, args = (args[i + 1] if i + 1 < len(args) else ""), args[:i] + args[i + 2:]
+        files = []
+        while "--file" in args:        # once per file
+            i = args.index("--file")
+            if i + 1 == len(args):
+                raise SystemExit("refused: --file needs a path. Nothing was sent.")
+            files.append(args.pop(i + 1))
+            args.pop(i)
         msg = args.pop(1) if len(args) >= 3 and args[1].isdigit() else ""
-        print(reply(args[0], msg, " ".join(args[1:]), topic))
+        print(reply(args[0], msg, " ".join(args[1:]), topic, files))
     elif cmd == "react" and len(args) == 3:
         print(react(*args))
     elif cmd == "assign" and len(args) == 2:

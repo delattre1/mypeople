@@ -28,7 +28,7 @@ class DiscordChatTest(unittest.TestCase):
         loader = importlib.machinery.SourceFileLoader("discord_chat", str(PLUGIN))
         self.d = importlib.util.module_from_spec(importlib.util.spec_from_loader("discord_chat", loader))
         loader.exec_module(self.d)
-        self.boss, self.posted, self.page = [], [], []
+        self.boss, self.posted, self.page, self.attached = [], [], [], []
         self.d.send_to_boss = lambda text: self.boss.append(text) or True   # never the real mp
         self.thread_exists = False
         self.d.api = self.api
@@ -36,10 +36,11 @@ class DiscordChatTest(unittest.TestCase):
         self.roster = {}
         self.d.roster = lambda: self.roster
 
-    def api(self, method, path, body=None):
+    def api(self, method, path, body=None, files=()):
         """Discord as the plugin sees it: channel c1 is listed, thread 77 is in it, thread 88 is not."""
         if method != "GET":
             self.posted.append((path, body))
+            self.attached.append(list(files))
             if path.endswith("/threads"):
                 if self.thread_exists:
                     raise urllib.error.HTTPError(path, 400, "thread exists", {}, None)
@@ -76,6 +77,7 @@ class DiscordChatTest(unittest.TestCase):
         self.assertIn("never write an account email, login, key, token", self.boss[0])
         self.assertIn("never use this team's inside words", self.boss[0])
         self.assertIn("file it before you say so", self.boss[0])
+        self.assertIn("add --file <path> to that reply, up to 4", self.boss[0])
         self.assertIn("trust=community", self.boss[1])
         self.assertIn("--community", self.boss[1])
         self.assertIn("never run git", self.boss[1])
@@ -151,6 +153,44 @@ class DiscordChatTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.d.reply(ch, "7", text)
         self.assertEqual(len(self.posted), n)
+
+    def file(self, name, data):
+        path = Path(self.tmp.name) / name
+        path.write_bytes(data)
+        return path
+
+    def test_a_replys_files_ride_on_its_first_message(self):
+        shot, log = self.file("shot.png", b"\x89PNG\r\n\x1a\n\xff\x00"), self.file("build.log", b"all green\n")
+        self.assertEqual(self.d.reply("c1", "7", "word " * 500, topic="Install help", files=[shot, log]), "sent in 77")
+        self.assertEqual([path for path, _ in self.posted],
+                         ["/channels/c1/messages/7/threads", "/channels/77/messages", "/channels/77/messages"])
+        self.assertEqual(self.attached, [[], [shot, log], []])     # the thread first, then text and files together
+        self.assertEqual(self.d.reply("77", "8", "here it is", files=[shot]), "sent in 77")
+        path, body = self.posted[-1]
+        self.assertEqual((body["content"], body["message_reference"]["message_id"]), ("here it is", "8"))
+        self.assertEqual(self.attached[-1], [shot])
+
+    def test_files_are_checked_before_anything_is_sent(self):
+        shot = self.file("shot.png", b"\x89PNG\r\n\x1a\n\xff\x00")
+        env = self.file("queue.env", b"export DISCORD_BOT_TOKEN=" + b"x" * 60 + b"\n")
+        notes = self.file("notes.md", b"see /Users/delattre/secret.txt\n")
+        for files in ([shot] * 5, [shot, Path(self.tmp.name) / "gone.png"], [Path(self.tmp.name)], [env], [notes]):
+            with self.assertRaises(SystemExit):
+                self.d.reply("c1", "7", "here", topic="Install help", files=files)
+        self.assertEqual(self.posted, [])     # not even the thread
+
+    def test_the_reply_command_takes_each_file_after_its_own_flag(self):
+        shot, log = self.file("shot.png", b"\x89PNG\r\n\x1a\n\xff\x00"), self.file("build.log", b"all green\n")
+        with mock.patch("builtins.print"):
+            self.d.main(["discord-chat.py", "reply", "77", "8", "--file", str(shot), "here", "--file", str(log)])
+            self.d.main(["discord-chat.py", "reply", "77", "9", "--file", str(shot), "--topic", "Install help", "done"])
+        (_, here), (_, done) = self.posted
+        self.assertEqual((here["content"], here["message_reference"]["message_id"]), ("here", "8"))
+        self.assertEqual((done["content"], done["message_reference"]["message_id"]), ("done", "9"))
+        self.assertEqual(self.attached, [[shot, log], [shot]])
+        with self.assertRaises(SystemExit):
+            self.d.main(["discord-chat.py", "reply", "77", "8", "here", "--file"])
+        self.assertEqual(len(self.posted), 2)
 
 
 class CommunityLaunchTest(unittest.TestCase):
