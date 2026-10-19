@@ -68,6 +68,9 @@ except (OSError, ValueError, AttributeError):
 ACTIVATION = STATE_DIR / "activation.json"
 ATTACHMENTS = STATE_DIR / "attachments"   # inbound photos/files, for the Boss to open
 STATE = STATE_DIR / "state.json"          # {"marks": {chat: [created_at, uid]}, "seeded_chats": [...]}
+# How every reply looks, in one file the owner or the Boss edits (Daniel 10-18: "the style of how to reply should be
+# part of the message package"). It rides in every message package; "{name}" becomes the agent that gets the text.
+STYLE = STATE_DIR / "style.md"
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
@@ -186,7 +189,7 @@ def listing(data) -> list:
 
 # --- Boss ---
 
-def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str = "") -> str:
+def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str = "", agent: str = "") -> str:
     # Plow seats whoever the carrier reports in the thread, so the Boss is told
     # who actually spoke and which thread — in a group these differ per message.
     sent = "".join(f"\n[attached, open it: {f}]" for f in files)
@@ -205,6 +208,10 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
             f"\"members\": [\"+1...\"], \"body\": \"first text\", \"idempotency_key\": \"any-unique-id\"}}' "
             f"to start a new thread or group. Do what the person asks with it; never answer that you "
             f"can't without trying. ")
+    try:
+        style = " ".join(STYLE.read_text().split()).replace("{name}", agent or BOSS_AGENT.rsplit(":", 1)[1])
+    except OSError:
+        style = ""
     return (
         f"{seen}[plowchat] from {who} in {chat_uid}: {text}{sent}{said}\n"
         f"({able}This is the owner's Plow messages line. The owner texts here, and so "
@@ -212,6 +219,7 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
         f"{RUN} reply {chat_uid} \"your reply\" — it goes back to that "
         f"same thread, which may be a group. Plain text only, no markdown. To send "
         f"photos or files, add --file PATH before the text, up to 4.{tap})"
+        + (f"\n(Reply style: {style})" if style else "")
     )
 
 
@@ -438,7 +446,8 @@ def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
     with STATE_LOCK:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
     target = pick_agent(text, message, *last)
-    if send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid), target):
+    if send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid,
+                              target.rsplit(":", 1)[1]), target):
         if taps:
             with STATE_LOCK:
                 st = read_json(STATE, {})

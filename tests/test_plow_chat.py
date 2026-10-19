@@ -66,6 +66,16 @@ class PlowChatTest(unittest.TestCase):
         self.assertTrue(lines[2].startswith("(You hold this line's Plow login"))
         self.assertEqual(len(lines), 3)
 
+    def test_the_reply_style_file_rides_in_every_message_package_with_the_agents_name(self):
+        """Daniel 10-18: the style of a reply is part of the message package, from one file anyone can edit."""
+        self.assertNotIn("Reply style", self.pc.envelope("Dan", "hi", "cht_a", mid="m1"), "no file, no style line")
+        (Path(self.tmp.name) / "style.md").write_text("Short WhatsApp messages, in the sender's language.\n"
+                                                       "Sign once: ~{name} on its own line at the bottom of the last bubble.")
+        env = self.pc.envelope("Dan", "hi", "cht_a", mid="m1", agent="Chef")
+        self.assertTrue(env.endswith("(Reply style: Short WhatsApp messages, in the sender's language. "
+                                     "Sign once: ~Chef on its own line at the bottom of the last bubble.)"), env)
+        self.assertIn("~Boss", self.pc.envelope("Dan", "hi", "cht_a", mid="m1"), "no agent named: the Boss signs")
+
     def test_a_reply_carries_what_it_answers_and_who_it_mentions(self):
         self.pc.poll_chat(self.creds, "cht_a")
         self.msgs.append({
