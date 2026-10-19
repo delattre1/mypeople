@@ -37,6 +37,7 @@ Config (env, or the file MYPEOPLE_CONFIG_PATH names, default ~/.config/mypeople/
     discord-agent.py status    cursor per channel, outbox, whether the agent is up
 """
 import json
+import mimetypes
 import os
 import re
 import shlex
@@ -46,6 +47,7 @@ import time
 import unicodedata
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
 INSTALL = Path(os.environ.get("INSTALL_DIR") or os.environ.get("MYPEOPLE_HOME")
@@ -109,14 +111,34 @@ def write_state(st):
     os.replace(tmp, STATE)
 
 
-def api(method, path, body=None):
-    req = urllib.request.Request(API + path, method=method,
-                                 data=json.dumps(body).encode() if body is not None else None)
+def api(method, path, body=None, files=()):
+    """One Discord REST call. With files, the message goes as Discord's upload form instead of JSON."""
+    data, kind = (json.dumps(body).encode() if body is not None else None), "application/json"
+    if files:
+        data, kind = multipart(body or {}, files)
+    req = urllib.request.Request(API + path, method=method, data=data)
     req.add_header("Authorization", "Bot " + cfg("DISCORD_BOT_TOKEN"))
     req.add_header("User-Agent", "DiscordBot (https://github.com/delattre1/mypeople, 1)")
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=20) as r:
+    req.add_header("Content-Type", kind)
+    with urllib.request.urlopen(req, timeout=60 if files else 20) as r:
         return json.loads(r.read() or b"null")
+
+
+def multipart(body, files):
+    """Discord's upload form: the message as payload_json, each file as files[n], which the message's
+    attachments list names by n. Returns (bytes, Content-Type)."""
+    files = [Path(f) for f in files]
+    edge = uuid.uuid4().hex
+    body = dict(body, attachments=[{"id": n, "filename": f.name} for n, f in enumerate(files)])
+    parts = [("payload_json", None, "application/json", json.dumps(body).encode())]
+    parts += [("files[%d]" % n, f.name, mimetypes.guess_type(f.name)[0] or "application/octet-stream",
+               f.read_bytes()) for n, f in enumerate(files)]
+    out = b""
+    for name, filename, kind, data in parts:
+        named = 'name="%s"' % name + ('; filename="%s"' % re.sub(r'["\\\r\n]', "_", filename) if filename else "")
+        out += ("--%s\r\nContent-Disposition: form-data; %s\r\nContent-Type: %s\r\n\r\n"
+                % (edge, named, kind)).encode() + data + b"\r\n"
+    return out + ("--%s--\r\n" % edge).encode(), "multipart/form-data; boundary=" + edge
 
 
 # ---------------------------------------------------------------- the agent this plugin owns
