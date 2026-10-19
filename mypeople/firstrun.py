@@ -163,6 +163,12 @@ def materialize(install):
         mode = stat.S_IMODE(os.stat(reg_path).st_mode)
         merged = dict(kept_roles)
         merged.update(reg.get("roles") or {})
+        # A shipped name this install points at a profile of its OWN (a factory agent's Boss with the
+        # person's role, 10-18) stays pointed there: the product's version only replaces the product's
+        # versions. Moving it to the stock profile made every restart revive that Boss onto the wrong
+        # role, or refuse it on a locked-role drift, so the agent stayed down.
+        merged.update({r: ref for r, ref in kept_roles.items()
+                       if not os.path.isfile(os.path.join(rt, "roles", *ref.split("/")))})
         # a kept entry whose profile this release deleted would fail closed at spawn; drop it.
         reg["roles"] = {r: ref for r, ref in merged.items()
                         if os.path.isfile(os.path.join(install, "roles", *ref.split("/")))}

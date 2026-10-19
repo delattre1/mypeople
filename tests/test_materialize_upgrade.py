@@ -101,6 +101,24 @@ class MaterializeOverExistingInstallTests(unittest.TestCase):
         self.assertIn("boss", after, "upgrade dropped a shipped role")
         self.assertNotIn("ghost", after, "kept an entry whose profile does not exist")
 
+    def test_upgrade_keeps_a_shipped_name_the_install_points_at_its_own_profile(self):
+        """The factory gives an agent's Boss the person's role: boss -> an install-only profile. A
+        restart (materialize) that put it back on the stock profile left the agent unrevivable."""
+        firstrun.materialize(self.install)
+        roles = Path(self.install) / "roles"
+        reg = roles / "registry.json"
+        data = json.loads(reg.read_text())
+        stock = data["roles"]["boss"]
+        own = stock.replace(".json", "-home.json")
+        (roles / own).write_text((roles / stock).read_text())
+        data["roles"]["boss"] = own
+        os.chmod(reg, 0o644)
+        reg.write_text(json.dumps(data))
+
+        firstrun.materialize(self.install)
+        self.assertEqual(json.loads(reg.read_text())["roles"]["boss"], own, "a restart moved the Boss off its own role")
+
+
     def test_scripts_stay_executable_after_upgrade(self):
         firstrun.materialize(self.install)
         firstrun.materialize(self.install)
