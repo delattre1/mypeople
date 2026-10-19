@@ -86,7 +86,14 @@ ROUTE_ASK = ("A person texts one WhatsApp chat answered by several AI agents, as
              "its own and names no agent (a greeting, ok, thanks, yes, and?, more, why?, what can you do?): pick the agent "
              "who answered in the last few minutes, or Boss when none did.")
 FOLLOW_MINUTES = float(os.environ.get("PLOW_CHAT_FOLLOW_MINUTES", "30"))  # an older answer no longer counts as the conversation
-SPEAKER = re.compile(r"([A-Z][A-Za-z0-9]{1,19}): ")  # each agent's prompt starts its replies with its name
+# Who wrote a reply: each agent's prompt signs its last bubble "~Name" on its own line (Daniel 10-18). Unsigned
+# bubbles of the same reply name no one.
+SPEAKER = re.compile(r"(?:\n|^)~([A-Z][A-Za-z0-9]{1,19})\s*$")
+
+
+def signed_by(body: str) -> str:
+    named = SPEAKER.search(body or "")
+    return named.group(1) if named else ""
 # A pass over every chat runs on each (re)connect, every SWEEP_SECONDS on a live socket (Plow's
 # events are best-effort, so a frame can go missing), and every POLL_SECONDS while the socket is
 # down or a text waits on the Boss.
@@ -389,7 +396,7 @@ def conversation(answer, message) -> tuple:
         minutes = None  # no readable times: who answered last still counts
     if minutes is not None and minutes > FOLLOW_MINUTES:
         return ()
-    return SPEAKER.match(answer["body"]).group(1), minutes, answer["body"]
+    return signed_by(answer["body"]), minutes, answer["body"]
 
 
 def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
@@ -715,7 +722,7 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
         return 0
     routed, last = 0, None
     for m in sorted(msgs, key=order):
-        if m.get("direction") == "outbound" and (named := SPEAKER.match(m.get("body") or "")):
+        if m.get("direction") == "outbound" and signed_by(m.get("body")):
             last = m  # who answered last, for the router
         r = route_message(m, chat_uid, conversation(last, m))
         if not r.startswith("skip"):

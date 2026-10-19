@@ -368,20 +368,24 @@ class PlowChatTest(unittest.TestCase):
             self.assertEqual(set(agents), {"Boss", "Chef"}, "only this host's live agents: created = in, retired = out")
             self.assertEqual(agents["Chef"][1], "You are Chef, a cooking assistant.")
             self.pc.poll_chat(self.creds, "cht_a")
-            for uid, way, body, ts in (("m2", "inbound", "what can I cook?", "2"), ("m3", "outbound", "Chef: rice!", "3"),
+            for uid, way, body, ts in (("m2", "inbound", "what can I cook?", "2"), ("m3", "outbound", "Rice!\n~Chef", "3"),
                                        ("m4", "inbound", "and for dinner?", "4")):
                 self.msgs.append({"uid": uid, "direction": way, "body": body, "chat_uid": "cht_a", "created_at": ts})
                 self.pc.poll_chat(self.creds, "cht_a")
         self.assertEqual(sent, ["h/main:Chef", "h/main:Chef"])
         self.assertEqual(list(asked[-1]["questions"]), ["agent"], "one decision, never a second question")
         self.assertEqual(asked[0]["state"], {"message": "what can I cook?"})
-        self.assertEqual(asked[-1]["state"], {"message": "and for dinner?", "last_answered_by": "Chef", "that_answer": "Chef: rice!"},
+        self.assertEqual(asked[-1]["state"], {"message": "and for dinner?", "last_answered_by": "Chef", "that_answer": "Rice!\n~Chef"},
                          "who answered last = the name the latest reply starts with; what they said is context too")
         # A conversation is recent answers only: minutes count, and an answer older than the window is no context.
         at = lambda minute: f"2026-10-18T21:{minute:02d}:00Z"
-        reply = {"direction": "outbound", "body": "Chef: Yep, I'm here!", "created_at": at(24)}
-        self.assertEqual(self.pc.conversation(reply, {"created_at": at(25)}), ("Chef", 1.0, "Chef: Yep, I'm here!"))
+        reply = {"direction": "outbound", "body": "Yep, I'm here!\n~Chef", "created_at": at(24)}
+        self.assertEqual(self.pc.conversation(reply, {"created_at": at(25)}), ("Chef", 1.0, "Yep, I'm here!\n~Chef"))
         self.assertEqual(self.pc.conversation(dict(reply, created_at="2026-10-18T20:00:00Z"), {"created_at": at(25)}), ())
+        # The signature Daniel picked: "~Name" on its own line at the bottom of the last bubble; earlier bubbles name no one.
+        self.assertEqual(self.pc.signed_by("Pancakes, step 2: flip when bubbles form.\n~Chef"), "Chef")
+        self.assertEqual(self.pc.signed_by("Ingredients: 2 eggs, 1 cup flour"), "")
+        self.assertEqual(self.pc.signed_by("a ~tilde mid-line is not a signature"), "")
         self.assertIn("calls an agent by name", asked[-1]["questions"]["agent"]["instructions"])
         self.assertEqual(set(asked[-1]["questions"]["agent"]["criteria"]), {"Boss", "Chef"})
         with mock.patch.object(self.pc.subprocess, "run", return_value=status), \
