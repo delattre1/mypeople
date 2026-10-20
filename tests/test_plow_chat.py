@@ -284,11 +284,8 @@ class PlowChatTest(unittest.TestCase):
         self.assertIn("\n(could not download trip.mov: file unavailable)", self.sent[0])
         self.assertNotIn("open it", self.sent[0], "nothing to open: the file never arrived")
 
-    def test_a_voice_note_is_heard_before_routing_and_a_deaf_stt_still_delivers_the_file(self):
-        """Daniel 10-20: a voice note reached the agent as a file only, and the router had nothing to classify. The STT
-        server's words are what JEV routes on and what the agent reads; with no words, the file comes as before."""
-        audio = Path(self.tmp.name) / "att_v-3A1B.ogg"
-        audio.write_bytes(b"OggS opus bytes")
+    def stt_server(self):
+        """An stt-api stand-in on 127.0.0.1 only: what it got per request (form field, filename, bytes, Host), and the server."""
         heard = []
 
         class STT(http.server.BaseHTTPRequestHandler):
@@ -297,7 +294,7 @@ class PlowChatTest(unittest.TestCase):
                                                 + self.rfile.read(int(self.headers["Content-Length"])))
                 part = form.get_payload()[0]
                 heard.append((part.get_param("name", header="content-disposition"), part.get_filename(),
-                              part.get_payload(decode=True)))
+                              part.get_payload(decode=True), self.headers["Host"]))
                 out = json.dumps({"text": " Hey chef,  what can I cook\n tonight? "}).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(out)))
@@ -311,6 +308,14 @@ class PlowChatTest(unittest.TestCase):
         threading.Thread(target=stt.serve_forever, daemon=True).start()
         self.addCleanup(stt.server_close)
         self.addCleanup(stt.shutdown)
+        return heard, stt
+
+    def test_a_voice_note_is_heard_before_routing_and_a_deaf_stt_still_delivers_the_file(self):
+        """Daniel 10-20: a voice note reached the agent as a file only, and the router had nothing to classify. The STT
+        server's words are what JEV routes on and what the agent reads; with no words, the file comes as before."""
+        audio = Path(self.tmp.name) / "att_v-3A1B.ogg"
+        audio.write_bytes(b"OggS opus bytes")
+        heard, stt = self.stt_server()
         routed = []
         self.pc.pick_agent = lambda text, message, *last: routed.append(text) or "h/main:Chef"
         self.pc.download = lambda a: str(audio)
@@ -321,7 +326,8 @@ class PlowChatTest(unittest.TestCase):
         self.pc.STT_URL = f"http://127.0.0.1:{stt.server_port}/transcribe/fast"
         self.msgs.append(note("m2", "2"))
         self.pc.poll_chat(self.creds, "cht_a")
-        self.assertEqual(heard, [("audio", "voice.ogg", b"OggS opus bytes")], "stt-api's form: the audio, its format in the name")
+        self.assertEqual(heard, [("audio", "voice.ogg", b"OggS opus bytes", f"127.0.0.1:{stt.server_port}")],
+                         "stt-api's form: the audio, its format in the name")
         self.assertEqual(routed, ["[voice note, transcribed] Hey chef, what can I cook tonight?"], "JEV routes on the words")
         self.assertIn("[plowchat] from Dan in cht_a: [voice note, transcribed] Hey chef, what can I cook tonight?\n"
                       f"[attached, open it: {audio}]", self.sent[0])
@@ -331,6 +337,27 @@ class PlowChatTest(unittest.TestCase):
         self.assertEqual(routed[-1], "", "no words: nothing to classify, it stays with whoever had the chat")
         self.assertIn(f"[plowchat] from Dan in cht_a: \n[attached, open it: {audio}]", self.sent[1])
         self.assertRegex(self.sent[1], r"\n\(voice note not transcribed \(.+\): the transcript is missing, only the audio file came\)")
+
+    def test_the_stt_server_is_reached_over_ipv4_when_its_name_also_answers_with_ipv6(self):
+        """Mac 1, 10-20: server.local answered with only its IPv6 address while a VPN exit node held the IPv6 route, and
+        Daniel's first voice note died on "No route to host". The call goes to the name's IPv4 address, the name kept
+        as Host (exehome's proxy routes the homes' stt.int.exe.home on it)."""
+        audio = Path(self.tmp.name) / "att_v-3A1B.ogg"
+        audio.write_bytes(b"OggS opus bytes")
+        heard, stt = self.stt_server()
+        lookup = socket.getaddrinfo
+
+        def dns(host, port, family=0, *rest):
+            if host != "stt.home.test":
+                return lookup(host, port, family, *rest)
+            if family == socket.AF_INET:
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+            return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", port, 0, 0))]  # nothing listens there
+
+        self.pc.STT_URL = f"http://stt.home.test:{stt.server_port}/transcribe/fast"
+        with mock.patch.object(socket, "getaddrinfo", dns):
+            self.assertEqual(self.pc.transcribe(str(audio)), "Hey chef, what can I cook tonight?")
+        self.assertEqual(heard[0][3], f"stt.home.test:{stt.server_port}", "the name rides as Host")
 
     def test_reply_uploads_files_then_sends_their_uids(self):
         calls = []

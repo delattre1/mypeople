@@ -530,8 +530,17 @@ def transcribe(path: str) -> str:
     edge = os.urandom(16).hex()
     data = (f'--{edge}\r\nContent-Disposition: form-data; name="audio"; filename="voice{suffix}"\r\n'
             f"Content-Type: application/octet-stream\r\n\r\n").encode() + Path(path).read_bytes() + f"\r\n--{edge}--\r\n".encode()
-    req = urllib.request.Request(STT_URL, data=data, method="POST",
-                                 headers={"Content-Type": f"multipart/form-data; boundary={edge}"})
+    # To the name's IPv4 address when it has one, the name kept as Host (a proxy routes on it): a VPN exit node can take
+    # the IPv6 one, and Daniel's first voice note on Mac 1 died on "No route to host" for server.local (10-20).
+    u, url = urllib.parse.urlsplit(STT_URL), STT_URL
+    if u.scheme == "http":  # https checks the certificate against the name in the URL
+        try:
+            ip = socket.getaddrinfo(u.hostname, u.port or 80, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+            url = u._replace(netloc=f"{ip}:{u.port}" if u.port else ip).geturl()
+        except OSError:
+            pass  # no IPv4 address: the name as given
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={"Host": u.netloc, "Content-Type": f"multipart/form-data; boundary={edge}"})
     with urllib.request.urlopen(req, timeout=STT_SECONDS) as r:
         heard = " ".join((json.load(r).get("text") or "").split())
     if not heard:
