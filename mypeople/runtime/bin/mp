@@ -1101,6 +1101,9 @@ def do_revive(argv):
     if not argv:
         print(USAGE["revive"], file=sys.stderr); return 2
     aid = full_aid(argv[0])
+    # `--model <id>` brings the same session back on another model; the respawn records it, so later
+    # revives keep it. A resumed Claude session otherwise keeps the model it last ran.
+    model = argv[argv.index("--model") + 1] if "--model" in argv[1:-1] else None
     if not is_local(aid):
         ok, result = remote_task("revive", aid, {}, timeout=150)
         print(result)
@@ -1133,8 +1136,9 @@ def do_revive(argv):
     role = _record_role(rr)
     if role:
         args += ["--role", role]
-    if rr.get("model"):
-        args += ["--model", rr["model"]]
+    model = model or rr.get("model")
+    if model:
+        args += ["--model", model]
     # A revived owner must come back bound to the same card (see spawn_args_from_record).
     if rr.get("lifecycle") == "owner" and rr.get("owner_task_id"):
         args += ["--owner-task", rr["owner_task_id"]]
@@ -1817,7 +1821,7 @@ USAGE = {
     "peek": "usage: mp peek <agent_id>",
     "kill": "usage: mp kill <agent_id> [--reason ...]",
     "answer": "usage: mp answer <agent_id> <N>",
-    "revive": "usage: mp revive <agent_id>",
+    "revive": "usage: mp revive <agent_id> [--model <id>]",
     "ensure-boss": "usage: mp ensure-boss [<agent_id>] [--backend claude|codex|grok] [--master] [--role ...]",
     "reconcile": "usage: mp reconcile",
     "stop-recorders": "usage: mp stop-recorders [--keep-intent]",

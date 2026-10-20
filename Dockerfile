@@ -70,6 +70,9 @@ COPY --from=package-builder /dist/mypeople-*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/mypeople-*.whl \
     && rm /tmp/mypeople-*.whl
 
+# The model and effort every agent runs are env, not ~/.claude/settings.json: /home/mypeople is a volume,
+# so a file put there reaches only a brand-new home. mp passes DEFAULT_CLAUDE_MODEL to the agents it
+# spawns; the Boss, spawned without --model, runs ANTHROPIC_MODEL (without it, Claude Code's Sonnet).
 ENV MYPEOPLE_HOME=/var/lib/mypeople \
     MYPEOPLE_CONFIG_PATH=/var/lib/mypeople/config/queue.env \
     MYPEOPLE_CONTAINER=1 \
@@ -80,6 +83,10 @@ ENV MYPEOPLE_HOME=/var/lib/mypeople \
     TTYD_PORT=7681 \
     TTYD_BROWSER_PORT=7681 \
     DEFAULT_BACKEND=claude \
+    DEFAULT_CLAUDE_MODEL=claude-opus-5-5 \
+    DEFAULT_ENG_MODEL=claude-opus-5-5 \
+    ANTHROPIC_MODEL=claude-opus-5-5 \
+    CLAUDE_CODE_EFFORT_LEVEL=xhigh \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
