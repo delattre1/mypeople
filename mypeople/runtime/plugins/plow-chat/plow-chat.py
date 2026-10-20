@@ -89,6 +89,11 @@ ROUTE_ASK = ("A person texts one WhatsApp chat answered by several AI agents, as
              "its own and names no agent (a greeting, ok, thanks, yes, and?, more, why?, what can you do?): pick the agent "
              "who answered in the last few minutes, or Boss when none did.")
 FOLLOW_MINUTES = float(os.environ.get("PLOW_CHAT_FOLLOW_MINUTES", "30"))  # an older answer no longer counts as the conversation
+# A voice note is heard before it is routed, so the router and the agent get words, not only a file (Daniel 10-20). The
+# server at PLOW_CHAT_STT_URL takes the audio as multipart "audio" and answers {"text": ...} (the homelab's stt-api
+# /transcribe/fast). Unset, down or slow: the file still arrives, with a note that the transcript is missing.
+STT_URL = os.environ.get("PLOW_CHAT_STT_URL", "")
+STT_SECONDS = 30
 # Who wrote a reply: each agent's prompt signs its last bubble "~Name" on its own line (Daniel 10-18). Unsigned
 # bubbles of the same reply name no one.
 SPEAKER = re.compile(r"(?:\n|^)~([A-Z][A-Za-z0-9]{1,19})\s*$")
@@ -325,7 +330,7 @@ def pick_agent(text: str, message: dict, last: str = "", minutes=None, last_repl
         return BOSS_AGENT
     try:
         agents = live_agents()
-        if not text:  # a photo or voice note has nothing to classify: it stays with whoever had the chat
+        if not text:  # a photo, or a voice note nobody could hear, has nothing to classify: it stays with whoever had the chat
             return agents[last][0] if last in agents else BOSS_AGENT
         if len(agents) < 2:
             return BOSS_AGENT
@@ -443,6 +448,13 @@ def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
         except (OSError, ValueError) as e:
             log(f"attachment {a.get('uid')} not saved: {e}")
             notes.append(f"could not download {a.get('filename') or 'attachment'}: {e}")
+            continue
+        if (a.get("content_type") or mimetypes.guess_type(files[-1])[0] or "").startswith("audio/"):
+            try:
+                text = f"{text}\n[voice note, transcribed] {transcribe(files[-1])}".strip()
+            except Exception as e:  # noqa: BLE001 - a deaf STT must never lose the voice note
+                log(f"voice note {a.get('uid')} not transcribed: {e}")
+                notes.append(f"voice note not transcribed ({e}): the transcript is missing, only the audio file came")
     with STATE_LOCK:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
     target = pick_agent(text, message, *last)
@@ -508,6 +520,23 @@ def download(att: dict) -> str:
     with urllib.request.urlopen(req, timeout=60) as r:
         dest.write_bytes(r.read())
     return str(dest)
+
+
+def transcribe(path: str) -> str:
+    """What a saved voice note says, from the STT server. Raises when there is none, it fails, or it heard nothing."""
+    if not STT_URL:
+        raise OSError("no STT server set (PLOW_CHAT_STT_URL)")
+    suffix = Path(path).suffix if Path(path).suffix[1:].isalnum() else ""  # the server reads the format from it
+    edge = os.urandom(16).hex()
+    data = (f'--{edge}\r\nContent-Disposition: form-data; name="audio"; filename="voice{suffix}"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n").encode() + Path(path).read_bytes() + f"\r\n--{edge}--\r\n".encode()
+    req = urllib.request.Request(STT_URL, data=data, method="POST",
+                                 headers={"Content-Type": f"multipart/form-data; boundary={edge}"})
+    with urllib.request.urlopen(req, timeout=STT_SECONDS) as r:
+        heard = " ".join((json.load(r).get("text") or "").split())
+    if not heard:
+        raise ValueError("no words heard")
+    return heard
 
 
 def upload(path: str, chat_uid: str, creds: dict) -> str:
