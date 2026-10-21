@@ -376,8 +376,9 @@ class CatchupTests(unittest.TestCase):
             self.m.catchup("fleet", {})
         (agent, text), = self.sent
         self.assertEqual("node/main:Boss", agent)
-        self.assertIn("no card on the board links this PR", text)
-        self.assertIn("give it to an agent", text)
+        self.assertTrue(text.endswith(" — no card on the board links this PR, so nobody owns it: give it to an agent."),
+                        text[-120:])
+        self.assertNotIn("yourself", text)       # the Boss routes work, he does not do it
 
 
 class WatchTests(unittest.TestCase):

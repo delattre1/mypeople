@@ -265,9 +265,9 @@ def format_event(repo, n, event, owned, orphan=False):
     tail = ""
     if orphan:
         # Landing on the Boss with nobody owning it is how a review goes unanswered: it reads as
-        # one more line among everything else the Boss is told. Say what to do with it.
-        tail = (" — no card on the board links this %s, so nobody owns it: give it to an agent"
-                " or handle it yourself." % noun)
+        # one more line among everything else the Boss is told. Say what to do with it: the Boss routes
+        # work, he does not do it (the owner, 10-21), so it goes to an agent.
+        tail = " — no card on the board links this %s, so nobody owns it: give it to an agent." % noun
     if event["kind"] in ("merged", "closed"):
         return "%s: %s%s" % (head, event["url"], tail)
     return "%s: %s %s%s" % (head, body or "(no text)", event["url"], tail)
