@@ -6,6 +6,7 @@ drive the plugin's logic with GitHub, the board and `mp send` stubbed, so nothin
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest import mock
 import sandbox
@@ -13,6 +14,8 @@ import sandbox
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "mypeople" / "runtime" / "plugins" / "github-prs" / "github-prs.py"
 PR = "https://github.com/acme/app/pull/8"
+# A day ago, not a fixed date: 2026-09-20 aged past the sweep's 30-day limit on 10-21 and failed the suite.
+AGO = lambda hours: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - hours * 3600))
 
 
 def load(state_dir):
@@ -302,7 +305,7 @@ class CatchupTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.m = load(self.tmp.name)
         self.reviews = [{"id": 1, "user": {"login": "srosro"}, "state": "APPROVED",
-                         "submitted_at": "2026-09-20T10:00:00Z", "body": "ship it",
+                         "submitted_at": AGO(24), "body": "ship it",
                          "html_url": PR + "#r1"}]
         self.comments = []
         self.sent = []
@@ -327,7 +330,7 @@ class CatchupTests(unittest.TestCase):
         self.assertIn("approved", text)
 
     def test_a_review_we_already_answered_is_left_alone(self):
-        self.comments = [{"user": {"login": "fleet"}, "created_at": "2026-09-20T11:00:00Z"}]
+        self.comments = [{"user": {"login": "fleet"}, "created_at": AGO(23)}]
         self.assertEqual([], self.m.catchup("fleet", {}))
         self.assertEqual([], self.sent)
 
