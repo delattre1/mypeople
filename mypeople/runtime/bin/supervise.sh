@@ -114,6 +114,9 @@ while true; do
   # Latch reconnect: after Latch restarts, types `/mcp reconnect all` into each IDLE Claude agent so it gets
   # its Latch tools back. Off until queue.env sets LATCH_RECONNECT (see the plugin's header).
   [ -n "${LATCH_RECONNECT:-}" ] && ensure "$ID/plugins/latch-reconnect/latch-reconnect.py serve$" "exec python3 '$ID/plugins/latch-reconnect/latch-reconnect.py' serve"
+  # A2A: mp send to an agent on a paired MyPlow crosses the relay. On once a pairing or an invite exists
+  # (mp pair; see the plugin's header).
+  [ -f "$ID/state/a2a/keys.json" ] && ensure "$ID/plugins/a2a/a2a.py serve$" "exec python3 '$ID/plugins/a2a/a2a.py' serve"
   recycle_leaked_ttyd "ttyd -W -a -p $TTYD_PORT"
   recycle_leaked_ttyd "ttyd -a -p $TTYD_RO_PORT"
   sleep 10

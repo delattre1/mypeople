@@ -1812,6 +1812,13 @@ def do_cron(argv):
     return 2
 
 
+def do_pair(argv):
+    """mp pair ... -- pairing with another MyPlow lives in the a2a plugin, beside the bridge that carries
+    mp send to a paired host."""
+    return subprocess.call([sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                         "plugins", "a2a", "a2a.py"), "pair"] + argv)
+
+
 USAGE = {
     "status": "usage: mp status",
     "spawn": "usage: mp spawn <agent_id> [--backend claude|codex|grok] [--cwd PATH] [--boss <id>] "
@@ -1831,6 +1838,8 @@ USAGE = {
     "proof": "usage: mp proof <task_id> <path-or-url> [body...]",
     "owner": "usage: mp owner <assign|replace|reopen> <task_id> <agent_id>",
     "cron": CRON_USAGE,
+    "pair": "usage: mp pair | mp pair <code> | mp pair ls | mp pair rm <host>   (the owner pairs this MyPlow "
+            "with another, so mp send reaches its agents: <host>/<session>:<tab>)",
 }
 TOP_USAGE = "usage: mp {%s} ...   (mp <verb> --help for one verb)" % "|".join(USAGE)
 
@@ -1851,7 +1860,7 @@ def main():
             "ensure-boss": do_ensure_boss, "reconcile": do_reconcile,
             "stop-recorders": do_stop_recorders,
             "board": do_board, "card": do_card, "comment": do_comment, "proof": do_proof,
-            "owner": do_owner, "cron": do_cron}.get(
+            "owner": do_owner, "cron": do_cron, "pair": do_pair}.get(
         verb, lambda a: (print("unknown verb %s" % verb, file=sys.stderr) or 2))(rest)
 
 
