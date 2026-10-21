@@ -180,7 +180,10 @@ Set `DISCORD_CHAT=1`, `DISCORD_BOT_TOKEN` and `DISCORD_CHAT_CHANNEL_IDS` in `que
 in those channels reaches the Boss, which answers there. `DISCORD_CHAT_USERS=<id>:full,<id>` names whose
 words count for more: a plain id is a selected community developer, whose work only an engineer spawned
 with `mp spawn ... --community` may do (no Latch, no secrets, a sandboxed shell that reaches only GitHub
-and the package registries). Anyone else can chat, report bugs and ask for features, but not develop.
+and the package registries). Anyone else can chat, report bugs and ask for features, but not develop. Bots and
+webhooks go unheard, but for the bug reports agents send your Plow server: with
+`DISCORD_BUG_REPORT_CHANNEL_ID` (a listed channel) and `DISCORD_BUG_REPORT_WEBHOOK_ID`, what the server posts
+there with that webhook reaches the Boss too, as a guest's words.
 
 In the cloud: `cloud/Dockerfile` builds MyPlow as a Plow cloud agent (1-click from
 [aiworthusing.com/agent-index/myplow](https://aiworthusing.com/agent-index/myplow)). It is a separate MyPlow
