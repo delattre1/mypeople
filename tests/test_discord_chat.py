@@ -4,7 +4,9 @@ import importlib.util
 import json
 import os
 import shlex
+import signal
 import socket
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -335,6 +337,38 @@ class AnyMentionTest(unittest.TestCase):
         with self.assertRaises(self.d.Closed) as e:
             ws.recv(2)
         self.assertEqual(e.exception.code, 4004)
+
+
+class StopTest(unittest.TestCase):
+    def test_a_stop_mid_pass_still_saves_what_it_routed(self):
+        """Killed outright mid-pass, the next serve routed those messages again (10-21)."""
+        harness = "\n".join((
+            "import importlib.machinery, importlib.util, sys, time",
+            "l = importlib.machinery.SourceFileLoader('dc', sys.argv[1])",
+            "d = importlib.util.module_from_spec(importlib.util.spec_from_loader('dc', l)); l.exec_module(d)",
+            "def api(method, path, body=None):",
+            "    if path.startswith('/channels/c1/'):",
+            "        return [{'id': '5', 'content': 'hi', 'author': {'id': '300'}}]",
+            "    if path.startswith('/channels/c2/'):",
+            "        print('slow', flush=True); time.sleep(30)     # the pass is still under way",
+            "    return {'id': '900', 'guild_id': 'g1', 'threads': []}",
+            "d.api, d.send_to_boss = api, lambda text: True",
+            "d.serve()"))
+        with tempfile.TemporaryDirectory() as td:
+            state = Path(td) / "state/discord-chat/state.json"
+            state.parent.mkdir(parents=True)
+            state.write_text(json.dumps({"cursor": {"c1": "1", "c2": "1"}}))
+            env = dict(os.environ, INSTALL_DIR=td, DISCORD_CHAT_CHANNEL_IDS="c1,c2", DISCORD_CHAT_ANY_MENTION="",
+                       MYPEOPLE_CONFIG_PATH=os.path.join(td, "queue.env"))
+            p = subprocess.Popen([sys.executable, "-c", harness, str(PLUGIN)], env=env, stdout=subprocess.PIPE, text=True)
+            self.addCleanup(p.kill)
+            lines = [p.stdout.readline() for _ in range(3)]
+            self.assertIn("routed 5", lines[1])
+            self.assertEqual(lines[2], "slow\n")
+            p.send_signal(signal.SIGTERM)
+            self.assertEqual(p.wait(10), 0)
+            p.stdout.close()
+            self.assertEqual(json.loads(state.read_text())["cursor"]["c1"], "5")
 
 
 if __name__ == "__main__":

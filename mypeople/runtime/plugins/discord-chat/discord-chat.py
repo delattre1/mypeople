@@ -46,6 +46,7 @@ import json
 import os
 import random
 import re
+import signal
 import socket
 import ssl
 import subprocess
@@ -512,6 +513,9 @@ def gateway():
 def serve():
     global ME
     ME = api("GET", "/users/@me")["id"]    # a dead token fails here; supervise.sh restarts us
+    # Stopped mid-pass (mp down, an update, a restart), it still saves what it routed: the finally below.
+    # Killed outright, the next serve routed those messages again (10-21).
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     log("up, routing %s to %s" % (", ".join(channels()), BOSS))
     if any_mention():
         GATEWAY.update(read_json(STATE, {}).get("gateway") or {})
