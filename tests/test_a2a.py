@@ -108,6 +108,15 @@ class A2ATest(unittest.TestCase):
         [back] = self.qa.sends()
         self.assertEqual(back["target_agent"], "alpha/main:eng-1")
         self.assertEqual(back["payload"]["message"], "[from beta/main:Boss, on another MyPlow] pong")
+        back["delivered"] = True
+        # the Stop hook's notice has no sender agent and no reply_to: it crosses from the host, and is not
+        # answered in turn (a reply_to on it would ping-pong notices)
+        self.qb.submit("send", "alpha/main:eng-1", {"message": "[AGENT NOTIFICATION] beta/main:Boss finished: ok"})
+        self.beta.step()
+        self.alpha.step()
+        [notice] = self.qa.sends()
+        self.assertEqual(notice["payload"], {"message": "[from beta, on another MyPlow] [AGENT NOTIFICATION] "
+                                                        "beta/main:Boss finished: ok"})
 
     def test_only_send_crosses_and_forgeries_drop(self):
         self.pair()

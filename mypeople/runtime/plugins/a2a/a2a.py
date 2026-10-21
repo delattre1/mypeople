@@ -376,7 +376,8 @@ class Bridge:
             self.seen.append(sig)
             return True
         frm, to = str(body.get("from")), str(body.get("to"))
-        if not (AGENT.fullmatch(frm) and AGENT.fullmatch(to) and C.parse_agent_id(frm)[0] == h
+        # A Stop-hook notice comes from the host alone (no agent): parse_agent_id reads a bare name as a session.
+        if not (AGENT.fullmatch(frm) and AGENT.fullmatch(to) and frm.split("/")[0] == h
                 and C.parse_agent_id(to)[0] == self.host and "/" in to):
             log("dropped a message from %s: from %s to %s" % (h, frm, to))
             return True
