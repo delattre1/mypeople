@@ -41,6 +41,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import sys
 import threading
@@ -85,6 +86,39 @@ def box(key, frm, to):
 
 def sha(token):
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+_getaddrinfo = socket.getaddrinfo
+
+
+def resolve(host, *a, **k):
+    """socket.getaddrinfo, plus public DNS for a *.ts.net name the system refuses: Tailscale's MagicDNS refuses
+    another tailnet's ts.net names, so a MyPlow on a machine in any other tailnet could not find the relay.
+    TLS is still checked against the name. ponytail: only because the relay's name is a Funnel (ts.net) one;
+    a relay on an ordinary domain drops this."""
+    try:
+        return _getaddrinfo(host, *a, **k)
+    except socket.gaierror:
+        if not str(host).endswith(".ts.net"):
+            raise
+        ips = public_ips(host)
+        if not ips:
+            raise
+        return _getaddrinfo(ips[0], *a, **k)
+
+
+_public = {}     # host -> (addresses, when asked): one public lookup per 5 minutes, not one per request
+
+
+def public_ips(host):
+    ips, at = _public.get(host, ([], 0))
+    if time.time() - at > 300:
+        req = urllib.request.Request("https://1.1.1.1/dns-query?type=A&name=" + host,
+                                     headers={"Accept": "application/dns-json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            ips = [x["data"] for x in json.load(r).get("Answer") or [] if x.get("type") == 1]
+        _public[host] = (ips, time.time())
+    return ips
 
 
 def post(url, body, timeout=10):
@@ -245,8 +279,11 @@ class Bridge:
         if host in self.read("keys.json", {}).get("peers", {}):
             raise SystemExit("refused: %s is paired already; to pair it again, mp pair rm %s first" % (host, host))
         n = secrets.token_hex(16)
-        post(relay_url.rstrip("/") + "/put", {"box": mac(s, "hello"), "msg": json.dumps(
-            {"h": self.host, "n": n, "sig": mac(s, "hello", self.host, n)})})
+        try:
+            post(relay_url.rstrip("/") + "/put", {"box": mac(s, "hello"), "msg": json.dumps(
+                {"h": self.host, "n": n, "sig": mac(s, "hello", self.host, n)})})
+        except (OSError, ValueError) as e:
+            raise SystemExit("not paired: the relay %s did not take it (%s). Nothing changed; try again." % (relay_url, e))
         self.change_keys(lambda k: k["peers"].__setitem__(host, {"key": mac(s, "key", n), "relay": relay_url}))
         return ("paired with %s: its agents are reachable as %s/<session>:<tab>, once its MyPlow is on to read "
                 "this pairing (the code is now spent)" % (host, host))
@@ -441,6 +478,7 @@ def pair(argv):
 
 def main(argv):
     cmd, args = (argv[1] if len(argv) > 1 else "serve"), argv[2:]
+    socket.getaddrinfo = resolve        # this process only: the bridge and mp pair reach the relay by name
     if cmd == "serve":
         Bridge().serve()
     elif cmd == "relay":

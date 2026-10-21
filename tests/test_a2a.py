@@ -155,6 +155,18 @@ class A2ATest(unittest.TestCase):
         self.beta.step()
         self.assertEqual(len(self.qb.sends()), self.a2a.MAX_HOPS)
 
+    def test_a_ts_net_name_the_system_refuses_resolves_publicly(self):
+        """Tailscale's MagicDNS refuses another tailnet's ts.net names: the relay's must still resolve."""
+        def system(host, *a, **k):     # refuses every name; answers an address
+            if not host.replace(".", "").isdigit():
+                raise socket.gaierror(8, "refused")
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (host, a[0]))]
+        with mock.patch.object(self.a2a, "_getaddrinfo", system), \
+                mock.patch.object(self.a2a, "public_ips", lambda host: ["203.0.113.7"]):
+            self.assertEqual(self.a2a.resolve("relay.example.ts.net", 8443)[0][4], ("203.0.113.7", 8443))
+            with self.assertRaises(socket.gaierror):
+                self.a2a.resolve("other.example.com", 443)      # any other name: the system's answer stands
+
 
 if __name__ == "__main__":
     unittest.main()
