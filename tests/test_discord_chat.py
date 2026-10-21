@@ -118,7 +118,11 @@ class DiscordChatTest(unittest.TestCase):
                           text)
             self.assertIn("roadmap and enhancement for a feature request", text)
             self.assertIn("bug for a bug, plus roadmap if users see it", text)
-            self.assertIn("never roadmap+N, roadmap-planned or roadmap-cooking", text)
+            self.assertIn("whenever it has roadmap, add roadmap+1 (one upvote for the real person who asked; create the "
+                          "label first if the repo lacks it, description: Admin points: adds 1 to this card's votes on "
+                          "roadmap.plow.co (roadmap+N adds N)); never roadmap-planned or roadmap-cooking, never other "
+                          "roadmap+N", text)
+            self.assertNotIn("never roadmap+N,", text)
             self.assertNotIn("No public repo fits", text)
         self.assertIn("trust=community", self.boss[1])
         self.assertIn("Their code work is public repos only (their bug reports and feature requests are filed",

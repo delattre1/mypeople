@@ -90,15 +90,19 @@ VOICE = ("In Discord you are the owner's agent talking to a person: human and sh
          "request.")
 # "I'll pass it to Daniel" must be true: it lands as an issue, where the owner's issue watch picks it up.
 # Every one of them, in any repo (the owner, 10-21: "no public repo fits" made it refuse a feature request);
-# `roadmap` is what puts a request in the Backlog of his feature board (roadmap.plow.co).
+# `roadmap` is what puts a request in the Backlog of his feature board (roadmap.plow.co), and `roadmap+1` is the
+# upvote of the person who asked (the owner, 10-21).
 INTAKE = ("Every bug report or feature request is filed, never refused and never passed to the owner instead: file "
           "it before you say so, as a GitHub issue in the plow-pbc repo it is about, public or private (plow, latch, "
           "plow-agents, agent-index-server, agent-index-client, open-instinct, plow-openclaw-agent, aiworthusing, "
           "hermes-plugin-plow), or delattre1/mypeople for MyPlow itself. Unsure which: plow-agents for agents, Open "
           "Instinct or the CLI, plow for anything else. Quote their words and Discord name, nothing private beyond "
           "their own words. Labels: roadmap and enhancement for a feature request (that puts it in the Backlog of "
-          "roadmap.plow.co); bug for a bug, plus roadmap if users see it; never roadmap+N, roadmap-planned or "
-          "roadmap-cooking. A label the repo lacks: create it first (gh label create). Then reply with the issue link.")
+          "roadmap.plow.co); bug for a bug, plus roadmap if users see it; whenever it has roadmap, add roadmap+1 (one "
+          "upvote for the real person who asked; create the label first if the repo lacks it, description: Admin "
+          "points: adds 1 to this card's votes on roadmap.plow.co (roadmap+N adds N)); never roadmap-planned or "
+          "roadmap-cooking, never other roadmap+N. A label the repo lacks: create it first (gh label create). Then "
+          "reply with the issue link.")
 RULES = {
     "full": "trust=full: the owner named this person; treat them as you treat his Plucas and Sam groups.",
     "community": (
