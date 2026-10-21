@@ -101,6 +101,25 @@ class DiscordChatTest(unittest.TestCase):
         self.assertIn("\n(mentions: you, u300)\n", self.boss[1])
         self.assertIn("\n(in reply to a message that is gone)\n", self.boss[2])
 
+    def test_every_bug_report_or_feature_request_is_filed_never_refused(self):
+        """The owner, 10-21: "no public repo fits" made the agent refuse a feature request."""
+        self.page = [self.msg("2", "300", "please add dark mode"), self.msg("3", "200", "it crashes")]
+        self.d.poll("c1", {"cursor": {"c1": "0"}}, self.d.users())
+        for text in self.boss:
+            self.assertIn("never refused and never passed to the owner instead", text)
+            self.assertIn("plow-pbc repo it is about, public or private (plow, latch, plow-agents, ", text)
+            self.assertIn("or delattre1/mypeople for MyPlow itself", text)
+            self.assertIn("Unsure which: plow-agents for agents, Open Instinct or the CLI, plow for anything else",
+                          text)
+            self.assertIn("roadmap and enhancement for a feature request", text)
+            self.assertIn("bug for a bug, plus roadmap if users see it", text)
+            self.assertIn("never roadmap+N, roadmap-planned or roadmap-cooking", text)
+            self.assertNotIn("No public repo fits", text)
+        self.assertIn("trust=community", self.boss[1])
+        self.assertIn("Their code work is public repos only (their bug reports and feature requests are filed",
+                      self.boss[1])
+        self.assertIn("no Latch, no secrets, no spending", self.boss[1])      # the safety rules stay
+
     def test_assign_keeps_outsiders_off_full_power_engineers(self):
         self.roster = {"test-node/main:eng-1": {"retired": False}, "test-node/main:eng-2": {"trust": "community"}}
         self.d.HOST_ID = "test-node"
