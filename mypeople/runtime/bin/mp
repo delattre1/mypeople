@@ -1815,8 +1815,7 @@ def do_cron(argv):
 def do_pair(argv):
     """mp pair ... -- pairing with another MyPlow lives in the a2a plugin, beside the bridge that carries
     mp send to a paired host."""
-    return subprocess.call([sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                                         "plugins", "a2a", "a2a.py"), "pair"] + argv)
+    return subprocess.call([sys.executable, os.path.join(INSTALL_DIR, "plugins", "a2a", "a2a.py"), "pair"] + argv)
 
 
 USAGE = {
