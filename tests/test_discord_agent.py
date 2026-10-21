@@ -1,4 +1,7 @@
 """Discord agent plugin: the guards that stand between a steerable agent and a public channel."""
+import email.parser
+import email.policy
+import json
 import os
 import shutil
 import tempfile
@@ -279,6 +282,37 @@ class RealTmuxSlotTest(unittest.TestCase):
                 self.d.tmux("kill-pane", "-t", pid)
         self.assertEqual(self.launches(), self.d.MAX_STARTS)
         self.assertIn("circuit-open", self.alerts)
+
+
+class UploadTest(unittest.TestCase):
+    """A message with files goes as Discord's upload form: payload_json, then each file as files[n]."""
+
+    def test_files_go_in_one_multipart_post_that_parses_back(self):
+        with tempfile.TemporaryDirectory() as td:
+            shot, note = Path(td) / "shot.png", Path(td) / 'say "hi".txt'
+            shot.write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff")
+            note.write_text("hello\n")
+            d = load({})
+            # never the live queue.env: the test must not read, let alone send, the real bot token
+            with mock.patch.dict(os.environ, {"DISCORD_BOT_TOKEN": "t", "MYPEOPLE_CONFIG_PATH": td + "/none"}), \
+                    mock.patch.object(d.urllib.request, "urlopen") as urlopen:
+                urlopen.return_value.__enter__.return_value.read.return_value = b'{"id": "9"}'
+                self.assertEqual(d.api("POST", "/channels/77/messages", {"content": "hi"}, [shot, note]), {"id": "9"})
+                d.api("POST", "/channels/77/messages", {"content": "plain"})
+        upload, plain = (call[0][0] for call in urlopen.call_args_list)
+        self.assertEqual((upload.get_method(), upload.get_header("Authorization")), ("POST", "Bot t"))
+        form = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
+            b"Content-Type: " + upload.get_header("Content-type").encode() + b"\r\n\r\n" + upload.data)
+        payload, png, txt = form.iter_parts()
+        self.assertEqual([part.get_param("name", header="content-disposition") for part in (payload, png, txt)],
+                         ["payload_json", "files[0]", "files[1]"])
+        self.assertEqual(json.loads(payload.get_payload(decode=True)),
+                         {"content": "hi", "attachments": [{"id": 0, "filename": "shot.png"},
+                                                           {"id": 1, "filename": 'say "hi".txt'}]})
+        self.assertEqual((png.get_content_type(), png.get_payload(decode=True)), ("image/png", b"\x89PNG\r\n\x1a\n\x00\xff"))
+        self.assertEqual((txt.get_filename(), txt.get_payload(decode=True)), ("say _hi_.txt", b"hello\n"))
+        self.assertEqual((plain.get_header("Content-type"), json.loads(plain.data)),
+                         ("application/json", {"content": "plain"}))      # no files: JSON as before
 
 
 if __name__ == "__main__":
