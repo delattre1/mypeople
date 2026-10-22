@@ -516,6 +516,7 @@ class CookingTest(unittest.TestCase):
         return [line for _, body in self.posts for line in body["content"].split("\n")]
 
     def test_a_task_that_starts_cooking_gets_one_thread_where_its_work_shows(self):
+        self.look()                                         # GitHub's search came back empty: no answer
         self.issue(1, "Already cooking before the first look")
         self.look()
         self.assertEqual((self.made, self.posts), ([], []))      # what cooked already gets a thread only by backfill
@@ -578,11 +579,19 @@ class CookingTest(unittest.TestCase):
         self.assertEqual({p[0] for p in self.posts}, {"t1"})
 
     def test_an_issue_off_the_cooking_column_gets_nothing_until_it_is_back(self):
+        self.issue(1, "Cooking before the first look")
         self.look()
         self.issue(7, "Fix the thing", prs=[8])
         self.pr(8)
         self.look()
         ours = {"databaseId": 31, "author": {"login": "us"}, "body": "Live and verified."}
+        hidden, self.issues = self.issues, {}              # a search that came back empty pauses nothing
+        self.pr(8, ci="SUCCESS")
+        self.look()
+        self.assertEqual(self.posts, [])
+        self.issues = hidden
+        self.look()
+        self.assertEqual(self.said(), ["app#8: CI green"])
         self.off(7, "Fix the thing", prs=[8], comments=[ours])     # its label went; it is still open
         self.pr(8, ci="FAILURE", failed=["API"])
         self.look()

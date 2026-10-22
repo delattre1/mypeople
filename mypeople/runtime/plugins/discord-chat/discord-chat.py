@@ -743,6 +743,8 @@ def cook(st, backfill=()):
     what changed on it. An issue no longer cooking is left alone, and one already cooking at the very first
     look gets a thread only by backfill. Returns what it said, one line per thread."""
     me, now, issues = gh_login(), cooking_now(), st.setdefault("issues", {})
+    if not now:     # GitHub's search comes back empty at times (10-22, a first look: none of 11): that is no answer
+        return ["%s: GitHub's search found nothing this time, so no thread yet" % k for k in backfill]
     out = ["%s: not cooking, so no thread" % k for k in backfill if k not in now or now[k]["state"] != "OPEN"]
     for key, i in now.items():
         e, start = issues.get(key), i["state"] == "OPEN" and (st.get("seen") or key in backfill)
