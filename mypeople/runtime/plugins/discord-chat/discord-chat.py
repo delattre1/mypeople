@@ -18,6 +18,9 @@ the same way, with the same trust. It comes over Discord's gateway, which gives 
 but a message that mentions it; the Boss answers in a thread on it, and that thread is then read too.
 Bots and webhooks are never heard, but for one: the bug reports agents send the owner's Plow server, which
 posts them in one listed channel with one webhook (DISCORD_BUG_REPORT_*). They arrive as a guest's words.
+With DISCORD_CHAT_COOKING (a gh search), each issue it finds being worked on gets one thread in the first
+listed channel, where its work shows as it happens: who has it, its PRs, their reviews and CI, merged,
+closed, live and verified. GitHub is polled; nothing is said while nothing happens.
 The Boss answers with `reply`, one topic per thread: a request said in the channel itself is answered
 in a thread `reply --topic` opens on it, and work on it goes on there, so the channel stays a list of
 requests. Each reply passes discord-agent's post filter (no token, local path or private repo), and so
@@ -34,6 +37,7 @@ Config (env, or queue.env):
     DISCORD_CHAT_ANY_MENTION=1                  # optional: an @-mention anywhere in the server arrives too
     DISCORD_BUG_REPORT_CHANNEL_ID=1560395610148835438   # optional, both: the listed channel where the Plow
     DISCORD_BUG_REPORT_WEBHOOK_ID=1234                  # server posts bug reports, and its webhook's id
+    DISCORD_CHAT_COOKING="org:my-org label:roadmap-cooking"   # optional: a thread for each task being worked on
 
     discord-chat.py serve                       read and route forever (what supervise.sh runs)
     discord-chat.py reply <chan> <msg> --topic "a few words" "text"   answer a request in a thread on it
@@ -41,10 +45,13 @@ Config (env, or queue.env):
     discord-chat.py reply <thread> <msg> --file a.png "text"         attach a file (--file again: up to 4)
     discord-chat.py react <chan> <msg> EMOJI    react to it (the Boss's 👀 = it read the message)
     discord-chat.py assign <user> <agent>       make <agent> that person's owner engineer
+    discord-chat.py cooking                     the issues being worked on, their threads and PRs (posts nothing)
+    discord-chat.py cooking --backfill <owner/repo#n>...   open the thread of one that was cooking already
     discord-chat.py status
 """
 import base64
 import collections
+import fcntl
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -61,6 +68,7 @@ import threading
 import time
 import urllib.error
 import urllib.parse
+import urllib.request
 from pathlib import Path
 
 SELF = Path(__file__).resolve()
@@ -544,6 +552,300 @@ def gateway():
         wait = min(wait * 2, 60)
 
 
+# ---------------------------------------------------------------- the feature board's work, a thread per task
+# The owner's ask (10-22): a task picked up from his feature board (its issue labelled roadmap-cooking) gets one
+# thread in his channel, "so I can visualize the work being done". DISCORD_CHAT_COOKING is the gh search that
+# finds those issues. GitHub is polled, no webhook: one GraphQL search, then one query for their PRs, per look.
+# The posts are built from GitHub's own fields, never an agent's words; free text (a title, a comment) loses
+# anything that looks like a token or a local path first.
+COOKING = STATE_DIR / "cooking.json"    # {"seen": true, "issues": {"owner/repo#n": {...}}}: under COOK_LOCK
+COOK_LOCK = STATE_DIR / "cooking.lock"  # serve's looks and a backfill take turns
+COOK_EVERY = 120        # seconds between looks
+REVIEW_BOT = "<!-- knightwatch-reviewer:auto-post -->"     # how the review bot (/srosro-review) marks its verdicts
+LIVE = re.compile(r"\blive and verified\b", re.I)          # what we write once a change is deployed and checked
+FAILED = ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE")
+TOKENISH = re.compile(r"[A-Za-z0-9_\-.]{40,}|(?<!\S)(?:/Users/|/home/|~/)\S*")
+PR_KEY = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
+ISSUE = """number title url state stateReason repository { nameWithOwner } assignees(first: 5) { nodes { login } }
+  comments(last: 10) { nodes { databaseId author { login } body } }
+  timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], last: 30) { nodes {
+    ... on CrossReferencedEvent { source { ... on PullRequest { url } } }
+    ... on ConnectedEvent { subject { ... on PullRequest { url } } } } }"""
+PR = """url state isDraft reviews(last: 10) { nodes { databaseId author { login } state } }
+  comments(last: 10) { nodes { databaseId author { login } body } }
+  commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 50) { nodes {
+    ... on CheckRun { name conclusion } ... on StatusContext { context state } } } } } } }"""
+GH_LOGIN = []
+
+
+def graphql(query, **strings):
+    """The data of gh's GraphQL answer, as far as it goes: one PR gone or unreadable leaves the rest."""
+    args = ["gh", "api", "graphql", "-f", "query=" + query]
+    for k, v in strings.items():
+        args += ["-f", "%s=%s" % (k, v)]
+    r = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    try:
+        return json.loads(r.stdout)["data"] or {}
+    except (ValueError, KeyError, TypeError):
+        raise OSError("gh api graphql: %s" % (r.stderr or r.stdout).strip()[:200])
+
+
+def gh_login():
+    """Whose "live and verified" counts: ours, the login gh (and every agent) posts with."""
+    if not GH_LOGIN:
+        GH_LOGIN.append(cfg("GITHUB_PRS_AUTHOR") or graphql("query { viewer { login } }")["viewer"]["login"])
+    return GH_LOGIN[0]
+
+
+def aliased(fields, kind, keys):
+    """{key: node} for "owner/repo#n" keys, all in one query."""
+    keys, asks = sorted(keys), []
+    for i, k in enumerate(keys):
+        owner, repo, n = k.replace("#", "/").split("/")
+        asks.append('k%d: repository(owner: "%s", name: "%s") { %s(number: %s) { %s } }'
+                    % (i, owner, repo, kind, n, fields))
+    data = graphql("query { %s }" % " ".join(asks)) if asks else {}
+    found = {k: (data.get("k%d" % i) or {}).get(kind) for i, k in enumerate(keys)}
+    return {k: node for k, node in found.items() if node}
+
+
+def cooking_now():
+    """{issue key: issue} for every issue DISCORD_CHAT_COOKING finds, open or closed, updated last first."""
+    query = ("query($q: String!) { search(query: $q, type: ISSUE, first: 50) "
+             "{ issueCount nodes { ... on Issue { %s } } } }")
+    found = graphql(query % ISSUE, q=cfg("DISCORD_CHAT_COOKING") + " is:issue sort:updated-desc")["search"]
+    if found["issueCount"] > 50:
+        log("cooking: %d issues match; only the 50 updated last are followed" % found["issueCount"])
+    return {"%s#%d" % (i["repository"]["nameWithOwner"], i["number"]): i for i in found["nodes"] if i}
+
+
+def pr_keys(issue):
+    """The PRs that mention or close the issue, as keys."""
+    urls = [(t.get("source") or t.get("subject") or {}).get("url") or "" for t in issue["timelineItems"]["nodes"] if t]
+    return list(dict.fromkeys("%s#%s" % m.groups() for m in map(PR_KEY.search, urls) if m))
+
+
+def short(key):
+    return key.split("/", 1)[1]
+
+
+def clean(text, limit=200):
+    text = TOKENISH.sub("[redacted]", flat(re.sub(r"<!--.*?-->", "", text or "", flags=re.S)))
+    return text[:limit - 1] + "…" if len(text) > limit else text
+
+
+def live(body):
+    """Our "live and verified" note as one line, said once."""
+    text = clean(body)
+    return text if text.lower().startswith("live and verified") else "live and verified: " + text
+
+
+def fetch_board():
+    req = urllib.request.Request("http://127.0.0.1:%s/todo/board" % (cfg("TODO_PORT") or "9933"),
+                                 headers={"X-Queue-Secret": cfg("QUEUE_SECRET")})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def engineer(board, issue):
+    """Who has it: the assignee of the live board card that links the issue (the one updated last), else
+    its GitHub assignees. None while the board is unreadable."""
+    if board is None:
+        return None
+    needle = re.compile(re.escape(issue["url"]) + r"(?![0-9])")
+    cards = [t for t in (board.get("tasks") or {}).values() if t.get("assignee") and t.get("state") not in (
+        "done", "cancelled") and needle.search(json.dumps([t.get("text"), t.get("comments"), t.get("proofs")]))]
+    if cards:
+        return max(cards, key=lambda t: float(t.get("updated") or 0))["assignee"].rpartition(":")[2]
+    return ", ".join(a["login"] for a in issue["assignees"]["nodes"])
+
+
+def verdict(body):
+    """The review bot's verdict in a few words: how many probes, by weight."""
+    if "**Probes**" not in body:
+        return "review bot: reviewed"
+    probes = re.split(r"(?m)^\*\*", body.partition("**Probes**")[2], maxsplit=1)[0]
+    tags = collections.Counter(re.findall(r"(?m)^\d+\. \[([\w-]+)\]", probes))
+    n = sum(tags.values())
+    weights = ", ".join("%d %s" % (c, t) for t, c in tags.most_common())
+    return "review bot: %d probe%s (%s)" % (n, "s" * (n > 1), weights) if n else "review bot: no probes"
+
+
+def checks(pr):
+    """(head, "green" | "failed" | None while they run, the failed checks' names)."""
+    commit = (pr["commits"]["nodes"] or [{}])[0].get("commit") or {}
+    roll = commit.get("statusCheckRollup") or {}
+    failed = [c.get("name") or c.get("context") for c in (roll.get("contexts") or {}).get("nodes") or []
+              if c and (c.get("conclusion") or c.get("state")) in FAILED]
+    state = {"SUCCESS": "green", "FAILURE": "failed", "ERROR": "failed"}.get(roll.get("state"))
+    return commit.get("oid"), state, failed
+
+
+def pr_news(key, pr, old, me):
+    """What changed on a PR since its record old (None the first time), as lines, and its record now."""
+    head, ci, failed = checks(pr)
+    ci_line = "CI green" if ci == "green" else "CI failed (%s)" % ", ".join(failed[:3]) if ci else ""
+    seen = set((old or {}).get("seen", []))
+    said = []
+    events = [("review", r) for r in pr["reviews"]["nodes"]] + [("comment", c) for c in pr["comments"]["nodes"]]
+    for kind, e in events:
+        who, body = (e.get("author") or {}).get("login") or "someone", e.get("body") or ""
+        if e["databaseId"] in seen:
+            continue
+        if kind == "review" and e["state"] in ("APPROVED", "CHANGES_REQUESTED"):
+            said.append(("approved by %s" if e["state"] == "APPROVED" else "changes requested by %s") % who)
+        elif kind == "comment" and REVIEW_BOT in body:
+            said.append(verdict(body))
+        elif kind == "comment" and who == me and LIVE.search(body):
+            said.append(live(body))
+    now = {"state": pr["state"], "ci": [head, ci] if ci else (old or {}).get("ci"),
+           "seen": sorted(seen | {e["databaseId"] for _, e in events})[-60:]}
+    if old is None:     # first seen: one line, as it stands now
+        if pr["state"] != "OPEN":
+            return ["PR %s: %s" % ("merged" if pr["state"] == "MERGED" else "closed without merging", pr["url"])], now
+        last = [b for b in said if b.startswith("review bot")][-1:] + [b for b in said if " by " in b][-1:]
+        bits = ["draft"] * pr["isDraft"] + [ci_line] * bool(ci) + last
+        return ["PR opened: %s%s" % (pr["url"], " (%s)" % "; ".join(bits) if bits else "")], now
+    lines = ["%s: %s" % (short(key), b) for b in said]
+    if ci and old.get("ci") != [head, ci]:
+        lines.append("%s: %s" % (short(key), ci_line))
+    if pr["state"] != old.get("state"):
+        what = {"MERGED": "merged", "CLOSED": "closed without merging"}.get(pr["state"], "reopened")
+        lines.append("%s: %s" % (short(key), what))
+    return lines, now
+
+
+def cook_thread(key, issue):
+    """The issue's thread in the first listed channel: the one already named for it, else a new one."""
+    ch, prefix = channels()[0], short(key) + " "
+    guild = api("GET", "/channels/%s" % ch)["guild_id"]
+    for t in ((api("GET", "/guilds/%s/threads/active" % guild) or {}).get("threads") or []) + (
+            (api("GET", "/channels/%s/threads/archived/public?limit=100" % ch) or {}).get("threads") or []):
+        if t.get("parent_id") == ch and (t.get("name") or "").startswith(prefix):
+            return t["id"]
+    return api("POST", "/channels/%s/threads" % ch, {"name": clean(prefix + issue["title"], 100), "type": 11,
+                                                      "auto_archive_duration": 1440})["id"]   # 11: public
+
+
+def say(thread, lines):
+    """Short lines, in as few messages as fit, with no ping and no link preview (flags 4: no embeds)."""
+    texts = [""]
+    for line in lines:
+        if texts[-1] and len(texts[-1]) + len(line) >= 2000:
+            texts.append("")
+        texts[-1] += ("\n" if texts[-1] else "") + line[:2000]
+    for text in texts:
+        api("POST", "/channels/%s/messages" % thread, {"content": text, "allowed_mentions": {"parse": []}, "flags": 4})
+
+
+def cook(st, backfill=()):
+    """One look at GitHub: a thread for each issue that started cooking (or is backfilled), and in each thread
+    what changed on it. An issue no longer cooking is left alone, and one already cooking at the very first
+    look gets a thread only by backfill. Returns what it said, one line per thread."""
+    me, now, issues = gh_login(), cooking_now(), st.setdefault("issues", {})
+    out = ["%s: not cooking, so no thread" % k for k in backfill if k not in now or now[k]["state"] != "OPEN"]
+    for key, i in now.items():
+        e, start = issues.get(key), i["state"] == "OPEN" and (st.get("seen") or key in backfill)
+        if e is None or key in backfill and not e.get("thread"):
+            issues[key] = {"new": True} if start else {}
+        elif e.get("done") and i["state"] == "OPEN":
+            e.update(done=False, reopened=True)
+    st["seen"] = True
+    followed = [k for k, e in issues.items() if (e.get("new") or e.get("thread")) and not e.get("done")]
+    cooking = {k for k in followed if k in now and now[k]["state"] == "OPEN"}
+    now.update(aliased(ISSUE, "issue", [k for k in followed if k not in now]))
+    want = {p for k in cooking for p in pr_keys(now[k])
+            if (issues[k].get("prs") or {}).get(p, {}).get("state") in (None, "OPEN")}
+    prs = aliased(PR, "pullRequest", want)
+    try:
+        board = fetch_board()
+    except (OSError, ValueError):
+        board = None
+    for key in followed:
+        if key in now:
+            try:
+                out += cook_one(key, issues[key], now[key], key in cooking, prs, board, me)
+            except (OSError, ValueError, KeyError, TypeError) as e:     # the others still get theirs
+                log("cooking: %s: %s: %s" % (key, type(e).__name__, e))
+    return out
+
+
+def cook_one(key, e, i, cooking, prs, board, me):
+    """Say in the issue's thread what changed since the last look, opening the thread the first time."""
+    if i["state"] != "OPEN":
+        reason = {"COMPLETED": ": done", "NOT_PLANNED": ": not planned", "DUPLICATE": ": a duplicate"}
+        said = e.get("cooking", True) and e.get("thread") and "prs" in e
+        if said:
+            say(e["thread"], ["Issue closed%s." % reason.get(i.get("stateReason"), "")])
+        e["done"] = True
+        return ["%s: closed" % key] if said else []
+    e["cooking"] = cooking
+    if not cooking:
+        return []           # off the board's cooking column: nothing is said there
+    if not e.get("thread"):
+        e["thread"] = cook_thread(key, i)
+        e.pop("new", None)
+    first = "prs" not in e
+    lines = ["Work started on %s" % i["url"]] if first else ["Issue reopened."] * bool(e.pop("reopened", False))
+    old, notes, who = e.get("prs") or {}, set(e.get("notes", [])), engineer(board, i)
+    new = dict(old)
+    if who and who != e.get("engineer"):
+        lines.append("Engineer: %s" % who)
+    for p in pr_keys(i):
+        if p in prs:
+            said, new[p] = pr_news(p, prs[p], old.get(p), me)
+            lines += said
+    for c in i["comments"]["nodes"]:
+        if not first and c["databaseId"] not in notes and (c.get("author") or {}).get("login") == me \
+                and LIVE.search(c.get("body") or ""):
+            lines.append(live(c["body"]))
+    if lines:
+        say(e["thread"], lines)
+    e.update(prs=new, notes=sorted(notes | {c["databaseId"] for c in i["comments"]["nodes"]})[-60:],
+             engineer=who if who is not None else e.get("engineer"))
+    return ["%s: %d line%s in thread %s" % (key, len(lines), "s" * (len(lines) > 1), e["thread"])] if lines else []
+
+
+def cook_locked(backfill=()):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(COOK_LOCK, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        st = read_json(COOKING, {})
+        try:
+            return cook(st, backfill)
+        finally:
+            write_json(COOKING, st)     # what was said stays said, even when a later post fails
+
+
+def cooking_loop():
+    while True:
+        try:
+            for line in cook_locked():
+                log("cooking: " + line)
+        except Exception as e:      # this thread must outlive a bad look; the next one tries again
+            log("cooking: look failed: %s: %s" % (type(e).__name__, e))
+        time.sleep(COOK_EVERY)
+
+
+def cooking_list():
+    """Each issue being worked on now: its thread, who has it, its PRs. Posts nothing."""
+    now, issues = cooking_now(), read_json(COOKING, {}).get("issues", {})
+    open_ = {k: i for k, i in now.items() if i["state"] == "OPEN"}
+    prs = aliased(PR, "pullRequest", {p for i in open_.values() for p in pr_keys(i)})
+    try:
+        board = fetch_board()
+    except (OSError, ValueError):
+        board = None
+    rows = []
+    for k, i in open_.items():
+        state = {p: (prs.get(p) or {}).get("state") for p in pr_keys(i)}
+        rows.append("%s  %s\n    thread: %s; engineer: %s; open PRs: %s; done PRs: %s" % (
+            k, clean(i["title"], 70), (issues.get(k) or {}).get("thread") or "none", engineer(board, i) or "unknown",
+            ", ".join(short(p) for p, v in state.items() if v == "OPEN") or "none",
+            ", ".join(short(p) for p, v in state.items() if v in ("MERGED", "CLOSED")) or "none"))
+    return "\n".join(rows) or "nothing is cooking"
+
+
 def serve():
     global ME
     ME = api("GET", "/users/@me")["id"]    # a dead token fails here; supervise.sh restarts us
@@ -556,6 +858,8 @@ def serve():
     if any_mention():
         GATEWAY.update(read_json(STATE, {}).get("gateway") or {})
         threading.Thread(target=gateway, daemon=True).start()
+    if cfg("DISCORD_CHAT_COOKING"):
+        threading.Thread(target=cooking_loop, daemon=True).start()
     while True:
         st = read_json(STATE, {})
         try:
@@ -658,6 +962,10 @@ def main(argv):
         print(react(*args))
     elif cmd == "assign" and len(args) == 2:
         print(assign(*args))
+    elif cmd == "cooking" and (not args or args[0] == "--backfill" and args[1:]):
+        if not cfg("DISCORD_CHAT_COOKING"):
+            raise SystemExit("DISCORD_CHAT_COOKING is not set: no issue is followed")
+        print("\n".join(cook_locked(args[1:]) or ["nothing to say"]) if args else cooking_list())
     elif cmd == "status":
         print(json.dumps({"channels": channels(), "threads": read_json(STATE, {}).get("threads"), "users": users(),
                           "cursor": read_json(STATE, {}).get("cursor"),

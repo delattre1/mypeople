@@ -3,6 +3,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import shlex
 import signal
 import socket
@@ -434,6 +435,195 @@ class AnyMentionTest(unittest.TestCase):
         with self.assertRaises(self.d.Closed) as e:
             ws.recv(2)
         self.assertEqual(e.exception.code, 4004)
+
+
+class CookingTest(unittest.TestCase):
+    """DISCORD_CHAT_COOKING: each feature-board task being worked on gets one thread, where its work shows."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        env = mock.patch.dict(os.environ, {"INSTALL_DIR": self.tmp.name, "DISCORD_CHAT_CHANNEL_IDS": "c1,c2",
+                                           "DISCORD_CHAT_COOKING": "org:acme label:roadmap-cooking",
+                                           "GITHUB_PRS_AUTHOR": "us",
+                                           "MYPEOPLE_CONFIG_PATH": os.path.join(self.tmp.name, "queue.env")})
+        env.start()
+        self.addCleanup(env.stop)
+        loader = importlib.machinery.SourceFileLoader("discord_chat", str(PLUGIN))
+        self.d = importlib.util.module_from_spec(importlib.util.spec_from_loader("discord_chat", loader))
+        loader.exec_module(self.d)
+        self.issues, self.gone, self.prs, self.threads, self.posts, self.made, self.asked = {}, {}, {}, [], [], [], []
+        self.board = {"tasks": {}}
+        self.d.graphql, self.d.api, self.d.fetch_board = self.graphql, self.api, lambda: self.board
+        self.d.log = lambda msg: None
+
+    # ---- GitHub, as the plugin's queries see it
+    def issue(self, n, title, prs=(), state="OPEN", comments=()):
+        self.issues["acme/app#%d" % n] = {
+            "number": n, "title": title, "url": "https://github.com/acme/app/issues/%d" % n, "state": state,
+            "stateReason": "COMPLETED" if state == "CLOSED" else None, "repository": {"nameWithOwner": "acme/app"},
+            "assignees": {"nodes": []}, "comments": {"nodes": list(comments)},
+            "timelineItems": {"nodes": [{"source": {"url": "https://github.com/acme/app/pull/%d" % p}} for p in prs]}}
+
+    def off(self, n, *args, **kw):
+        """Off the cooking column: the search no longer finds it, but it is still there to look up."""
+        self.issue(n, *args, **kw)
+        self.gone["acme/app#%d" % n] = self.issues.pop("acme/app#%d" % n)
+
+    def pr(self, n, state="OPEN", ci=None, head="h1", reviews=(), comments=(), failed=()):
+        self.prs["acme/app#%d" % n] = {
+            "url": "https://github.com/acme/app/pull/%d" % n, "state": state, "isDraft": False,
+            "reviews": {"nodes": list(reviews)}, "comments": {"nodes": list(comments)},
+            "commits": {"nodes": [{"commit": {"oid": head, "statusCheckRollup": ci and {
+                "state": ci, "contexts": {"nodes": [{"name": f, "conclusion": "FAILURE"} for f in failed]}}}}]}}
+
+    def graphql(self, query, **strings):
+        self.asked.append(query)
+        if "search(" in query:
+            self.assertEqual(strings["q"], "org:acme label:roadmap-cooking is:issue sort:updated-desc")
+            return {"search": {"issueCount": len(self.issues), "nodes": list(self.issues.values())}}
+        out = {}
+        for alias, owner, repo, kind, n in re.findall(
+                r'(k\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ (issue|pullRequest)\(number: (\d+)\)', query):
+            pool = self.gone if kind == "issue" else self.prs
+            out[alias] = {kind: pool.get("%s/%s#%s" % (owner, repo, n))}
+        return out
+
+    # ---- Discord: c1 is the owner's channel
+    def api(self, method, path, body=None, files=()):
+        if path == "/channels/c1":
+            return {"guild_id": "g1"}
+        if path == "/guilds/g1/threads/active":
+            return {"threads": self.threads}
+        if path.startswith("/channels/c1/threads/archived/public"):
+            return {"threads": []}
+        if path == "/channels/c1/threads":
+            tid = "t%d" % (len(self.made) + 1)
+            self.made.append(body)
+            self.threads.append({"id": tid, "parent_id": "c1", "name": body["name"]})
+            return {"id": tid}
+        self.posts.append((path.split("/")[2], body))
+        return {}
+
+    def look(self, *backfill):
+        self.posts = []
+        st = self.d.read_json(self.d.COOKING, {})
+        out = self.d.cook(st, backfill)
+        self.d.write_json(self.d.COOKING, st)
+        return out
+
+    def said(self):
+        return [line for _, body in self.posts for line in body["content"].split("\n")]
+
+    def test_a_task_that_starts_cooking_gets_one_thread_where_its_work_shows(self):
+        self.issue(1, "Already cooking before the first look")
+        self.look()
+        self.assertEqual((self.made, self.posts), ([], []))      # what cooked already gets a thread only by backfill
+
+        self.issue(7, "Fix the thing ghp_" + "x" * 40, prs=[8])
+        self.pr(8)
+        self.board["tasks"]["c"] = {"assignee": "mac/main:eng-5", "state": "doing", "updated": 2,
+                                    "text": "work https://github.com/acme/app/issues/7 now"}
+        self.look()
+        self.assertEqual(self.made, [{"name": "app#7 Fix the thing [redacted]", "type": 11, "auto_archive_duration": 1440}])
+        self.assertEqual(self.said(), ["Work started on https://github.com/acme/app/issues/7", "Engineer: eng-5",
+                                       "PR opened: https://github.com/acme/app/pull/8"])
+        self.assertEqual({p[0] for p in self.posts}, {"t1"})
+        for _, body in self.posts:      # pings no one, unfurls nothing
+            self.assertEqual((body["allowed_mentions"], body["flags"]), ({"parse": []}, 4))
+        self.look()
+        self.assertEqual(self.posts, [])                    # quiet while nothing happens
+
+        bot = {"databaseId": 11, "author": {"login": "srosro"}, "body": self.d.REVIEW_BOT + "\n**Probes**\n\n"
+               "1. [blocking] [from: security] a leak in [api]\n2. [blocking] x\n3. [low] y\n\n**Security** — 4. [low] no"}
+        theirs = {"databaseId": 14, "author": {"login": "someone"}, "body": "live and verified, says someone else"}
+        self.pr(8, ci="SUCCESS", comments=[bot, theirs],
+                reviews=[{"databaseId": 12, "author": {"login": "srosro"}, "state": "APPROVED"},
+                         {"databaseId": 13, "author": {"login": "srosro"}, "state": "COMMENTED"}])
+        self.look()
+        self.assertEqual(self.said(), ["app#8: approved by srosro", "app#8: review bot: 3 probes (2 blocking, 1 low)",
+                                       "app#8: CI green"])
+        self.look()
+        self.assertEqual(self.posts, [])                    # the same green CI is not news twice
+        self.pr(8, ci="PENDING", head="h2", comments=[bot])
+        self.look()
+        self.assertEqual(self.posts, [])                    # a new head's checks still running: nothing yet
+        self.pr(8, ci="FAILURE", head="h2", comments=[bot], failed=["API", "lint"])
+        self.look()
+        self.assertEqual(self.said(), ["app#8: CI failed (API, lint)"])
+        self.pr(8, state="MERGED", ci="SUCCESS", head="h3", comments=[bot])
+        self.issue(7, "Fix the thing", prs=[8], comments=[
+            {"databaseId": 21, "author": {"login": "someone"}, "body": "live and verified? not by us"},
+            {"databaseId": 22, "author": {"login": "us"}, "body": "<!-- mp:agent -->Live and verified on prod: it works"}])
+        self.look()
+        self.assertEqual(self.said(), ["app#8: CI green", "app#8: merged", "Live and verified on prod: it works"])
+        asked = len(self.asked)
+        self.look()
+        self.assertEqual(self.posts, [])
+        self.assertFalse([q for q in self.asked[asked:] if "pullRequest(number: 8)" in q])   # merged: asked no more
+
+        self.issue(7, "Fix the thing", prs=[8], state="CLOSED")
+        self.look()
+        self.assertEqual(self.said(), ["Issue closed: done."])
+        self.look()
+        self.assertEqual(self.posts, [])
+        self.assertEqual(len(self.made), 1)                 # one thread, all along
+
+        st = self.d.read_json(self.d.COOKING, {})
+        del st["issues"]["acme/app#7"]                      # its record lost: the thread is found by its name
+        self.d.write_json(self.d.COOKING, st)
+        self.issue(7, "Fix the thing", prs=[8])
+        self.look()
+        self.assertEqual(len(self.made), 1)
+        self.assertEqual({p[0] for p in self.posts}, {"t1"})
+
+    def test_an_issue_off_the_cooking_column_gets_nothing_until_it_is_back(self):
+        self.look()
+        self.issue(7, "Fix the thing", prs=[8])
+        self.pr(8)
+        self.look()
+        ours = {"databaseId": 31, "author": {"login": "us"}, "body": "Live and verified."}
+        self.off(7, "Fix the thing", prs=[8], comments=[ours])     # its label went; it is still open
+        self.pr(8, ci="FAILURE", failed=["API"])
+        self.look()
+        self.assertEqual(self.posts, [])
+        self.issues["acme/app#7"] = self.gone.pop("acme/app#7")    # back on it
+        self.look()
+        self.assertEqual(self.said(), ["app#8: CI failed (API)", "Live and verified."])
+        self.off(7, "Fix the thing", prs=[8])
+        self.look()
+        self.off(7, "Fix the thing", prs=[8], state="CLOSED")
+        self.look()
+        self.assertEqual(self.posts, [])                    # closed after it left the column: nothing said
+        self.issue(9, "Done and dropped together", prs=[])
+        self.look()
+        self.off(9, "Done and dropped together", state="CLOSED")
+        self.look()
+        self.assertEqual(self.said(), ["Issue closed: done."])    # its label went as it closed: that is news
+
+    def test_backfill_opens_only_the_threads_named_and_the_list_posts_nothing(self):
+        self.issue(1, "One", prs=[2])
+        self.issue(3, "Three")
+        self.issue(5, "Five", state="CLOSED")
+        self.pr(2, state="MERGED")
+        listing = self.d.cooking_list()     # before the very first look
+        self.assertIn("acme/app#1  One\n    thread: none; engineer: unknown; open PRs: none; done PRs: app#2", listing)
+        self.assertNotIn("acme/app#5", listing)
+        self.assertEqual((self.made, self.posts), ([], []))
+        out = self.look("acme/app#1", "acme/app#5")
+        self.assertEqual([m["name"] for m in self.made], ["app#1 One"])
+        self.assertEqual(self.said(), ["Work started on https://github.com/acme/app/issues/1",
+                                       "PR merged: https://github.com/acme/app/pull/2"])
+        self.assertEqual(out, ["acme/app#5: not cooking, so no thread", "acme/app#1: 2 lines in thread t1"])
+        self.look("acme/app#1")
+        self.look()
+        self.assertEqual((len(self.made), self.posts), (1, []))     # #3 was cooking before: no thread unless named
+
+    def test_the_review_bots_verdict_in_a_few_words(self):
+        self.assertEqual(self.d.verdict(self.d.REVIEW_BOT + "\n**Probes**\n\nNone.\n\n**Security** — None."),
+                         "review bot: no probes")
+        self.assertEqual(self.d.verdict("**Probes**\n\n1. [low] a\n"), "review bot: 1 probe (1 low)")
+        self.assertEqual(self.d.verdict("a review in another shape"), "review bot: reviewed")
 
 
 class StopTest(unittest.TestCase):

@@ -184,6 +184,9 @@ and the package registries). Anyone else can chat, report bugs and ask for featu
 webhooks go unheard, but for the bug reports agents send your Plow server: with
 `DISCORD_BUG_REPORT_CHANNEL_ID` (a listed channel) and `DISCORD_BUG_REPORT_WEBHOOK_ID`, what the server posts
 there with that webhook reaches the Boss too, as a guest's words.
+With `DISCORD_CHAT_COOKING` (a gh search, e.g. `org:my-org label:roadmap-cooking`), each issue it finds
+being worked on gets one thread in the first listed channel, where its PRs, their reviews and CI, merge and
+close show as they happen (`discord-chat.py cooking` lists them; `--backfill` opens one that cooked already).
 
 In the cloud: `cloud/Dockerfile` builds MyPlow as a Plow cloud agent (1-click from
 [aiworthusing.com/agent-index/myplow](https://aiworthusing.com/agent-index/myplow)). It is a separate MyPlow
