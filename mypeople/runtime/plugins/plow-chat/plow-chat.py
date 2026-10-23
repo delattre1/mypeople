@@ -33,8 +33,6 @@ says which chat changed and that chat is read at once. Every (re)connect, and ev
 minute, a pass over all chats catches whatever the socket missed; while the socket
 is down the bridge polls every PLOW_CHAT_POLL_SECONDS.
 """
-import base64
-import hashlib
 import http.client
 import json
 import mimetypes
@@ -42,7 +40,6 @@ import os
 import re
 import shlex
 import socket
-import ssl
 import subprocess
 import sys
 import threading
@@ -52,6 +49,9 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
+from mpcommon import WebSocket  # noqa: E402  (the one discord-chat holds Discord's gateway with)
 
 BASE = (os.environ.get("PLOW_CHAT_BASE_URL") or os.environ.get("PLOW_API_BASE")
         or "https://api.plow.co").rstrip("/")
@@ -785,83 +785,17 @@ def sweep(creds: dict, seed: bool = False) -> bool:
     return min([poll_chat(creds, uid, seed) for uid in list_chats(creds)], default=0) >= 0
 
 
-class WebSocket:
-    """Just enough RFC 6455 on the stdlib for Plow's event socket: text in, pings both ways.
-
-    No extension is offered, so frames come uncompressed; fragments are joined; a ping is answered;
-    a close frame raises. The server speaks first with {"type": "connected"}: a ticket it refuses
-    is accepted and then closed with 4401, which raises here.
-    """
-
-    def __init__(self, url: str, timeout: float = 15):
-        u = urllib.parse.urlsplit(url)
-        sock = socket.create_connection((u.hostname, u.port or (443 if u.scheme == "wss" else 80)),
-                                        timeout)
-        if u.scheme == "wss":
-            sock = ssl.create_default_context().wrap_socket(sock, server_hostname=u.hostname)
-        self.sock, self.buf, self.parts, self.heard = sock, b"", b"", time.time()
-        key = base64.b64encode(os.urandom(16)).decode()
-        sock.sendall(f"GET {u.path}?{u.query} HTTP/1.1\r\nHost: {u.netloc}\r\n"
-                     f"Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
-                     f"Sec-WebSocket-Version: 13\r\n\r\n".encode())
-        while b"\r\n\r\n" not in self.buf:
-            self._fill()
-        head, self.buf = self.buf.split(b"\r\n\r\n", 1)
-        accept = base64.b64encode(hashlib.sha1(
-            (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest())
-        if not head.startswith(b"HTTP/1.1 101") or accept not in head:
-            raise OSError(f"websocket refused: {head.splitlines()[0][:100]!r}")
-        first = self.recv(timeout)
-        if json.loads(first or "{}").get("type") != "connected":
-            raise OSError(f"websocket opened without connected: {first!r:.100}")
-
-    def _fill(self):
-        chunk = self.sock.recv(65536)
-        if not chunk:
-            raise OSError("websocket closed by the server")
-        self.buf += chunk
-        self.heard = time.time()
-
-    def recv(self, timeout: float):
-        """The next text message, or None when none came within `timeout`. Raises once closed."""
-        self.sock.settimeout(timeout)
-        while True:
-            b = self.buf
-            n, at = (b[1] & 0x7F, 2) if len(b) >= 2 else (0, 2)
-            if n > 125:
-                at = 4 if n == 126 else 10
-                n = int.from_bytes(b[2:at], "big") if len(b) >= at else 0
-            if len(b) < 2 or len(b) < at + n:  # a frame not yet whole: read more, keep what came
-                try:
-                    self._fill()
-                except socket.timeout:
-                    return None
-                continue
-            op, fin, data, self.buf = b[0] & 0x0F, b[0] & 0x80, b[at:at + n], b[at + n:]
-            if op == 0x9:
-                self.send(0xA, data)
-            elif op == 0x8:
-                raise OSError(f"websocket closed {int.from_bytes(data[:2], 'big')} "
-                              f"{data[2:].decode(errors='replace')}")
-            elif op in (0x0, 0x1, 0x2):
-                self.parts += data
-                if fin:
-                    text, self.parts = self.parts.decode(), b""
-                    return text
-
-    def send(self, op: int, data: bytes = b""):
-        """One control frame (ping 0x9, pong 0xA): 125 bytes at most, masked like every client frame."""
-        mask = os.urandom(4)
-        self.sock.sendall(bytes([0x80 | op, 0x80 | len(data)]) + mask
-                          + bytes(c ^ mask[i % 4] for i, c in enumerate(data)))
-
-
 def open_socket(creds: dict) -> WebSocket:
     # No chat_id: an account ticket carries every chat, a group made after it connected included.
     status, data = api("POST", "/v1/ws/ticket", {}, token=creds["token"])
     if status >= 400 or not data.get("ticket"):
         raise OSError(f"ws ticket {status}: {json.dumps(data)[:160]}")
-    return WebSocket(f"{BASE.replace('http', 'ws', 1)}/v1/ws?ticket={urllib.parse.quote(data['ticket'])}")
+    ws = WebSocket(f"{BASE.replace('http', 'ws', 1)}/v1/ws?ticket={urllib.parse.quote(data['ticket'])}")
+    # The server speaks first with {"type": "connected"}: a ticket it refuses is accepted, then closed with 4401.
+    first = ws.recv(15)
+    if json.loads(first or "{}").get("type") != "connected":
+        raise OSError(f"websocket opened without connected: {first!r:.100}")
+    return ws
 
 
 def listen(creds: dict, ws: WebSocket, due: float):
@@ -886,7 +820,7 @@ def listen(creds: dict, ws: WebSocket, due: float):
         if now >= ping:
             if now - ws.heard > 2 * PING_SECONDS:
                 raise OSError(f"websocket silent for {now - ws.heard:.0f}s")
-            ws.send(0x9)
+            ws.send(b"", 0x9)
             ping = now + PING_SECONDS
 
 

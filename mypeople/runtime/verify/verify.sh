@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# MyPlow DISTRIBUTABLE acceptance harness (Fase-1 scope; see tools/scope-verify.py)
 # MyPlow acceptance harness (§14/§15). Exit code = truth (0 = Done). Self-contained.
-# STANDALONE mode: UPSTREAM_QUEUE_URL unset => J12/J13 skipped.
 set -u
 source "${MYPEOPLE_CONFIG_PATH:-$HOME/.config/mypeople/queue.env}" 2>/dev/null || true
 export PATH="$HOME/.local/bin:${INSTALL_DIR:-$HOME/mypeople}/bin:$PATH"
@@ -182,9 +180,6 @@ kill $PXP 2>/dev/null
 at=$($CURL -H "$QS" "$TODO/todo/attach?agent=$BOSS")
 echo "$at" | python3 -c "import sys,json;d=json.load(sys.stdin);exit(0 if d.get('ok') and d.get('target')=='mc-main:Boss' and d.get('port')==int('$TTYD_BROWSER_PORT') else 1)" && pass "J7 attach-resolver" || fail "J7 attach-resolver"
 
-# ---------- J8/J27/J47 attach-live-pane (SKIPPED — out of Fase-1 scope)
-echo "SKIP J8/J27/J47 attach-live-pane: cross-host routing (single host uses localhost + published ports)"
-
 # ---------- J9/J9c/J14/J29 PLOW tokens + no animations ----------
 for pg in "$TODO/" "$HUD/dashboard"; do
   b=$($CURL "$pg")
@@ -230,9 +225,6 @@ if echo "$TB" | grep -Eqi '<input[^>]*type="file"|add proof|choose file'; then f
 echo "$TB" | grep -q 'className="check"' && echo "$TB" | grep -q "stopPropagation" \
   && echo "$TB" | grep -q 'state: done?"working":"done"' && echo "$TB" | grep -q "task-top" \
   && pass "J9e check-toggle-markup" || fail "J9e check-toggle-markup"
-
-# ---------- J10 reachable-remote (SKIPPED — out of Fase-1 scope)
-echo "SKIP J10 reachable-remote: cross-host routing, off by default"
 
 # ---------- J15 delete ----------
 D=$($CURL -X POST -H "$QS" -d '{"op":"add","text":"to delete"}' "$TODO/todo/update" | jqget "d['id']")
@@ -468,7 +460,6 @@ else
 fi
 
 # ---------- J36 nested spawn no disconnect ----------
-before_wins=$(tmux list-windows -t mc-main -F '#{window_name}' | sort | tr '\n' ',')
 # attach a ttyd client to Boss window via a grouped session (simulate viewer)
 tmux new-session -d -t mc-main -s _vtest \; select-window -t Boss 2>/dev/null
 mp spawn "$HOST/main:parent-eng" --boss "$BOSS" >/dev/null 2>&1; sleep 5
@@ -481,7 +472,6 @@ for i in $(seq 1 12); do
   tmux list-windows -t mc-main -F '#{window_name}' 2>/dev/null | grep -qx eng-child && { child=1; break; }
 done
 has=$(tmux has-session -t mc-main 2>/dev/null && echo 1 || echo 0)
-vtest=$(tmux list-clients -t mc-main 2>/dev/null | grep -c _vtest || echo 0)
 bosswin=$(tmux list-windows -t mc-main -F '#{window_name}' | grep -qx Boss && echo 1 || echo 0)
 tmux kill-session -t _vtest 2>/dev/null
 [ "$child" = "1" ] && [ "$has" = "1" ] && [ "$bosswin" = "1" ] && pass "J36 nested-spawn-no-disconnect" || fail "J36 nested-spawn child=$child has=$has boss=$bosswin"
@@ -511,8 +501,6 @@ echo "$porder" | grep -q "True" && [ "$(echo $porder | awk '{print $1}')" -ge 6 
 $CURL -X POST -H "$QS" -d "{\"op\":\"unpin\",\"id\":\"${PT[0]}\"}" "$TODO/todo/update" >/dev/null
 up=$($CURL -H "$QS" "$TODO/todo/board" | python3 -c "import sys,json;t=json.load(sys.stdin)['tasks']['${PT[0]}'];print(t['pinned'],t['pinRank'])")
 [ "$up" = "False None" ] && pass "J37b unpin-restore" || fail "J37b unpin ($up)"
-
-# ---------- J39-J44 removed: external messaging bridge stripped from this build ----------
 
 # ---------- J48 boss quickstart (static) ----------
 grep -q "mp send" "$ID/boss-CLAUDE.md" && grep -q "mp spawn" "$ID/boss-CLAUDE.md" && grep -qi "todo/comment" "$ID/boss-CLAUDE.md" && grep -q "todo/board" "$ID/boss-CLAUDE.md" \

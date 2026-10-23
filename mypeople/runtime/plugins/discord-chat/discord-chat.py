@@ -49,10 +49,8 @@ Config (env, or queue.env):
     discord-chat.py cooking --backfill <owner/repo#n>...   open the thread of one that was cooking already
     discord-chat.py status
 """
-import base64
 import collections
 import fcntl
-import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -60,8 +58,6 @@ import os
 import random
 import re
 import signal
-import socket
-import ssl
 import subprocess
 import sys
 import threading
@@ -72,6 +68,8 @@ import urllib.request
 from pathlib import Path
 
 SELF = Path(__file__).resolve()
+sys.path.insert(0, str(SELF.parents[2] / "bin"))
+from mpcommon import Closed, WebSocket  # noqa: E402  (the one the plow-chat bridge holds too)
 _loader = importlib.machinery.SourceFileLoader(
     "discord_agent", str(SELF.parent.parent / "discord-agent" / "discord-agent.py"))
 DA = importlib.util.module_from_spec(importlib.util.spec_from_loader("discord_agent", _loader))
@@ -418,75 +416,6 @@ def mentions(st, who):
             write_json(STATE, st)       # now: the Boss's first step is to react there, which reads it
             log("routed mention %s in %s from %s (%s)" % (m["id"], ch, a.get("id"), who.get(a.get("id"), "guest")))
         HEARD.popleft()
-
-
-class Closed(OSError):
-    def __init__(self, code, reason):
-        OSError.__init__(self, "closed %d %s" % (code, reason))
-        self.code = code
-
-
-class WebSocket:
-    """Just enough RFC 6455 on the stdlib for Discord's gateway (plow-chat's is the model): text both ways,
-    uncompressed, fragments joined, a ping answered, a close frame raised as Closed with its code."""
-
-    def __init__(self, url, timeout=15):
-        u = urllib.parse.urlsplit(url)
-        sock = socket.create_connection((u.hostname, u.port or 443), timeout)
-        self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=u.hostname)
-        self.buf, self.parts = b"", b""
-        key = base64.b64encode(os.urandom(16)).decode()
-        self.sock.sendall(("GET %s?%s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                           "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n"
-                           % (u.path or "/", u.query, u.netloc, key)).encode())
-        while b"\r\n\r\n" not in self.buf:
-            self._fill()
-        head, self.buf = self.buf.split(b"\r\n\r\n", 1)
-        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest())
-        if not head.startswith(b"HTTP/1.1 101") or accept not in head:
-            raise OSError("websocket refused: %r" % head.splitlines()[0][:100])
-
-    def _fill(self):
-        chunk = self.sock.recv(65536)
-        if not chunk:
-            raise OSError("websocket closed by the server")
-        self.buf += chunk
-
-    def recv(self, timeout):
-        """The next text message, or None when none came within `timeout`. Raises once closed."""
-        self.sock.settimeout(timeout)
-        while True:
-            b = self.buf
-            n, at = (b[1] & 0x7F, 2) if len(b) >= 2 else (0, 2)
-            if n > 125:
-                at = 4 if n == 126 else 10
-                n = int.from_bytes(b[2:at], "big") if len(b) >= at else 0
-            if len(b) < 2 or len(b) < at + n:      # a frame not yet whole: read more, keep what came
-                try:
-                    self._fill()
-                except socket.timeout:
-                    return None
-                continue
-            op, fin, data, self.buf = b[0] & 0x0F, b[0] & 0x80, b[at:at + n], b[at + n:]
-            if op == 0x9:
-                self.send(data, 0xA)
-            elif op == 0x8:
-                raise Closed(int.from_bytes(data[:2], "big") if len(data) >= 2 else 1005,
-                             data[2:].decode(errors="replace"))
-            elif op in (0x0, 0x1, 0x2):
-                self.parts += data
-                if fin:
-                    text, self.parts = self.parts.decode(), b""
-                    return text
-
-    def send(self, data, op=0x1):
-        """One frame, masked like every client frame: a text unless op says otherwise."""
-        data = data.encode() if isinstance(data, str) else data
-        n = len(data)
-        size = bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + n.to_bytes(2, "big") if n < 65536 \
-            else bytes([0x80 | 127]) + n.to_bytes(8, "big")
-        mask = os.urandom(4)
-        self.sock.sendall(bytes([0x80 | op]) + size + mask + bytes(c ^ mask[i % 4] for i, c in enumerate(data)))
 
 
 def gateway():

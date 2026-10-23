@@ -970,9 +970,6 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, {"ok": False, "error": "no_task"})
                 if "assignee" in body:
                     return self._send(400, {"ok": False, "error": "assignee_controlled"})
-                # reject removed features (subtasks/deps/hardgate) silently — never persist
-                for banned in ("parent", "dependsOn", "hardGate", "brainstorm"):
-                    body.pop(banned, None)
                 prev_state = t.get("state")
                 if "state" in body:
                     st = body["state"]

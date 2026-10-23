@@ -23,9 +23,8 @@ mypeople = "mypeople.cli:main"
 path = "mypeople/__init__.py"
 
 # The runtime/ tree ships as package data (daemons, HTML, doctrine, verify harness,
-# tmux config, hook plugins, skel dirs). hatchling's default package inclusion picks up
-# every file under mypeople/ regardless of extension — including the suffixless scripts
-# (mp, board-restore) and skel/*/.gitkeep that first-run's materialize() expects.
+# tmux config, hook plugins). hatchling's default package inclusion picks up every file
+# under mypeople/ regardless of extension — including the suffixless scripts (mp, board-restore).
 [tool.hatch.build.targets.wheel]
 packages = ["mypeople"]
 
