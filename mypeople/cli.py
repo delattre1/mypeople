@@ -287,7 +287,7 @@ def cmd_down(args):
             pass
     bindir = os.path.join(install, "bin")
     for pat in ("supervise.sh", "queue-server.py", "todo-server.py", "queue-client.py",
-                "board-exporter.py", "boss-supervisor.sh", "mp cron serve"):
+                "board-exporter.py", "boss-supervisor.sh", "mp cron serve", "mp tcc serve"):
         subprocess.run(["pkill", "-f", os.path.join(bindir, pat)], capture_output=True)
     # Every plugin, not a named few: one `down` forgot kept serving its old code after an upgrade
     # while run/serving.version claimed the new release (latch-reconnect, 10-03).

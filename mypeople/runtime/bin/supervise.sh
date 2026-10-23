@@ -47,6 +47,7 @@ ensure(){
   fi
 }
 
+OS="$(uname)"
 TTYD_PORT="${TTYD_PORT:-7681}"
 # The Terminal Graph tiles onto a READ-ONLY ttyd: a tile is a view, and a stray click must never
 # type into a live agent. Stock ttyd is readonly unless -W, so this is the same binary, no flag.
@@ -90,6 +91,8 @@ while true; do
   ensure "$BIN/boss-supervisor.sh"         "exec bash '$BIN/boss-supervisor.sh'"
   # Cron: each schedule is one `mp send` on a timer (mp cron add/ls/rm). Idle when none exist.
   ensure "$BIN/mp cron serve$"             "exec python3 '$BIN/mp' cron serve"
+  # App Data recorder: one line per macOS "access data from other apps" request (mp tcc). macOS only.
+  [ "$OS" = Darwin ] && ensure "$BIN/mp tcc serve$" "exec python3 '$BIN/mp' tcc serve"
   # GitHub PR watcher: off until queue.env sets GITHUB_PRS (see the plugin's header).
   [ -n "${GITHUB_PRS:-}" ] && ensure "$ID/plugins/github-prs/github-prs.py serve$" "exec python3 '$ID/plugins/github-prs/github-prs.py' serve"
   # Instagram comment watcher: off until queue.env sets INSTAGRAM_COMMENTS (see the plugin's header).
