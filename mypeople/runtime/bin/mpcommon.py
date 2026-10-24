@@ -719,15 +719,34 @@ def pane_input_state(target):
 
 def send_when_ready(target, message, wait):
     """tmux_send_message, after waiting up to `wait` seconds for a Claude target to reach its
-    input box. Returns "sent", "not_ready" or "no_pane", so a caller that can retry later knows
-    to, and one that cannot at least says why instead of printing "sent"."""
+    input box. Returns "sent", "not_ready", "no_pane", or for a retired agent a sentence saying
+    so, so a caller that can retry later knows to, and one that cannot at least says why instead
+    of printing "sent"."""
     deadline = time.time() + wait
     while pane_input_state(target) == "not_ready" and time.time() < deadline:
         time.sleep(1)
     if tmux_send_message(target, message):
         return "sent"
     state = pane_input_state(target)
-    return "not_ready" if state == "not_ready" else "no_pane"
+    return "not_ready" if state == "not_ready" else (retired_note(target) or "no_pane")
+
+
+def retired_note(target):
+    """What a send to mc-<sess>:<tab> says when the roster has that agent retired, else "".
+
+    A bare "no_pane" reads as a hiccup: on 2026-10-23 an A2A GO to an agent killed 4 h earlier
+    got one, and its sender waited 1.5 h for a result (card 65c54015d5). Local mp send and the
+    queue-client (which A2A deliveries go through) both return this to the sender."""
+    sess, _, tab = target[3:].partition(":") if target.startswith("mc-") else ("", "", "")
+    aid = "%s/%s:%s" % (CFG["HOST_ID"], sess, tab)
+    rr = (read_json(os.path.join(CFG["INSTALL_DIR"], "run", "roster.json"), {}) or {}).get(aid) or {}
+    if not rr.get("retired"):
+        return ""
+    mins = int((time.time() - rr.get("retired_ts", time.time())) // 60)
+    return ("not sent: %s was retired %s ago (%s), so no one got this message; "
+            "`mp revive %s` on its MyPlow brings it back"
+            % (aid, "%d min" % mins if mins < 120 else "%d h" % (mins // 60),
+               rr.get("retire_reason") or "mp kill", aid))
 
 
 def tmux_send_message(target, message):

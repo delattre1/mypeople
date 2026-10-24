@@ -119,6 +119,20 @@ class ComposerReadyTest(unittest.TestCase):
             with mock.patch.object(self.C.subprocess, "run", side_effect=FakeTmux(READY)):
                 self.assertEqual(self.C.send_when_ready(target, "hi", 0), "sent")
 
+    def test_a_send_to_a_retired_agent_says_it_is_retired(self):
+        """On 2026-10-23 an A2A GO to an agent killed 4 h earlier came back as a bare "no_pane"; the
+        sender read it as a hiccup and waited 1.5 h (card 65c54015d5). Local and A2A sends both end here."""
+        target = self.agent("claude")
+        run = Path(self.tmp.name) / "run"
+        run.mkdir()
+        (run / "roster.json").write_text(json.dumps({"node/main:eng-1": {
+            "retired": True, "retire_reason": "killed", "retired_ts": self.C.time.time() - 4 * 3600}}))
+        with mock.patch.object(self.C.time, "sleep"), \
+                mock.patch.object(self.C.subprocess, "run", side_effect=FakeTmux(READY, pane=False)):
+            why = self.C.send_when_ready(target, "hi", 0)
+        self.assertIn("node/main:eng-1 was retired 4 h ago (killed)", why)
+        self.assertIn("mp revive node/main:eng-1", why)
+
 
 class MpSendExitCodeTest(unittest.TestCase):
     def test_mp_send_exits_3_on_not_ready_so_a_retrying_sender_retries(self):

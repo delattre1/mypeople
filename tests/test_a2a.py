@@ -118,6 +118,23 @@ class A2ATest(unittest.TestCase):
         self.assertEqual(notice["payload"], {"message": "[from beta, on another MyPlow] [AGENT NOTIFICATION] "
                                                         "beta/main:Boss finished: ok"})
 
+    def test_a_failure_after_queued_reaches_the_sender(self):
+        """mp send printed "queued" (the peer was slow); the peer then could not deliver: the sender hears it."""
+        self.pair()
+        tid = self.qa.submit("send", "beta/main:eng-9", {"message": "GO", "reply_to": "alpha/main:eng-1"})
+        with mock.patch.object(self.a2a, "RECEIPT_WAIT", -1):
+            self.alpha.step()
+        self.assertTrue(self.qa.tasks[tid]["ok"])
+        self.assertIn("queued", self.qa.tasks[tid]["result"])
+        self.beta.step()
+        [got] = self.qb.sends()
+        got.update(delivered=True, ok=False, result="not sent: beta/main:eng-9 was retired 4 h ago (killed)")
+        self.beta.step()
+        self.alpha.step()
+        [notice] = self.qa.sends()
+        self.assertEqual(notice["target_agent"], "alpha/main:eng-1")
+        self.assertIn("beta/main:eng-9 was retired 4 h ago", notice["payload"]["message"])
+
     def test_only_send_crosses_and_forgeries_drop(self):
         self.pair()
         kill = self.qa.submit("kill", "beta/main:Boss")

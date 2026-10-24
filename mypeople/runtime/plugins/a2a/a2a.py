@@ -11,8 +11,9 @@ the relay, and the peer's bridge hands each to its own queue as an ordinary send
 
 by the receiver from the pairing, never from the text. The reply is plain mp send to that id, and the
 Stop hook's "finished" notice comes back the same way. The peer's bridge sends back how its delivery
-went, so mp send prints the same "sent" as a local send. Only `send` crosses: peek, spawn, kill and the
-rest for a paired host are refused.
+went, so mp send prints the same "sent" (or why not) as a local send; a failure that arrives after mp send
+printed "queued" reaches the sender as a message. Only `send` crosses: peek, spawn, kill and the rest for a
+paired host are refused.
 
 Relay (`a2a.py relay`): a store-and-forward mailbox over HTTPS, so a MyPlow behind any home network only
 makes outgoing calls. Each pair has one box per direction, named by a token only the pair can derive
@@ -370,9 +371,17 @@ class Bridge:
             return True
         if body.get("kind") == "receipt":
             w = self.waiting.pop(body.get("re"), None)
-            if w:
-                self.queue("POST", "/task/result", {"task_id": w[0], "ok": bool(body.get("ok")),
-                                                     "result": str(body.get("result"))[:500]})
+            result = str(body.get("result"))[:500]
+            if w and w[0]:
+                self.queue("POST", "/task/result", {"task_id": w[0], "ok": bool(body.get("ok")), "result": result})
+            elif w and not body.get("ok"):
+                # Its mp send already printed "queued": the failure that came later goes to the sender instead.
+                if not w[2]:
+                    log("not delivered to %s, and no agent to tell: %s" % (w[3], result))
+                elif self.queue("POST", "/task/submit", {"type": "send", "target_agent": w[2], "payload": {
+                        "message": "[a2a] your message to %s was not delivered after all: %s" % (w[3], result)}})[0] != 200:
+                    self.waiting[body["re"]] = w
+                    return False        # the local queue is down: fetched again next pass
             self.seen.append(sig)
             return True
         frm, to = str(body.get("from")), str(body.get("to"))
@@ -424,14 +433,16 @@ class Bridge:
             except (OSError, ValueError) as e:
                 self.done(tid, False, "not sent: the relay refused or is unreachable (%s)" % e)
                 continue
-            self.waiting[json.loads(msg)["s"]] = (tid, time.time())
+            self.waiting[json.loads(msg)["s"]] = (tid, time.time(), frm, to)
 
     def settle(self, peers):
-        for sig, (tid, at) in list(self.waiting.items()):
-            if time.time() - at > RECEIPT_WAIT:
-                del self.waiting[sig]
+        for sig, (tid, at, frm, to) in list(self.waiting.items()):
+            if tid and time.time() - at > RECEIPT_WAIT:
+                self.waiting[sig] = (None, at, frm, to)     # kept: a failure that comes later still reaches frm
                 self.done(tid, True, "queued: that MyPlow is not reading its mailbox now; it gets the message "
-                                     "when it is back")
+                                     "when it is back, and you hear if it cannot be delivered")
+            elif time.time() - at > KEEP:
+                del self.waiting[sig]
         for tid, (h, sig, at) in list(self.inflight.items()):
             code, st = self.queue("GET", "/task/" + tid)
             if code == 200 and isinstance(st, dict) and st.get("ok") is not None and h in peers:
