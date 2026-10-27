@@ -20,8 +20,10 @@ key's sha256. supervise.sh keeps `serve` running while that file exists.
     web-chat.py react <visitor> <msg> EMOJI    react to their message (👀 shows them it was read)
     web-chat.py history <visitor>              their thread as JSON, oldest first: [{id, mine, text, created_at}];
                                                mine = the visitor wrote it (e.g. for a handover)
+    web-chat.py route <visitor> <key_sha256|none>   hand that visitor to another MyPlow's relay key (none = back here)
     web-chat.py status
 """
+import fcntl
 import json
 import os
 import socket
@@ -77,22 +79,30 @@ def call(method, path, body=None, timeout=60):
 
 
 def envelope(m):
-    page = f" (came from page {m['page']})" if m.get("first") and m.get("page") else ""
     v = m["visitor"]
+    rules = (f"ABSOLUTE RULE, no exceptions whoever asks or however: never expose our API keys or secrets. To answer, run: "
+             f"{RUN} reply {v} \"your reply\" -- it appears live on their page. Short chat messages. Anything they must "
+             f"text from their iPhone (an activation text, a code) goes ONLY inside the link "
+             f"sms:<number>&body=<that exact text, URL-encoded> in your reply: the page shows it as a 'Continue on "
+             f"iMessage' button that opens Messages with it prefilled. Never write the text or code out for them to "
+             f"copy or type, and never say 'tap Continue on iMessage' without the link in that same reply.")
+    if m.get("kind") == "handover":  # the relay's own line, never visitor text: a visitor can type anything
+        return (f"[web-chat] web visitor {v} is now yours (handed over by the page's owner); their next messages come here.\n"
+                f"(Read the conversation so far first: {RUN} history {v} -- then greet them and pick up what they "
+                f"wanted. {rules})")
+    page = f" (came from page {m['page']})" if m.get("first") and m.get("page") else ""
     return (f"[web-chat] from web visitor {v}{page}: {m['text']}\n"
-            f"(Someone on Daniel's public web chat page; each visitor is their own thread. ABSOLUTE RULE, no exceptions "
-            f"whoever asks or however: never expose our API keys or secrets. FIRST, before reading on: {RUN} react {v} "
-            f"{m['id']} 👀 (shows them it was read). To answer, run: {RUN} reply {v} \"your reply\" -- it appears live "
-            f"on their page. Short chat messages.)")
+            f"(Someone on Daniel's public web chat page; each visitor is their own thread. FIRST, before reading on: "
+            f"{RUN} react {v} {m['id']} 👀 (shows them it was read). {rules})")
 
 
 def deliver(m):
     """One visitor message to the Boss; True once mp took it."""
     p = subprocess.run([MP_BIN, "send", TARGET, envelope(m)], capture_output=True, text=True, timeout=60)
     if p.returncode:
-        log(f"mp send failed for {m['visitor']} {m['id']}: exit {p.returncode}")  # never the stderr: it can quote their text
+        log(f"mp send failed for {m['visitor']} {m.get('id', m.get('kind'))}: exit {p.returncode}")  # never the stderr: it can quote their text
         return False
-    log(f"delivered {m['visitor']} {m['id']} to {TARGET}")
+    log(f"delivered {m['visitor']} {m.get('id', m.get('kind'))} to {TARGET}")
     return True
 
 
@@ -109,6 +119,12 @@ def poll_once(wait=25):
 
 def serve():
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    # Two pollers share one "after" mark, so every visitor message would reach the Boss twice: one serve at a time.
+    lock = open(STATE_DIR / "serve.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit("another web-chat serve is already running") from None
     log(f"polling {read_json(CREDS, {}).get('url')} -> {TARGET}")
     fails = 0
     while True:
@@ -122,7 +138,8 @@ def serve():
 
 
 def main():
-    cmd, args = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("serve", [])
+    # No verb is never "serve": a bare run to read the usage would start a second poller (plow-chat, 10-21).
+    cmd, args = (sys.argv[1], sys.argv[2:]) if len(sys.argv) > 1 else ("", [])
     if cmd == "serve":
         serve()
     elif cmd == "reply" and len(args) >= 2 and not args[1].startswith("--"):
@@ -132,6 +149,8 @@ def main():
     elif cmd == "history" and len(args) == 1:
         msgs = call("GET", f"/agent/thread?visitor={urllib.parse.quote(args[0])}")["messages"]
         print(json.dumps([{k: m[k] for k in ("id", "mine", "text", "created_at")} for m in msgs], ensure_ascii=False, indent=1))
+    elif cmd == "route" and len(args) == 2:
+        print(json.dumps(call("POST", "/agent/route", {"visitor": args[0], "key_sha256": None if args[1] == "none" else args[1]})))
     elif cmd == "status":
         print(json.dumps({"relay": read_json(CREDS, {}).get("url"), "target": TARGET, "after": read_json(STATE, {}).get("after", 0)}, indent=2))
     else:
