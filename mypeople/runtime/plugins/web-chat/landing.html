@@ -510,11 +510,24 @@ footer .wrap { border-top: .5px solid rgba(0, 0, 0, .12); padding-top: 18px; }
 }
 
 /* The live chat: a whole phone where the number form was; the chat inside is the relay's /chat. */
-.live { width: 100%; display: grid; place-items: center; margin: 32px auto 0; animation: rise .65s var(--ease) .12s both; }
-.live-phone { width: min(390px, 100%); height: min(760px, 78vh); border-radius: 52px; background: #1c1c1e; padding: 10px;
+.live { width: 100%; display: grid; place-items: center; margin: 28px auto 0; animation: rise .65s var(--ease) .12s both; }
+.live-phone { width: min(390px, 100%); height: var(--chat-h, min(760px, 78vh)); border-radius: 52px; background: #1c1c1e; padding: 10px;
   box-shadow: 0 0 0 1.5px #3a3a3c inset, 0 50px 90px -50px rgba(0, 0, 0, .45); }
 .live-phone iframe { display: block; width: 100%; height: 100%; border: 0; border-radius: 42px; background: #fff; }
-@media (max-width: 520px) { .live-phone { height: 72vh; border-radius: 40px; padding: 6px; } .live-phone iframe { border-radius: 34px; } }
+/* A phone in your hand needs no phone drawn around it: the chat is a card, and tapping in opens it full screen. */
+@media (max-width: 520px) {
+  .live { margin-top: 20px; }
+  .live-phone { padding: 0; background: #fff; border-radius: 26px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08), 0 24px 50px -28px rgba(0, 0, 0, .35); }
+  .live-phone iframe { border-radius: 26px; }
+}
+.live.open { position: fixed; z-index: 2147483000; left: 0; right: 0; top: var(--vv-top, 0px); height: var(--vv-h, 100dvh); margin: 0; animation: none;
+  background: #fff; display: block; }
+.live.open .live-phone { width: 100%; height: 100%; border-radius: 0; box-shadow: none; padding: 0; }
+.live.open .live-phone iframe { border-radius: 0; }
+html.chat-open, html.chat-open body { overflow: hidden; overscroll-behavior: none; }
+/* The hero is its own stacking context (isolation): lift it over the site header, and hide the header, while the chat is open. */
+html.chat-open .hero { z-index: 2147483000; }
+html.chat-open body > header { visibility: hidden; }
 .text-plow { display: inline-block; margin-top: 26px; border-radius: 980px; background: var(--ink); color: #fff; font: 500 18px/1 var(--text);
   letter-spacing: -.02em; padding: 18px 28px; text-decoration: none; }
 .text-plow:hover { background: #000; color: #fff; }
@@ -955,13 +968,54 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches) for (const belt of 
 <!-- kb-dock:end -->
 <script>
 (() => {
-  const frame = document.querySelector('#chat iframe');
+  const live = document.getElementById('chat'), phone = live.querySelector('.live-phone'), frame = live.querySelector('iframe');
   const slug = (new URLSearchParams(location.search).get('agent') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
   frame.src = location.pathname.replace(/\/?$/, '/') + 'chat' + (slug ? '?agent=' + slug : '');
+  const handheld = () => matchMedia('(max-width: 520px), (pointer: coarse) and (max-width: 900px)').matches;
+  const tell = (type) => { try { frame.contentWindow.postMessage({ type }, location.origin); } catch {} };
+
+  // The input must be on the first screen: the phone ends just above the fold (within sensible limits).
+  const fit = () => {
+    if (live.classList.contains('open')) return;
+    const top = phone.getBoundingClientRect().top + scrollY;
+    const room = innerHeight - top - (handheld() ? 12 : 24);
+    phone.style.setProperty('--chat-h', Math.round(Math.max(handheld() ? 420 : 560, Math.min(handheld() ? 640 : 760, room))) + 'px');
+  };
+  fit();
+  addEventListener('resize', fit);
+
+  // Full screen on a phone, over everything, kept above the keyboard (visualViewport); back or the chevron closes it.
+  const vv = window.visualViewport;
+  const follow = () => { if (!vv) return; live.style.setProperty('--vv-h', vv.height + 'px'); live.style.setProperty('--vv-top', vv.offsetTop + 'px'); };
+  const open = () => {
+    if (live.classList.contains('open') || !handheld()) return;
+    live.classList.add('open');
+    document.documentElement.classList.add('chat-open');
+    follow();
+    vv?.addEventListener('resize', follow); vv?.addEventListener('scroll', follow);
+    history.pushState({ chat: true }, '');
+    tell('plow-chat-open');
+  };
+  const close = (fromHistory) => {
+    if (!live.classList.contains('open')) return;
+    live.classList.remove('open');
+    document.documentElement.classList.remove('chat-open');
+    vv?.removeEventListener('resize', follow); vv?.removeEventListener('scroll', follow);
+    tell('plow-chat-closed');
+    if (!fromHistory && history.state?.chat) history.back();
+    fit();
+  };
+  addEventListener('popstate', () => close(true));
+  addEventListener('message', (e) => {
+    if (e.origin !== location.origin || e.source !== frame.contentWindow) return;
+    if (e.data?.type === 'plow-chat-focus') open();
+    if (e.data?.type === 'plow-chat-close') close(false);
+  });
   for (const a of document.querySelectorAll('[data-open]')) a.addEventListener('click', (e) => {
     e.preventDefault();
-    document.getElementById('chat').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(() => { try { frame.contentWindow.document.getElementById('t').focus({ preventScroll: true }); } catch {} }, 500);
+    if (handheld()) { open(); tell('plow-chat-type'); return; }
+    live.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => tell('plow-chat-type'), 450);
   });
 })();
 </script>
