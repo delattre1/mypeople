@@ -602,7 +602,7 @@ class CloudTest(unittest.TestCase):
 
             def api(method, path, body=None, token=None):
                 calls.append((method, path, body, token))
-                if path == "/v1/agents/cloud/me":
+                if path == "/v1/agents/me":
                     return 200, {"chats": [{"uid": "cht_c"}]}
                 return 200, {"data": [{"uid": "m1", "direction": "inbound",
                                        "body": "Set this up for me", "chat_uid": "cht_c"}]}
@@ -613,6 +613,23 @@ class CloudTest(unittest.TestCase):
             hellos = [c for c in calls if c[0] == "POST"]
             self.assertEqual(hellos, [("POST", "/v1/chats/cht_c/messages",
                                        {"body": pc.WELCOME}, "proxied")])
+
+
+    def test_cloud_agent_works_once_plow_drops_the_legacy_me_path(self):
+        """Plow keeps GET /v1/agents/cloud/me only until images move off it; the bridge reads /v1/agents/me."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pc = load("plow_chat_me", "plow-chat/plow-chat.py", {"PLOW_CHAT_STATE_DIR": tmp, "HOST_ID": "h"})
+
+            def api(method, path, body=None, token=None):
+                if path == "/v1/agents/me":
+                    return 200, {"chats": [{"uid": "cht_m"}], "mcp_url": "https://relay.example/mcp"}
+                return 404, {"detail": "Not Found"}
+            pc.api = api
+            creds = {"token": "t", "chat_uid": "", "cloud": True}
+            self.assertEqual(pc.list_chats(creds), ["cht_m"])
+            with mock.patch.dict(os.environ, {"HOME": tmp}):
+                self.assertEqual(pc.connect_latch(creds), "connected")
+            self.assertNotIn("/v1/agents/cloud/me", Path(PLUGINS, "plow-chat", "plow-chat.py").read_text())
 
 
 class LabBridgeTest(unittest.TestCase):

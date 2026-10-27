@@ -49,7 +49,7 @@ ln -sfn "$R/bin/claude" "$HOME/.local/bin/claude"
 # The owner's Mac, through Plow Latch: Plow hands this agent a relay URL (null when the owner has no
 # Latch) and its proxy adds the credential, so nothing here is a secret. Asked on every boot: the
 # owner can connect or remove a Mac at any time.
-LATCH_URL="$(curl -s -m 15 "$PLOW_API_BASE/v1/agents/cloud/me" -H "Authorization: Bearer $PLOW_AGENT_TOKEN" \
+LATCH_URL="$(curl -s -m 15 "$PLOW_API_BASE/v1/agents/me" -H "Authorization: Bearer $PLOW_AGENT_TOKEN" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin).get("mcp_url") or "")' 2>/dev/null)"
 beacon "latch $([ -n "$LATCH_URL" ] && echo connected || echo none)"
 python3 - "$R/claude-settings.json" "$R" "$LATCH_URL" <<'EOF'

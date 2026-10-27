@@ -52,7 +52,7 @@ def owner_chat():
     texted their new line (Plow's "your agent is ready" text tells them to), so wait for it."""
     while True:
         try:
-            chats = api("GET", "/v1/agents/cloud/me").get("chats") or []
+            chats = api("GET", "/v1/agents/me").get("chats") or []
             if chats:
                 return chats[0]["uid"]
         except OSError as e:

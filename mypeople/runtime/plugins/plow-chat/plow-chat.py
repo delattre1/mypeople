@@ -26,7 +26,7 @@ in the thread that asked.
 In a Plow cloud agent (PLOW_API_BASE set, no saved login) there is nothing to
 activate: the VM's own line is the chat, the token comes from the environment
 (or the "proxied" placeholder the exe.dev proxy swaps for the real one), and
-the chats come from GET /v1/agents/cloud/me.
+the chats come from GET /v1/agents/me.
 
 The bridge holds Plow's account websocket (POST /v1/ws/ticket, then /v1/ws): a frame
 says which chat changed and that chat is read at once. Every (re)connect, and every
@@ -208,7 +208,7 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
     # First, because an agent that only hears about reply/react told the owner "I can't create
     # threads" (10-15): it holds this line's login, and with it the whole API.
     able = (f"You hold this line's Plow login and with it the whole Plow API (docs: {BASE}/openapi.json). "
-            f"Any call: {RUN} api METHOD /v1/PATH ['JSON body']; e.g. {RUN} api GET /v1/agents/cloud/me "
+            f"Any call: {RUN} api METHOD /v1/PATH ['JSON body']; e.g. {RUN} api GET /v1/agents/me "
             f"(this line and its chats), or {RUN} api POST /v1/chats '{{\"line_uid\": \"ln_...\", "
             f"\"members\": [\"+1...\"], \"body\": \"first text\", \"idempotency_key\": \"any-unique-id\"}}' "
             f"to start a new thread or group. Do what the person asks with it; never answer that you "
@@ -615,7 +615,7 @@ def connect_latch(creds: dict) -> str:
     Mac that runs Latch has its own connector) and where Plow names none."""
     if not creds.get("cloud"):
         return "skip: not a line credential"
-    status, me = api("GET", "/v1/agents/cloud/me", token=creds["token"])
+    status, me = api("GET", "/v1/agents/me", token=creds["token"])
     url = (me or {}).get("mcp_url") if status < 400 else None
     if not url:
         return "skip: Plow names no Latch for this line"
@@ -699,8 +699,9 @@ def activation_loop() -> dict:
 
 def list_chats(creds: dict) -> list:
     if creds.get("cloud"):
-        # Live read every pass: a group the line joins later is a new chat.
-        status, data = api("GET", "/v1/agents/cloud/me", token=creds["token"])
+        # Live read every pass: a group the line joins later is a new chat. Not the legacy agents/cloud/me:
+        # Plow keeps that legacy path only until the images move off it (plow api/plow/main.py).
+        status, data = api("GET", "/v1/agents/me", token=creds["token"])
         if status >= 400:
             log(f"/me failed {status}: {json.dumps(data)[:160]}")
             return []

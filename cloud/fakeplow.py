@@ -3,7 +3,7 @@
 cloud/publish.sh runs it as the gate a release passes before the `myplow` pin moves to it.
 
 What the cloud MyPlow calls, and nothing more:
-  GET  /v1/agents/cloud/me                -> the one rig chat
+  GET  /v1/agents/me                      -> the one rig chat
   GET  /v1/chats/<uid>/messages           -> its messages (inbound the rig injected + agent replies)
   POST /v1/chats/<uid>/messages           -> an agent reply (recorded as outbound)
   GET  /v1/auth/index-identity            -> a fake assertion
@@ -64,7 +64,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = self.path.split("?")[0]
-        if p == "/v1/agents/cloud/me":
+        if p == "/v1/agents/me":
             return self.send(200, {"agent": {"uid": "agt_rig"}, "chats": [{"uid": CHAT}]})
         if p == f"/v1/chats/{CHAT}/messages" or p == "/rig/messages":
             with LOCK:
