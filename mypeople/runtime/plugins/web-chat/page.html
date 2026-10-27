@@ -1,113 +1,204 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>Plow</title>
 <style>
-:root{--blue:#0A84FF;--gray:#E9E9EB;--muted:#8a8a8e;--ios:-apple-system,"SF Pro Text",BlinkMacSystemFont,system-ui,sans-serif}
-*{box-sizing:border-box}[hidden]{display:none!important}
-html,body{height:100%;margin:0}
-body{background:#F5F5F7;font-family:var(--ios);display:grid;place-items:center;-webkit-font-smoothing:antialiased}
-.phone{height:min(800px,calc(100dvh - 40px));aspect-ratio:340/700;border-radius:52px;background:#1c1c1e;padding:10px;position:relative;
-  box-shadow:0 0 0 1.5px #3a3a3c inset,0 50px 90px -50px rgba(0,0,0,.45)}
-.screen{height:100%;border-radius:42px;background:#fff;overflow:hidden;display:flex;flex-direction:column;position:relative}
-.screen::before{content:"";position:absolute;inset:0 0 auto;height:160px;background:linear-gradient(180deg,#EEEEF2 0%,rgba(255,255,255,0) 100%);pointer-events:none}
-.island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:90px;height:27px;border-radius:20px;background:#000;z-index:2}
-.status{display:flex;justify-content:space-between;align-items:center;padding:14px 24px 0 30px;height:50px;font:600 15px/1 var(--ios);letter-spacing:-.01em;position:relative}
-.status svg{height:11px;width:auto}.status .icons{display:flex;gap:5px;align-items:center}
-.glass{background:rgba(255,255,255,.8);-webkit-backdrop-filter:blur(16px) saturate(1.8);backdrop-filter:blur(16px) saturate(1.8);
-  box-shadow:0 0 0 .5px rgba(0,0,0,.07),0 6px 16px -8px rgba(0,0,0,.2),inset 0 1px 1px rgba(255,255,255,.95)}
-.chat-head{display:grid;grid-template-columns:38px minmax(0,1fr) 38px;align-items:start;padding:2px 12px 4px;position:relative}
-.round{width:38px;height:38px;margin-top:6px;border-radius:50%;display:grid;place-items:center;color:#111}
-.round svg{width:19px;height:19px}.round .back{width:10px;height:17px;margin-right:2px}
-.contact{display:grid;justify-items:center}.contact img{width:50px;height:50px;border-radius:50%}
-.pill{margin-top:-7px;display:flex;align-items:center;gap:4px;padding:7px 11px 7px 13px;border-radius:999px;font:600 14px/1 var(--ios);letter-spacing:-.01em;color:#111}
-.pill svg{width:6px;height:10px;color:#8a8a8e}
-.thread{flex:1;overflow-y:auto;padding:6px 14px 12px;display:flex;flex-direction:column;gap:3px;position:relative;overscroll-behavior:contain}
-.enc{align-self:center;text-align:center;font:400 11px/1.4 var(--ios);color:var(--muted);margin:0 0 2px}
-.stamp{align-self:center;font:500 11px/1 var(--ios);color:var(--muted);margin:6px 0 8px}.stamp b{font-weight:600}
-.hint{align-self:center;text-align:center;max-width:80%;font:400 13px/1.4 var(--ios);color:var(--muted);margin:auto 0}
-.b{max-width:78%;padding:7px 12px;border-radius:18px;font:400 15px/1.34 var(--ios);letter-spacing:-.01em;position:relative;white-space:pre-wrap;overflow-wrap:anywhere}
-.b.me{align-self:flex-end;background:var(--blue);color:#fff}.b.them{align-self:flex-start;background:var(--gray);color:#000}
-.b.me+.b.them,.b.them+.b.me,.read+.b,.card+.b{margin-top:8px}
+/* iMessage on iOS 26, measured from Daniel's own thread with Willow (IMG_7426, iPhone, dark): glass header and composer
+   floating over the thread, 17pt bubbles, the 👀 tapback on the corner, Delivered under it. Light or dark follows the
+   phone, as Messages does. */
+:root{--bg:#fff;--them:#E9E9EB;--them-fg:#000;--me:#0A84FF;--muted:#8A8A8E;--icon:#111;--glass:rgba(250,250,252,.72);
+  --glass-line:rgba(0,0,0,.08);--glass-hi:rgba(255,255,255,.9);--veil:rgba(255,255,255,.35);--chip:#E5E5EA;--chip-fg:#000;
+  --ios:-apple-system,"SF Pro Text",BlinkMacSystemFont,system-ui,sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#000;--them:#262628;--them-fg:#fff;--me:#0A84FF;--muted:#8E8E93;--icon:#fff;
+  --glass:rgba(38,38,40,.66);--glass-line:rgba(255,255,255,.12);--glass-hi:rgba(255,255,255,.16);--veil:rgba(0,0,0,.4);--chip:#EBEBF0;--chip-fg:#000}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:var(--bg)}
+body{font-family:var(--ios);-webkit-font-smoothing:antialiased;color:var(--them-fg);overflow:hidden}
+.screen{position:relative;height:100%;background:var(--bg);overflow:hidden}
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(22px) saturate(1.8);backdrop-filter:blur(22px) saturate(1.8);
+  box-shadow:inset 0 .5px 0 var(--glass-hi),0 0 0 .5px var(--glass-line),0 8px 24px -14px rgba(0,0,0,.35)}
+
+/* The phone's own status bar, only when the page draws a phone around the chat (desktop). */
+.status{display:none;position:absolute;z-index:6;inset:0 0 auto;height:54px;padding:18px 30px 0 34px;justify-content:space-between;
+  align-items:center;font:600 17px/1 var(--ios);letter-spacing:-.02em;color:var(--icon);pointer-events:none}
+.status svg{height:12px;width:auto;fill:currentColor}.status .icons{display:flex;gap:6px;align-items:center}
+.framed .status{display:flex}
+
+/* Scroll edges: the thread fades and blurs under the header and the composer, as on iOS 26. */
+.edge{position:absolute;z-index:4;left:0;right:0;pointer-events:none;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.edge.top{top:0;height:calc(var(--head) + 26px);background:linear-gradient(var(--bg) 0%,color-mix(in srgb,var(--bg) 70%,transparent) 45%,transparent);
+  -webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent)}
+.edge.bottom{bottom:0;height:96px;background:linear-gradient(transparent,color-mix(in srgb,var(--bg) 80%,transparent) 60%,var(--bg));
+  -webkit-mask-image:linear-gradient(transparent,#000 45%);mask-image:linear-gradient(transparent,#000 45%)}
+
+/* Header: back, the contact (round avatar over a name pill), video. */
+.head{--top:6px;position:absolute;z-index:5;inset:0 0 auto;padding:var(--top) 16px 0;display:grid;grid-template-columns:44px 1fr 44px;align-items:start;pointer-events:none}
+.framed .head{--top:60px}
+.circle{pointer-events:auto;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:var(--icon);border:0;padding:0;font:inherit}
+.circle svg{fill:none;stroke:currentColor}
+.back svg{width:12px;height:21px;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;margin-right:2px}
+.video svg{width:27px;height:18px;stroke-width:1.9;stroke-linejoin:round}
+button.back{cursor:pointer}button.back:focus-visible{outline:2px solid var(--me);outline-offset:2px}
+.who{display:grid;justify-items:center;pointer-events:auto}
+.who img{width:60px;height:60px;border-radius:50%;display:block}
+.name{margin-top:-6px;display:flex;align-items:center;gap:5px;height:26px;padding:0 9px 0 12px;border-radius:13px;
+  font:600 17px/1 var(--ios);letter-spacing:-.02em;color:var(--icon)}
+.name svg{width:6px;height:11px;stroke:var(--muted);stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+
+/* The thread scrolls under both bars. */
+.thread{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;padding:calc(var(--head) + 12px) 16px 92px;
+  display:flex;flex-direction:column;gap:3px;--head:126px}
+.framed .thread{--head:180px}
+.framed .edge.top{--head:180px}.edge.top{--head:126px}
+.stamp{align-self:center;font:500 13px/1 var(--ios);color:var(--muted);margin:8px 0 10px;letter-spacing:-.01em}
+.b{position:relative;max-width:min(271px,74%);padding:9px 14px 10px;border-radius:19px;font:400 17px/21px var(--ios);
+  letter-spacing:-.02em;white-space:pre-wrap;overflow-wrap:anywhere;touch-action:manipulation;-webkit-user-select:none;user-select:none;
+  -webkit-touch-callout:none;cursor:default}
+.b.me{align-self:flex-end;background:var(--me);color:#fff}.b.them{align-self:flex-start;background:var(--them);color:var(--them-fg)}
+.b.me+.b.them,.b.them+.b.me,.read+.b,.card+.b,.typing+.b,.b+.typing{margin-top:10px}
+.thread .b.b.has-tb{margin-top:36px} /* beats the 10px side-switch gap: the badge needs the room, as in his shot */
 .b a{color:inherit}
-.b.tail::before{content:"";position:absolute;bottom:0;height:18px;width:18px}.b.tail::after{content:"";position:absolute;bottom:0;width:10px;height:18px;background:#fff}
-.b.tail.me::before{right:-6px;background:var(--blue);border-bottom-left-radius:14px 12px}.b.tail.me::after{right:-10px;border-bottom-left-radius:10px}
-.b.tail.them::before{left:-6px;background:var(--gray);border-bottom-right-radius:14px 12px}.b.tail.them::after{left:-10px;border-bottom-right-radius:10px}
-.read{align-self:flex-end;font:500 11px/1 var(--ios);color:var(--muted);margin:3px 4px 0 0}
-.read.failed{color:#d70015;cursor:pointer}.b.pending{opacity:.6}
-.b,.card,.typing{animation:pop .3s cubic-bezier(.2,.9,.3,1.2) both}@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){.b,.card,.typing{animation:none}}
-.round.close{cursor:pointer;border:0;padding:0;font:inherit}.round.close:focus-visible{outline:2px solid #111;outline-offset:2px}
-.chat-head .ghost{visibility:hidden}
-.typing{align-self:flex-start;background:var(--gray);border-radius:18px;padding:11px 13px;display:flex;gap:4px;margin-top:8px}
-.typing i{width:8px;height:8px;border-radius:50%;background:#8e8e93;animation:blink 1.2s infinite}.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+.b.tail::before{content:"";position:absolute;bottom:0;height:20px;width:20px}.b.tail::after{content:"";position:absolute;bottom:0;width:10px;height:20px;background:var(--bg)}
+.b.tail.me::before{right:-7px;background:var(--me);border-bottom-left-radius:16px 14px}.b.tail.me::after{right:-10px;border-bottom-left-radius:10px}
+.b.tail.them::before{left:-7px;background:var(--them);border-bottom-right-radius:16px 14px}.b.tail.them::after{left:-10px;border-bottom-right-radius:10px}
+.b.pending{opacity:.6}
+.read{align-self:flex-end;font:600 12.5px/1 var(--ios);color:var(--muted);margin:5px 20px 0 0;letter-spacing:-.01em}
+.read.failed{color:#FF453A;cursor:pointer}
+
+/* Tapbacks: a round badge on the bubble's top corner with two little dots, as in his 👀. Theirs on yours: their gray, top-left.
+   Yours on theirs: your blue, top-right. A ring in the background color cuts it out of the bubble. */
+.tb{position:absolute;top:-27px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:19px;line-height:1;
+  box-shadow:0 0 0 2.5px var(--bg);pointer-events:none;animation:tb .35s cubic-bezier(.2,1.4,.4,1) both}
+.tb::before,.tb::after{content:"";position:absolute;border-radius:50%;background:inherit;box-shadow:0 0 0 2px var(--bg)}
+.tb::before{width:10px;height:10px;top:27px}.tb::after{width:5px;height:5px;top:37px}
+.me>.tb{left:-14px;background:var(--them)}.me>.tb::before{left:2px}.me>.tb::after{left:-4px}
+.them>.tb{right:-14px;background:var(--me)}.them>.tb::before{right:2px}.them>.tb::after{right:-4px}
+@keyframes tb{from{transform:scale(.3);opacity:0}to{transform:none;opacity:1}}
+
+.typing{align-self:flex-start;background:var(--them);border-radius:19px;padding:12px 14px;display:flex;gap:5px}
+.typing i{width:8px;height:8px;border-radius:50%;background:var(--muted);animation:blink 1.2s infinite}.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
 @keyframes blink{0%,60%,100%{opacity:.35}30%{opacity:1}}
-.card{align-self:flex-start;display:flex;align-items:center;gap:10px;background:var(--gray);border-radius:18px;padding:9px 14px 9px 9px;margin-top:3px;
-  font:600 15px/1.2 var(--ios);color:#000;text-decoration:none}
+.card{align-self:flex-start;display:flex;align-items:center;gap:10px;background:var(--them);border-radius:19px;padding:9px 14px 9px 9px;margin-top:3px;
+  font:600 16px/1.2 var(--ios);color:var(--them-fg);text-decoration:none}
 .card .wa{width:38px;height:38px;border-radius:50%;background:#25D366;display:grid;place-items:center}.card .wa svg{width:22px;height:22px}
-.card small{display:block;font:400 12.5px/1.3 var(--ios);color:#6c6c70}.card .chev{width:8px;height:13px;margin-left:6px;color:#9a9aa0}
-.err{margin:0 16px 4px;font:400 12px/1.3 var(--ios);color:#d70015;text-align:center}
-.composer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px 30px;position:relative}
-.plus{flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;color:#111;font:300 24px/1 var(--ios)}
-.field{flex:1;min-width:0;min-height:36px;border-radius:18px;display:flex;align-items:flex-end;padding:0 3px 0 14px}
-.field textarea{flex:1;min-width:0;border:0;background:transparent;font:400 16px/20px var(--ios);color:#000;outline:none;resize:none;padding:8px 0;height:36px;max-height:100px;overflow-y:auto}
-.field textarea::placeholder{color:#a0a0a5}
-.csend{flex:none;width:30px;height:30px;margin:3px 0;border:0;border-radius:50%;background:var(--blue);color:#fff;display:grid;place-items:center;cursor:pointer;transform:scale(0);transition:transform .16s}
-.csend svg{width:14px;height:14px}.composer.has .csend{transform:none}.csend:focus-visible{outline:2px solid #111;outline-offset:2px}
-@media (max-width:520px){body{display:block;background:#fff}.phone{height:100dvh;width:100%;aspect-ratio:auto;border-radius:0;padding:0;box-shadow:none;background:#fff}
-  .screen{border-radius:0}.island,.status{display:none}.chat-head{padding-top:max(8px,env(safe-area-inset-top))}.composer{padding-bottom:max(12px,env(safe-area-inset-bottom))}}
+.card small{display:block;font:400 13px/1.3 var(--ios);color:var(--muted)}.card .chev{width:8px;height:13px;margin-left:6px;color:var(--muted)}
+.b,.card,.typing{animation:pop .3s cubic-bezier(.2,.9,.3,1.2) both}@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.96)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.b,.card,.typing,.tb,.picker{animation:none}}
+
+/* Composer: + and the field, floating glass; the mic shows while it is empty, the blue arrow once there is text. */
+.composer{position:absolute;z-index:5;left:0;right:0;bottom:max(8px,env(safe-area-inset-bottom));display:flex;align-items:flex-end;gap:14px;padding:0 28px}
+.framed .composer{bottom:30px;padding:0 24px}
+.plus{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:var(--icon)}
+.plus svg{width:17px;height:17px;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.field{flex:1;min-width:0;min-height:38px;border-radius:19px;display:flex;align-items:flex-end;padding:0 4px 0 15px}
+.field textarea{flex:1;min-width:0;border:0;background:transparent;font:400 17px/21px var(--ios);letter-spacing:-.02em;color:var(--them-fg);outline:none;resize:none;
+  padding:8.5px 0;height:38px;max-height:110px;overflow-y:auto;-webkit-user-select:text;user-select:text}
+.field textarea::placeholder{color:var(--muted)}
+.mic{flex:none;width:30px;height:30px;margin:4px 2px;display:grid;place-items:center;color:var(--muted)}
+.mic svg{width:15px;height:21px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+.csend{flex:none;width:30px;height:30px;margin:4px 0;border:0;border-radius:50%;background:var(--me);color:#fff;display:none;place-items:center;cursor:pointer}
+.csend svg{width:14px;height:14px}.composer.has .csend{display:grid}.composer.has .mic{display:none}
+.csend:focus-visible{outline:2px solid var(--me);outline-offset:2px}
+.err{position:absolute;z-index:5;left:16px;right:16px;bottom:58px;margin:0;font:400 12px/1.3 var(--ios);color:#FF453A;text-align:center}
+
+/* Tapback picker: hold or double-tap a bubble. The rest of the chat dims under a blur; the six sit in a glass capsule. */
+.veil{position:absolute;z-index:20;inset:0;background:var(--veil);-webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);animation:fade .18s both}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.b.lifted{z-index:21}
+.picker{position:absolute;z-index:22;display:flex;gap:2px;padding:5px;border-radius:26px;animation:pick .28s cubic-bezier(.2,1.3,.4,1) both;transform-origin:var(--ox,50%) 100%}
+@keyframes pick{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
+.picker button{width:42px;height:42px;border:0;border-radius:50%;background:transparent;font-size:23px;line-height:1;display:grid;place-items:center;cursor:pointer;padding:0}
+.picker button[aria-pressed=true]{background:var(--me)}
+.picker button:focus-visible{outline:2px solid var(--me);outline-offset:1px}
 </style></head>
 <body>
-<div class="phone"><div class="screen">
-<div class="island" aria-hidden="true"></div>
+<div class="screen" id="screen">
 <div class="status" aria-hidden="true"><span id="clock">9:41</span><span class="icons">
-<svg viewBox="0 0 18 11" fill="currentColor"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="6" rx="1"/><rect x="10" y="2.5" width="3" height="8.5" rx="1"/><rect x="15" y="0" width="3" height="11" rx="1"/></svg>
-<svg viewBox="0 0 16 11" fill="currentColor"><path d="M8 2.2c2.3 0 4.4.9 6 2.4l1.1-1.1A10 10 0 0 0 8 .6 10 10 0 0 0 .9 3.5L2 4.6a8.5 8.5 0 0 1 6-2.4Zm0 3.2c1.4 0 2.7.5 3.7 1.4l1.1-1.1A7 7 0 0 0 8 3.8a7 7 0 0 0-4.8 1.9l1.1 1.1A5.4 5.4 0 0 1 8 5.4Zm0 3.2c.6 0 1.1.2 1.5.6L8 10.7 6.5 9.2c.4-.4.9-.6 1.5-.6Z"/></svg>
-<svg viewBox="0 0 27 12" fill="currentColor"><rect x=".5" y=".5" width="22" height="11" rx="3.2" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="19" height="8" rx="2"/><path d="M24 4v4c.8-.3 1.4-1.1 1.4-2S24.8 4.3 24 4Z" opacity=".45"/></svg>
+<svg viewBox="0 0 18 11"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="6" rx="1"/><rect x="10" y="2.5" width="3" height="8.5" rx="1"/><rect x="15" y="0" width="3" height="11" rx="1"/></svg>
+<svg viewBox="0 0 16 11"><path d="M8 2.2c2.3 0 4.4.9 6 2.4l1.1-1.1A10 10 0 0 0 8 .6 10 10 0 0 0 .9 3.5L2 4.6a8.5 8.5 0 0 1 6-2.4Zm0 3.2c1.4 0 2.7.5 3.7 1.4l1.1-1.1A7 7 0 0 0 8 3.8a7 7 0 0 0-4.8 1.9l1.1 1.1A5.4 5.4 0 0 1 8 5.4Zm0 3.2c.6 0 1.1.2 1.5.6L8 10.7 6.5 9.2c.4-.4.9-.6 1.5-.6Z"/></svg>
+<svg viewBox="0 0 27 12"><rect x=".5" y=".5" width="22" height="11" rx="3.2" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="19" height="8" rx="2"/><path d="M24 4v4c.8-.3 1.4-1.1 1.4-2S24.8 4.3 24 4Z" opacity=".45"/></svg>
 </span></div>
-<div class="chat-head">
-<button class="round glass close ghost" id="close" type="button" aria-label="Close the chat"><svg class="back" aria-hidden="true" viewBox="0 0 11 19" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 1.5 1.8 9.5l7.7 8"/></svg></button>
-<span class="contact"><img src="data:image/webp;base64,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" alt=""><span class="pill glass">Plow <svg viewBox="0 0 7 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m1.5 1.5 4 4.5-4 4.5"/></svg></span></span>
-<span class="round ghost" aria-hidden="true"></span>
-</div>
 <div class="thread" id="log" role="log" aria-live="polite" aria-label="Conversation with Plow">
-<div class="enc">Plow<br>on the web</div>
-<div class="stamp"><b>Today</b> <span id="today"></span></div>
+<div class="stamp" id="today"></div>
 <div class="typing" id="typing" hidden aria-label="Plow is typing"><i></i><i></i><i></i></div>
 </div>
+<div class="edge top" aria-hidden="true"></div><div class="edge bottom" aria-hidden="true"></div>
+<div class="head">
+<button class="circle glass back" id="close" type="button" aria-label="Close the chat" tabindex="-1"><svg viewBox="0 0 12 21" aria-hidden="true"><path d="M10.5 1.5 2 10.5l8.5 9"/></svg></button>
+<div class="who"><img src="data:image/webp;base64,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" alt=""><div class="name glass">Plow<svg viewBox="0 0 6 11" aria-hidden="true"><path d="m1 1 4 4.5L1 10"/></svg></div></div>
+<span class="circle glass video" aria-hidden="true"><svg viewBox="0 0 27 18"><rect x="1" y="1.5" width="17" height="15" rx="4"/><path d="M18.5 7.2 25.5 3v12l-7-4.2"/></svg></span>
+</div>
 <p class="err" id="err" role="alert"></p>
-<form class="composer" id="f"><span class="plus glass" aria-hidden="true">+</span>
+<form class="composer" id="f"><span class="plus glass" aria-hidden="true"><svg viewBox="0 0 17 17"><path d="M8.5 1.5v14M1.5 8.5h14"/></svg></span>
 <span class="field glass"><textarea id="t" rows="1" aria-label="Message to Plow" placeholder="iMessage" autocomplete="off" maxlength="2000" enterkeyhint="send"></textarea>
+<span class="mic" aria-hidden="true"><svg viewBox="0 0 15 21"><rect x="4.2" y="1" width="6.6" height="12" rx="3.3"/><path d="M1.2 9.5a6.3 6.3 0 0 0 12.6 0M7.5 15.8V20"/></svg></span>
 <button class="csend" id="b" aria-label="Send"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button></span>
 </form>
-</div></div>
+</div>
 <script>
 const API = location.pathname.replace(/\/(chat\/?)?$/, '');
 const KEY = 'plow-web-token';
-const slug = (new URLSearchParams(location.search).get('agent') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40) || null;
+const params = new URLSearchParams(location.search);
+const slug = (params.get('agent') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40) || null;
 const $ = (id) => document.getElementById(id);
-const log = $('log'), typing = $('typing'), err = $('err'), input = $('t'), form = $('f');
-const seen = new Map(); // message id -> its bubble
+const screen = $('screen'), log = $('log'), typing = $('typing'), err = $('err'), input = $('t'), form = $('f');
+if (params.get('frame') === '1') screen.classList.add('framed'); // the page draws a phone around us: show its status bar
+const seen = new Map();    // message id -> its bubble
 const pending = new Map(); // text -> your bubble already on screen, until the relay gives it an id (its echo can come first)
-let token = null, events = null, statusEl = null, waitTimer = null, mine = false, sending = false;
+let token = null, events = null, statusEl = null, waitTimer = null, mine = false, sending = false, opened = false;
 try { token = localStorage.getItem(KEY); } catch {}
 const auth = () => (token ? { authorization: 'Bearer ' + token } : {});
 const time = (d) => new Date(d).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const tick = () => { $('clock').textContent = time(Date.now()).replace(/\s?[AP]M$/i, ''); };
-$('today').textContent = time(Date.now()); tick(); setInterval(tick, 30000);
+$('today').textContent = 'Today, ' + time(Date.now()); tick(); setInterval(tick, 30000);
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const up = (msg) => { try { parent.postMessage(msg, location.origin); } catch {} }; // the landing page around this chat
+const TAPBACKS = ['❤️', '👍', '👎', '😂', '‼️', '❓'];
 const IM = '<span class="wa" style="background:#34C759"><svg viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M12 3C6.5 3 2 6.6 2 11.1c0 2.6 1.5 4.9 3.8 6.4-.2 1.3-.9 2.6-2 3.5 2.2 0 4.1-.8 5.4-2 .9.2 1.8.3 2.8.3 5.5 0 10-3.6 10-8.1S17.5 3 12 3Z"/></svg></span>';
 const WA = '<span class="wa"><svg viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.3-.7-2.8-1.1-4.6-4-4.7-4.2-.1-.2-1.1-1.5-1.1-2.9s.7-2.1 1-2.4c.3-.3.6-.3.8-.3h.6c.2 0 .4 0 .6.5l.9 2.1c.1.2.1.4 0 .5l-.4.6-.4.5c-.1.1-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.2.5.1.6-.1l.9-1c.2-.3.4-.2.6-.1l2 .9c.3.1.5.2.5.3.1.2.1.7-.1 1.3Z"/></svg></span>';
 
-// What the composer types while it waits: Daniel's own asks from agents-one-text, the page's own ask first.
-const ASKS = {
-  'restaurant-support': "Answer my restaurant's customer messages: hours, menu and reservations.",
-};
-const ideas = [...(ASKS[slug] ? [ASKS[slug]] : []),
-  'Text me the top Hacker News stories every morning at 8.',
-  'Match my receipts to my card charges and text me when one is missing.',
-  'Text me before it rains when I usually bike home.',
-  'Every Sunday night, text me a grocery list for the week.'];
+// --- Sounds: our own, made here in the image of Messages' (Apple's files are Apple's): sent swells up a glide, received
+// glides down, each tapback plucks its own little figure. Silent until the visitor's first tap, as browsers require.
+const NOTES = { '❤️': [882, 1313, 1765], '👍': [882, 1765], '👎': [1313, 882], '😂': [1399, 1184], '‼️': [882, 882], '❓': [753, 904, 1033] };
+function voice(ctx, out, t0, kind) {
+  const env = (g, t, peak, rise, fall) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + rise); g.gain.exponentialRampToValueAtTime(0.0001, t + rise + fall); };
+  const tone = (f0, f1, t, dur, peak, rise) => {
+    const o = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain(), g2 = ctx.createGain();
+    o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur * 0.8);
+    o2.frequency.setValueAtTime(f0 * 2, t); o2.frequency.exponentialRampToValueAtTime(f1 * 2, t + dur * 0.8);
+    g2.gain.value = 0.18; env(g, t, peak, rise, dur - rise);
+    o.connect(g); o2.connect(g2).connect(g); g.connect(out);
+    o.start(t); o2.start(t); o.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
+  };
+  const air = (f0, f1, t, dur, peak) => { // the airy brightness at the start
+    const n = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate), d = n.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const s = ctx.createBufferSource(), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+    s.buffer = n; bp.type = 'bandpass'; bp.Q.value = 0.9; bp.frequency.setValueAtTime(f0, t); bp.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    env(g, t, peak, dur * 0.35, dur * 0.65); s.connect(bp).connect(g).connect(out); s.start(t); s.stop(t + dur);
+  };
+  if (kind === 'sent') { tone(344, 455, t0 + 0.02, 0.36, 0.42, 0.18); air(1600, 650, t0, 0.2, 0.05); }
+  else if (kind === 'received') { tone(390, 280, t0, 0.42, 0.38, 0.16); air(1200, 400, t0, 0.18, 0.04); }
+  else (NOTES[kind] || []).forEach((f, i) => tone(f, f, t0 + i * 0.08, 0.16, 0.22, 0.005));
+}
+const sfx = (() => {
+  let ctx = null, unlocked = false;
+  const unlock = () => {
+    unlocked = true;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = ctx || new AC();
+    if (ctx.state === 'suspended') ctx.resume();
+  };
+  for (const ev of ['pointerdown', 'keydown', 'touchend']) addEventListener(ev, unlock, { capture: true, passive: true });
+  window.__sfx = { events: [], voice };  // the proof recording renders these same voices at the same moments
+  return (kind) => {
+    window.__sfx.events.push({ kind, at: Date.now() });
+    if (!unlocked || !ctx) return;
+    const out = ctx.createGain(); out.gain.value = 0.9; out.connect(ctx.destination);
+    voice(ctx, out, ctx.currentTime + 0.01, kind);
+  };
+})();
 
 function linkify(node, text) {
   const cards = [];
@@ -130,12 +221,20 @@ function card(url) {
     + '<svg class="chev" viewBox="0 0 8 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m1.5 1.5 5 5-5 5"/></svg>';
   return a;
 }
-// One status line under your latest message, as in Messages: Delivered, then Read when Plow has seen it (its 👀).
+// One status line under your latest message, as in Messages.
 function status(bubble, text, failed = false) {
   statusEl = statusEl || Object.assign(document.createElement('div'), { className: 'read' });
   statusEl.textContent = text;
   statusEl.classList.toggle('failed', failed);
   bubble.after(statusEl);
+}
+// The tapback on a bubble: on yours, the agent's (its 👀 too); on the agent's, yours.
+function badge(b, emoji) {
+  b.querySelector(':scope > .tb')?.remove();
+  b.classList.toggle('has-tb', !!emoji);
+  if (!emoji) return;
+  const t = document.createElement('span'); t.className = 'tb'; t.textContent = emoji; t.setAttribute('aria-label', 'Tapback ' + emoji);
+  b.append(t);
 }
 function bubble(text, isMine) {
   const b = document.createElement('div'); b.className = 'b tail ' + (isMine ? 'me' : 'them');
@@ -154,17 +253,21 @@ function waiting(on) {
   scroll();
 }
 const scroll = () => log.scrollTo({ top: log.scrollHeight, behavior: still ? 'auto' : 'smooth' });
-function render(m) {
+function render(m, live = false) {
   if (m.mine && !seen.has(m.id) && pending.has(m.text)) { seen.set(m.id, pending.get(m.text)); pending.delete(m.text); }
-  if (seen.has(m.id)) { if (m.mine && m.reactions.length) status(seen.get(m.id), 'Read ' + time(Date.now())); return; }
-  const b = bubble(m.text, m.mine);
-  for (const f of m.files) {
-    const a = document.createElement('a'); a.href = f.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = (b.textContent ? '\n' : '') + '📎 ' + f.name;
-    b.append(a);
+  let b = seen.get(m.id);
+  if (!b) {
+    b = bubble(m.text, m.mine);
+    b.dataset.id = m.id;
+    for (const f of m.files) {
+      const a = document.createElement('a'); a.href = f.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = (b.textContent ? '\n' : '') + '📎 ' + f.name;
+      b.append(a);
+    }
+    seen.set(m.id, b);
+    if (m.mine) status(b, 'Delivered');
+    else { waiting(false); if (live) sfx('received'); }
   }
-  seen.set(m.id, b);
-  if (m.mine) status(b, m.reactions.length ? 'Read ' + time(m.created_at) : 'Delivered');
-  else waiting(false);
+  badge(b, m.mine ? m.reactions[0] : m.tapback);
   scroll();
 }
 async function refill() {
@@ -172,19 +275,84 @@ async function refill() {
   if (r.status === 401) { token = null; try { localStorage.removeItem(KEY); } catch {} return; }
   if (!r.ok) return;
   const msgs = (await r.json()).messages;
-  msgs.forEach(render);
+  msgs.forEach((m) => render(m));
   if (msgs.length) { stopIdeas(); if (msgs.at(-1).mine) waiting(true); } // back mid-conversation: Plow still owes an answer
 }
 function listen() {
   events?.close();
   events = new EventSource(API + '/events?token=' + encodeURIComponent(token));
-  events.addEventListener('message', (e) => render(JSON.parse(e.data)));
+  events.addEventListener('message', (e) => render(JSON.parse(e.data), true));
   events.addEventListener('typing', (e) => waiting(JSON.parse(e.data).on));
-  events.addEventListener('reaction', (e) => { const d = JSON.parse(e.data); if (seen.has(d.message_id) && d.emoji) status(seen.get(d.message_id), 'Read ' + time(Date.now())); });
+  events.addEventListener('reaction', (e) => { const d = JSON.parse(e.data); const b = seen.get(d.message_id); if (b?.classList.contains('me')) badge(b, d.emoji); });
+  events.addEventListener('tapback', (e) => { const d = JSON.parse(e.data); const b = seen.get(d.message_id); if (b?.classList.contains('them')) badge(b, d.emoji); });
   events.onopen = refill; // after a drop, catch up on what came meanwhile
 }
 
-// The composer types an ask, deletes it and types the next, until you tap it (then it's yours) or send what it shows.
+// --- Tapbacks from you: hold or double-tap a bubble of the agent's, pick one of the six; the same one again takes it back.
+let pick = null;
+function closePicker() {
+  if (!pick) return;
+  pick.veil.remove(); pick.bar.remove(); pick.b.classList.remove('lifted');
+  pick = null;
+}
+function openPicker(b) {
+  if (pick || !b.dataset.id || !token || !b.classList.contains('them')) return;
+  navigator.vibrate?.(8);
+  const veil = Object.assign(document.createElement('div'), { className: 'veil' });
+  const bar = Object.assign(document.createElement('div'), { className: 'picker glass', role: 'menu' });
+  bar.setAttribute('aria-label', 'Tapback');
+  const current = b.querySelector(':scope > .tb')?.textContent || '';
+  for (const e of TAPBACKS) {
+    const btn = Object.assign(document.createElement('button'), { type: 'button', textContent: e });
+    btn.setAttribute('role', 'menuitemradio'); btn.setAttribute('aria-pressed', String(e === current)); btn.setAttribute('aria-label', 'Tapback ' + e);
+    btn.addEventListener('click', () => react(b, e === current ? '' : e));
+    bar.append(btn);
+  }
+  veil.addEventListener('click', closePicker);
+  screen.append(veil, bar);
+  b.classList.add('lifted');
+  const s = screen.getBoundingClientRect(), r = b.getBoundingClientRect(), w = bar.offsetWidth, h = bar.offsetHeight;
+  const left = Math.max(10, Math.min(r.left - s.left - 4, s.width - w - 10));
+  const top = r.top - s.top - h - 14 > 70 ? r.top - s.top - h - 14 : r.bottom - s.top + 12;
+  Object.assign(bar.style, { left: left + 'px', top: top + 'px' });
+  bar.style.setProperty('--ox', (r.left - s.left - left + 30) + 'px');
+  pick = { veil, bar, b };
+  bar.querySelector('button').focus({ preventScroll: true });
+}
+async function react(b, emoji) {
+  closePicker();
+  badge(b, emoji);
+  if (emoji) sfx(emoji);
+  try {
+    const r = await fetch(API + '/react', { method: 'POST', headers: { 'content-type': 'application/json', ...auth() }, body: JSON.stringify({ message: b.dataset.id, emoji }) });
+    if (!r.ok) throw new Error();
+  } catch { badge(b, ''); err.textContent = 'Tapback not sent. Try again.'; }
+}
+let pressTimer = null, lastTap = { b: null, at: 0 };
+log.addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('.b.them');
+  if (!b || e.target.closest('a')) return;
+  clearTimeout(pressTimer);
+  pressTimer = setTimeout(() => openPicker(b), 420);
+});
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) log.addEventListener(ev, () => clearTimeout(pressTimer));
+log.addEventListener('scroll', () => clearTimeout(pressTimer), { passive: true });
+log.addEventListener('click', (e) => {
+  const b = e.target.closest('.b.them');
+  if (!b || e.target.closest('a')) return;
+  const now = Date.now();
+  if (lastTap.b === b && now - lastTap.at < 320) { lastTap = { b: null, at: 0 }; openPicker(b); } else lastTap = { b, at: now };
+});
+log.addEventListener('contextmenu', (e) => { if (e.target.closest('.b')) e.preventDefault(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape') closePicker(); });
+
+// --- The composer types an ask, deletes it and types the next, until you tap it (then it's yours) or send what it shows.
+const ASKS = { 'restaurant-support': "Answer my restaurant's customer messages: hours, menu and reservations." };
+const ideas = [...(ASKS[slug] ? [ASKS[slug]] : []),
+  'Text me the top Hacker News stories every morning at 8.',
+  'Match my receipts to my card charges and text me when one is missing.',
+  'Text me before it rains when I usually bike home.',
+  'Every Sunday night, text me a grocery list for the week.'];
 let ideaRun = 0, shown = ''; // shown: the whole ask the composer is typing (send sends all of it, not the half typed)
 function stopIdeas() { ideaRun++; mine = true; shown = ''; }
 async function playIdeas() {
@@ -201,8 +369,8 @@ async function playIdeas() {
     await wait(400);
   }
 }
-// The field grows with what it holds, up to 100px, like Messages; return sends (shift+return is a new line).
-function fit() { input.style.height = '36px'; input.style.height = Math.min(input.scrollHeight, 100) + 'px'; form.classList.toggle('has', !!input.value.trim()); }
+// The field grows with what it holds, like Messages; return sends (shift+return is a new line).
+function fit() { input.style.height = '38px'; input.style.height = Math.min(input.scrollHeight, 110) + 'px'; form.classList.toggle('has', !!input.value.trim()); }
 const clear = () => { input.value = ''; fit(); };
 input.addEventListener('pointerdown', () => { if (!mine) { stopIdeas(); clear(); } });
 input.addEventListener('focus', () => { if (!mine) { stopIdeas(); clear(); } up({ type: 'plow-chat-focus' }); });
@@ -219,9 +387,10 @@ async function send(text, b) {
     if (j.token) { token = j.token; try { localStorage.setItem(KEY, token); } catch {} listen(); }
     b.classList.remove('pending');
     pending.delete(text);
+    b.dataset.id = j.message.id;
     seen.set(j.message.id, b);
-    if (statusEl?.previousElementSibling === b && !/^Read/.test(statusEl.textContent)) status(b, 'Delivered');
-    if (!/^Read/.test(statusEl?.textContent || '')) waiting(true);
+    if (statusEl?.previousElementSibling === b) status(b, 'Delivered');
+    waiting(true);
   } catch (e) {
     status(b, (e.message && e.message !== 'Failed to fetch' ? e.message : 'Not Delivered') + ' · Tap to try again', true);
     statusEl.onclick = () => { statusEl.onclick = null; statusEl.classList.remove('failed'); b.classList.add('pending'); status(b, 'Sending…'); send(text, b); };
@@ -237,21 +406,23 @@ form.addEventListener('submit', (e) => {
   b.classList.add('pending');
   pending.set(text, b);
   status(b, 'Sending…');
+  sfx('sent');
   scroll();
   send(text, b);
   if (matchMedia('(pointer: fine)').matches) input.focus();
 });
 
-// Inside the landing page on a phone, the chat opens full screen; its back chevron closes it.
+// Inside the landing page on a phone, the chat opens full screen; its back button closes it.
 addEventListener('message', (e) => {
   if (e.origin !== location.origin) return;
-  if (e.data?.type === 'plow-chat-open') $('close').classList.remove('ghost');
-  if (e.data?.type === 'plow-chat-closed') $('close').classList.add('ghost');
+  if (e.data?.type === 'plow-chat-open') { opened = true; $('close').tabIndex = 0; }
+  if (e.data?.type === 'plow-chat-closed') { opened = false; $('close').tabIndex = -1; }
   if (e.data?.type === 'plow-chat-type') { stopIdeas(); clear(); input.focus(); }
 });
-$('close').addEventListener('click', () => { input.blur(); up({ type: 'plow-chat-close' }); });
+$('close').addEventListener('click', () => { if (opened) { input.blur(); up({ type: 'plow-chat-close' }); } });
 
 bubble('What do you want an agent to do for you?', false).classList.add('greet');
 if (token) refill().then(() => { if (!mine) playIdeas(); token && listen(); });
 else playIdeas();
+
 </script></body></html>

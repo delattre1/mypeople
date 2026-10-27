@@ -160,5 +160,35 @@ class WebChatPlugin(unittest.TestCase):
             self.assertNotEqual(p.returncode, 0)
             self.assertIn(says, p.stderr)
 
+    def test_tapbacks_both_ways(self):
+        # The visitor taps back on the agent's message (iMessage's six only, their own thread only); it shows on reload and
+        # reaches the agent with their next message, apart from its text. The agent's 👀 lands on the visitor's bubble.
+        _, a = self.http("POST", "/messages", {"text": "I want a running coach"})
+        _, b = self.http("POST", "/messages", {"text": "someone else"})
+        self.assertTrue(self.plugin.poll_once(wait=0))
+        va = self.sent()[0][2].split()[4].rstrip(":")
+        reply = self.plugin.call("POST", "/agent/reply", {"visitor": va, "text": "Happy to! How many days a week?"})["message"]
+        self.assertEqual(self.http("POST", "/react", {"message": reply, "emoji": "🔥"}, a["token"])[0], 422, "only the six")
+        self.assertEqual(self.http("POST", "/react", {"message": reply, "emoji": "❤️"}, b["token"])[0], 404, "never on someone else's chat")
+        self.assertEqual(self.http("POST", "/react", {"message": reply, "emoji": "❤️"}, a["token"]), (200, {"message": reply, "tapback": "❤️"}))
+        thread = self.http("GET", "/messages", token=a["token"])[1]["messages"]
+        self.assertEqual([m["tapback"] for m in thread], [None, "❤️"])
+        self.http("POST", "/messages", {"text": "Four days"}, a["token"])
+        self.assertTrue(self.plugin.poll_once(wait=0))
+        line = self.sent()[-1][2]
+        self.assertIn('they reacted ❤️ to your message "Happy to! How many days a week?"', line)
+        self.assertTrue(line.startswith(f"[web-chat] from web visitor {va}: Four days\n(Earlier, separate from this text"))
+        # Taken back before the next message: it no longer rides along, and the page shows none.
+        self.http("POST", "/react", {"message": reply, "emoji": "👍"}, a["token"])
+        self.http("POST", "/react", {"message": reply, "emoji": ""}, a["token"])
+        self.http("POST", "/messages", {"text": "Mornings"}, a["token"])
+        self.assertTrue(self.plugin.poll_once(wait=0))
+        self.assertNotIn("reacted", self.sent()[-1][2].split("\n(Someone")[0])
+        self.assertIsNone(self.http("GET", "/messages", token=a["token"])[1]["messages"][1]["tapback"])
+        # The agent's tapback (its 👀) on the visitor's bubble.
+        first = self.http("GET", "/messages", token=a["token"])[1]["messages"][0]["id"]
+        self.plugin.call("POST", "/agent/react", {"visitor": va, "message": first, "emoji": "👀"})
+        self.assertEqual(self.http("GET", "/messages", token=a["token"])[1]["messages"][0]["reactions"], ["👀"])
+
 if __name__ == "__main__":
     unittest.main()

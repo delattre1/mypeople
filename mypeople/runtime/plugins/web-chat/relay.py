@@ -8,14 +8,17 @@ Visitors (public):
     GET  /                       the landing page, its phone holding the chat (or the chat alone without landing.html)
     GET  /chat                   the chat
     POST /messages {text, page?} their message; the first one makes them a visitor: {token, message}, token shown once
+    POST /react {message, emoji} their tapback on a message in their thread (one of iMessage's six, or "" to take it back)
     GET  /messages               their thread (Authorization: Bearer <token>)
-    GET  /events?token=          their live thread: server-sent events message / reaction / typing
+    GET  /events?token=          their live thread: server-sent events message / reaction / tapback / typing
 
 The owner's MyPlow (Authorization: Bearer <agent key>; only its sha256 is here, in AGENT_KEY_SHA256), and any MyPlow
 a visitor was routed to (its key's sha256 is on that visitor). Each key sees only its own visitors: the owner's are the
 ones routed nowhere.
-    GET  /agent/inbox?after=<seq>&wait=25    after seq: {seq, visitor, kind: "message", id, text, page, first} or, once
-                                             per handover, {seq, visitor, kind: "handover"} (no text: never the visitor's words)
+    GET  /agent/inbox?after=<seq>&wait=25    after seq: {seq, visitor, kind: "message", id, text, page, first, tapbacks} or, once
+                                             per handover, {seq, visitor, kind: "handover"} (no text: never the visitor's words).
+                                             tapbacks: the visitor's tapbacks since their previous message, [{emoji, on, on_mine}]
+                                             (on = the start of the message they reacted to), as Plow Chat hands tapbacks over
     POST /agent/reply {visitor, text}        shows on their page at once
     POST /agent/react {visitor, message, emoji}
     GET  /agent/thread?visitor=<id>          that visitor's thread, oldest first
@@ -44,6 +47,7 @@ PAGE = Path(__file__).with_name("page.html")          # the chat, at /chat
 LANDING = Path(__file__).with_name("landing.html")    # the landing page around it, at / (the chat alone when absent)
 PORT = int(os.environ.get("RELAY_PORT") or 8000)
 SLUG = re.compile(r"[a-z0-9-]{1,40}")
+TAPBACKS = ("❤️", "👍", "👎", "😂", "‼️", "❓")  # iMessage's six
 
 
 def now():
@@ -69,8 +73,11 @@ class Store:
               create index if not exists messages_visitor on messages (visitor, seq);""")
             # Routing: the key that has the visitor (null = the owner), and handover items in the inbox (kind).
             # routed_seq: the holder sees this visitor's messages from that seq on (the past is in /agent/thread).
+            # tapback: the visitor's own tapback on a message; tapbacks: when each was made (after_seq), for the agent.
+            db.execute("create table if not exists tapbacks (seq integer primary key autoincrement, visitor text not null, "
+                       "message_id text not null, emoji text not null, after_seq integer not null)")
             for table, column in (("visitors", "agent_sha256 text"), ("visitors", "routed_seq integer not null default 0"),
-                                  ("messages", "kind text not null default 'message'")):
+                                  ("messages", "kind text not null default 'message'"), ("messages", "tapback text")):
                 if column.split()[0] not in [r["name"] for r in db.execute(f"pragma table_info({table})")]:
                     db.execute(f"alter table {table} add column {column}")
 
@@ -112,8 +119,20 @@ class Store:
                 not exists (select 1 from messages p where p.visitor = m.visitor and p.kind = 'message' and p.seq < m.seq) as first
                 from messages m join visitors v on v.id = m.visitor
                 where m.mine = 1 and m.seq > ? and m.seq >= v.routed_seq and v.agent_sha256 is ? order by m.seq limit 50""", (after, key))
-            return [{"seq": r["seq"], "visitor": r["visitor"], "kind": "handover"} if r["kind"] == "handover"
-                    else {k: r[k] for k in r.keys()} for r in rows]
+            out = []
+            for r in rows:
+                if r["kind"] == "handover":
+                    out.append({"seq": r["seq"], "visitor": r["visitor"], "kind": "handover"})
+                    continue
+                # The visitor's tapbacks made after their previous message and still standing, reach the agent with this one.
+                prev = db.execute("select coalesce(max(seq), 0) from messages where visitor = ? and mine = 1 and kind = 'message' and seq < ?",
+                                  (r["visitor"], r["seq"])).fetchone()[0]
+                taps = db.execute("""select t.emoji, m.text, m.mine from tapbacks t join messages m on m.id = t.message_id
+                    where t.visitor = ? and t.after_seq >= ? and t.after_seq < ? and t.emoji != '' and m.tapback = t.emoji
+                    group by t.message_id order by max(t.seq)""", (r["visitor"], prev, r["seq"])).fetchall()
+                out.append({**{k: r[k] for k in r.keys()},
+                            "tapbacks": [{"emoji": t["emoji"], "on": t["text"][:80], "on_mine": not t["mine"]} for t in taps]})
+            return out
 
     def holder(self, vid):
         """(exists, key sha256 that has the visitor or None for the owner)."""
@@ -134,6 +153,17 @@ class Store:
             db.execute("commit")
 
 
+    def tapback(self, vid, mid, emoji):
+        """The visitor's tapback on a message of their thread ("" takes it back); False if it isn't theirs."""
+        with self.db() as db:
+            db.execute("begin immediate")
+            n = db.execute("update messages set tapback = ? where id = ? and visitor = ? and kind = 'message'", (emoji or None, mid, vid)).rowcount
+            if n:
+                db.execute("insert into tapbacks (visitor, message_id, emoji, after_seq) values (?, ?, ?, (select coalesce(max(seq), 0) from messages))",
+                           (vid, mid, emoji))
+            db.execute("commit")
+        return n == 1
+
     def react(self, vid, mid, emoji):
         with self.db() as db:
             n = db.execute("update messages set reactions = ? where id = ? and visitor = ?", (json.dumps([emoji] if emoji else []), mid, vid)).rowcount
@@ -146,7 +176,7 @@ class Store:
 
 def view(m):
     return {"id": m["id"], "mine": bool(m["mine"]), "text": m["text"], "created_at": m["created_at"],
-            "reactions": json.loads(m["reactions"]), "files": []}
+            "reactions": json.loads(m["reactions"]), "tapback": m.get("tapback"), "files": []}
 
 
 class Relay:
@@ -235,6 +265,8 @@ def handler_for(relay):
                     return self.wfile.write(page)
                 if method == "POST" and url.path == "/messages":
                     return self.post_message()
+                if method == "POST" and url.path == "/react":
+                    return self.post_tapback()
                 if method == "GET" and url.path == "/messages":
                     return self.send_json(200, {"messages": [view(m) for m in relay.store.thread(self.visitor()["id"])]})
                 if method == "GET" and url.path == "/events":
@@ -276,6 +308,18 @@ def handler_for(relay):
             with relay.arrived:
                 relay.arrived.notify_all()
             self.send_json(201, {**({"token": token} if token else {}), "message": view(m)})
+
+        def post_tapback(self):
+            v, b = self.visitor(), self.body()
+            emoji = b.get("emoji") or ""
+            if emoji and emoji not in TAPBACKS:
+                raise Fail(422, "a tapback is one of " + " ".join(TAPBACKS) + ', or "" to take it back')
+            if relay.limited(f"msg {v['id']}", 30, 60):
+                raise Fail(429, "slow down a little")
+            if not relay.store.tapback(v["id"], str(b.get("message") or ""), emoji):
+                raise Fail(404, "no such message in your chat")
+            relay.push(v["id"], "tapback", {"message_id": b.get("message"), "emoji": emoji})
+            self.send_json(200, {"message": b.get("message"), "tapback": emoji or None})
 
         def events(self, v):
             q = queue.Queue()
