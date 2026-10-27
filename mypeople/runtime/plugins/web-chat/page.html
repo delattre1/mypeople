@@ -431,6 +431,9 @@ addEventListener('message', (e) => {
   if (e.data?.type === 'plow-chat-open') { opened = true; $('close').tabIndex = 0; }
   if (e.data?.type === 'plow-chat-closed') { opened = false; $('close').tabIndex = -1; }
   if (e.data?.type === 'plow-chat-type') { stopIdeas(); clear(); input.focus(); }
+  if (e.data?.type === 'plow-chat-ask' && typeof e.data.text === 'string') { // a template's ask, ready to send
+    stopIdeas(); input.value = e.data.text.slice(0, 500); fit();
+  }
 });
 $('close').addEventListener('click', () => { if (opened) { input.blur(); up({ type: 'plow-chat-close' }); } });
 
