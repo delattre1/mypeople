@@ -87,6 +87,7 @@ const slug = (new URLSearchParams(location.search).get('agent') || '').toLowerCa
 const $ = (id) => document.getElementById(id);
 const log = $('log'), typing = $('typing'), err = $('err'), input = $('t'), form = $('f');
 const seen = new Map(); // message id -> its bubble
+const pending = new Map(); // text -> your bubble already on screen, until the relay gives it an id (its echo can come first)
 let token = null, events = null, statusEl = null, waitTimer = null, mine = false, sending = false;
 try { token = localStorage.getItem(KEY); } catch {}
 const auth = () => (token ? { authorization: 'Bearer ' + token } : {});
@@ -154,6 +155,7 @@ function waiting(on) {
 }
 const scroll = () => log.scrollTo({ top: log.scrollHeight, behavior: still ? 'auto' : 'smooth' });
 function render(m) {
+  if (m.mine && !seen.has(m.id) && pending.has(m.text)) { seen.set(m.id, pending.get(m.text)); pending.delete(m.text); }
   if (seen.has(m.id)) { if (m.mine && m.reactions.length) status(seen.get(m.id), 'Read ' + time(Date.now())); return; }
   const b = bubble(m.text, m.mine);
   for (const f of m.files) {
@@ -216,6 +218,7 @@ async function send(text, b) {
     if (!r.ok) throw new Error(j.error?.message || 'Not Delivered');
     if (j.token) { token = j.token; try { localStorage.setItem(KEY, token); } catch {} listen(); }
     b.classList.remove('pending');
+    pending.delete(text);
     seen.set(j.message.id, b);
     if (statusEl?.previousElementSibling === b && !/^Read/.test(statusEl.textContent)) status(b, 'Delivered');
     if (!/^Read/.test(statusEl?.textContent || '')) waiting(true);
@@ -232,6 +235,7 @@ form.addEventListener('submit', (e) => {
   clear(); err.textContent = '';
   const b = bubble(text, true); // on screen at once, as in Messages; it is confirmed (or offered again) below
   b.classList.add('pending');
+  pending.set(text, b);
   status(b, 'Sending…');
   scroll();
   send(text, b);
