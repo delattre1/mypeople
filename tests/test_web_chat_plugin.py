@@ -98,6 +98,11 @@ class WebChatPlugin(unittest.TestCase):
         self.assertEqual([(m["mine"], m["text"]) for m in thread][-1], (False, "On it!"))
         self.assertEqual(thread[0]["reactions"], ["👀"])
         self.assertNotIn("On it!", json.dumps(self.http("GET", "/messages", token=b["token"])[1]))
+        # The agent reads one visitor's thread by id (Willow's handover), oldest first.
+        history = self.plugin.call("GET", f"/agent/thread?visitor={va}")["messages"]
+        self.assertEqual([(m["mine"], m["text"]) for m in history],
+                         [(True, "I want an email agent"), (True, "and my calendar"), (False, "On it!")])
+        self.assertEqual(self.http("GET", f"/agent/thread?visitor={va}", token=a["token"])[0], 404, "never with a visitor token")
 
         # Only the agent key opens /agent; a visitor token or a made-up one gets nothing.
         self.assertEqual(self.http("GET", "/agent/inbox?after=0", token=a["token"])[0], 404)

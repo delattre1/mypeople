@@ -18,6 +18,8 @@ key's sha256. supervise.sh keeps `serve` running while that file exists.
     web-chat.py serve                          deliver forever
     web-chat.py reply <visitor> "text"         the Boss's answer, live on their page
     web-chat.py react <visitor> <msg> EMOJI    react to their message (👀 shows them it was read)
+    web-chat.py history <visitor>              their thread as JSON, oldest first: [{id, mine, text, created_at}];
+                                               mine = the visitor wrote it (e.g. for a handover)
     web-chat.py status
 """
 import json
@@ -27,6 +29,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -126,6 +129,9 @@ def main():
         print(json.dumps(call("POST", "/agent/reply", {"visitor": args[0], "text": " ".join(args[1:])})))
     elif cmd == "react" and len(args) >= 2:
         print(json.dumps(call("POST", "/agent/react", {"visitor": args[0], "message": args[1], "emoji": args[2] if len(args) > 2 else ""})))
+    elif cmd == "history" and len(args) == 1:
+        msgs = call("GET", f"/agent/thread?visitor={urllib.parse.quote(args[0])}")["messages"]
+        print(json.dumps([{k: m[k] for k in ("id", "mine", "text", "created_at")} for m in msgs], ensure_ascii=False, indent=1))
     elif cmd == "status":
         print(json.dumps({"relay": read_json(CREDS, {}).get("url"), "target": TARGET, "after": read_json(STATE, {}).get("after", 0)}, indent=2))
     else:

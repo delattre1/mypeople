@@ -14,6 +14,7 @@ The owner's MyPlow (Authorization: Bearer <agent key>; only its sha256 is here, 
     GET  /agent/inbox?after=<seq>&wait=25    visitor messages after seq, waiting up to `wait` s for one
     POST /agent/reply {visitor, text}        shows on their page at once
     POST /agent/react {visitor, message, emoji}
+    GET  /agent/thread?visitor=<id>          that visitor's thread, oldest first
 
     AGENT_KEY_SHA256=<64 hex> RELAY_DATA=~/web-chat RELAY_PORT=8000 python3 relay.py
 """
@@ -266,6 +267,11 @@ def handler_for(relay):
                         relay.arrived.wait(end - time.time())
                     rows = relay.store.inbox(after)
                 return self.send_json(200, {"messages": rows})
+            if method == "GET" and path == "/agent/thread":
+                vid = (q.get("visitor") or [""])[0]
+                if not relay.store.exists(vid):
+                    raise Fail(404, f"no visitor {vid}")
+                return self.send_json(200, {"visitor": vid, "messages": [view(m) for m in relay.store.thread(vid)]})
             b = self.body()
             vid = str(b.get("visitor") or "")
             if not relay.store.exists(vid):
