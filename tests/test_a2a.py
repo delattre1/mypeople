@@ -164,22 +164,23 @@ class A2ATest(unittest.TestCase):
         self.alpha.step()
         self.assertEqual(self.alpha.read("keys.json", {})["peers"]["beta"], before)
 
-    def test_loop_guard(self):
+    def test_no_loop_guard(self):
+        """Two Bosses can keep talking: no cap on messages in a row, either way (the 20-in-30-minutes guard is gone)."""
         self.pair()
-        results = []
-        for _ in range(self.a2a.MAX_HOPS + 2):
+        n = 45
+        for _ in range(n):
             tid = self.qa.submit("send", "beta/main:Boss", {"message": "ping", "reply_to": "alpha/main:Boss"})
             self.alpha.step()
-            results.append(self.qa.tasks[tid]["ok"])
-        self.assertEqual(results.count(False), 2)       # sends past the guard are refused at once
+            self.assertIsNot(self.qa.tasks[tid]["ok"], False, self.qa.tasks[tid])
         self.beta.step()
-        self.assertEqual(len(self.qb.sends()), self.a2a.MAX_HOPS)
-        # a peer that skips its own guard: beta drops what is past it
-        self.alpha.conv = {}
-        self.qa.submit("send", "beta/main:Boss", {"message": "ping", "reply_to": "alpha/main:Boss"})
+        self.assertEqual(len(self.qb.sends()), n)
+        # and back the other way, past where the old guard dropped incoming messages
+        for _ in range(n):
+            self.qb.submit("send", "alpha/main:Boss", {"message": "pong", "reply_to": "beta/main:Boss"})
+            self.beta.step()
         self.alpha.step()
-        self.beta.step()
-        self.assertEqual(len(self.qb.sends()), self.a2a.MAX_HOPS)
+        self.assertEqual(len(self.qa.sends()), n)
+        self.assertNotIn("conv", self.alpha.read("state.json", {}))
 
     def test_a_ts_net_name_the_system_refuses_resolves_publicly(self):
         """Tailscale's MagicDNS refuses another tailnet's ts.net names: the relay's must still resolve."""

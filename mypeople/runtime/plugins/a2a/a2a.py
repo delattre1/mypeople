@@ -19,8 +19,7 @@ Relay (`a2a.py relay`): a store-and-forward mailbox over HTTPS, so a MyPlow behi
 makes outgoing calls. Each pair has one box per direction, named by a token only the pair can derive
 (the relay keeps its hash), and every message is signed with the pair key and checked on arrival, so not
 even the relay can forge one. It can read the text: TLS covers the wire, not the relay.
-Loop guard: 20 messages between two agents, each within 30 minutes of the last, and further sends are
-refused and incoming ones dropped until 30 quiet minutes.
+There is no cap on how many messages two agents exchange (the owner's call, 10-27: no loop guard).
 
 Pairing, by the owner, once per peer:
 
@@ -61,7 +60,6 @@ import mpcommon as C  # noqa: E402
 RELAY = "https://delattre-server.mulley-firefighter.ts.net:8443/a2a"
 STATE_DIR = Path(os.environ.get("A2A_STATE_DIR") or Path(C.CFG["INSTALL_DIR"]) / "state" / "a2a")
 INVITE_TTL = 24 * 3600
-MAX_HOPS, QUIET = 20, 30 * 60
 RECEIPT_WAIT = 25           # mp send waits 30 s for its result
 KEEP = 7 * 24 * 3600        # a message the relay or a bridge still holds after this is dropped
 MAX_MSG, MAX_BOX, MAX_ROWS = 16 * 1024, 200, 20000
@@ -215,7 +213,7 @@ class Bridge:
         self.inflight = {}    # local task id -> (peer, signature): a delivery, until its local result
         self.down = set()     # relays that failed last time: logged once, retried quietly
         st = self.read("state.json", {})
-        self.seen, self.conv = st.get("seen", []), st.get("conv", {})
+        self.seen = st.get("seen", [])
 
     # -- files: keys.json is shared with `mp pair`, so it is changed under a lock
     def read(self, name, default):
@@ -247,18 +245,6 @@ class Bridge:
 
     def sign(self, key, body):
         return json.dumps({"b": body, "s": mac(key, json.dumps(body, sort_keys=True))})
-
-    def hop(self, a, b, count=True):
-        """Count one message between agents a and b; False past the loop guard (nothing counted)."""
-        k = "|".join(sorted((a, b)))
-        n, at = self.conv.get(k, (0, 0))
-        if time.time() - at > QUIET:
-            n = 0
-        if n >= MAX_HOPS:
-            return False
-        if count:
-            self.conv[k] = [n + 1, time.time()]
-        return True
 
     # -- pairing
     def invite(self):
@@ -352,8 +338,7 @@ class Bridge:
                 self.send(h, p)
         self.settle(peers)
         self.seen = self.seen[-1000:]
-        self.write("state.json", {"seen": self.seen, "conv": {
-            k: v for k, v in self.conv.items() if time.time() - v[1] < QUIET}})
+        self.write("state.json", {"seen": self.seen})
 
     def take(self, h, peer, raw):
         """Handle one message from peer h. False only when it should be fetched again (queue down)."""
@@ -390,17 +375,12 @@ class Bridge:
                 and C.parse_agent_id(to)[0] == self.host and "/" in to):
             log("dropped a message from %s: from %s to %s" % (h, frm, to))
             return True
-        if not self.hop(to, frm, count=False):
-            log("dropped a message from %s to %s: loop guard (%d in a row)" % (frm, to, MAX_HOPS))
-            self.seen.append(sig)
-            return True
         payload = {"message": "[from %s, on another MyPlow] %s" % (frm, body.get("text", ""))}
         if body.get("reply"):
             payload["reply_to"] = frm
         code, out = self.queue("POST", "/task/submit", {"type": "send", "target_agent": to, "payload": payload})
         if code != 200 or not isinstance(out, dict) or not out.get("task_id"):
             return False
-        self.hop(to, frm)
         self.inflight[out["task_id"]] = (h, sig, time.time())
         self.seen.append(sig)
         return True
@@ -421,10 +401,6 @@ class Bridge:
             frm = payload.get("reply_to") or ""
             if C.parse_agent_id(frm)[0] != self.host:
                 frm = ""
-            if not self.hop(frm or self.host, to):
-                self.done(tid, False, "refused: %s and %s exchanged %d messages, each within 30 minutes of the "
-                                      "last (loop guard); it reopens after 30 quiet minutes" % (frm or self.host, to, MAX_HOPS))
-                continue
             body = {"kind": "send", "from": frm or self.host, "to": to, "text": payload.get("message", ""),
                     "reply": bool(frm), "ts": time.time(), "n": secrets.token_hex(8)}
             msg = self.sign(peer["key"], body)
