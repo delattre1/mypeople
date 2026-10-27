@@ -11,11 +11,15 @@ Visitors (public):
     GET  /messages               their thread (Authorization: Bearer <token>)
     GET  /events?token=          their live thread: server-sent events message / reaction / typing
 
-The owner's MyPlow (Authorization: Bearer <agent key>; only its sha256 is here, in AGENT_KEY_SHA256):
-    GET  /agent/inbox?after=<seq>&wait=25    visitor messages after seq, waiting up to `wait` s for one
+The owner's MyPlow (Authorization: Bearer <agent key>; only its sha256 is here, in AGENT_KEY_SHA256), and any MyPlow
+a visitor was routed to (its key's sha256 is on that visitor). Each key sees only its own visitors: the owner's are the
+ones routed nowhere.
+    GET  /agent/inbox?after=<seq>&wait=25    after seq: {seq, visitor, kind: "message", id, text, page, first} or, once
+                                             per handover, {seq, visitor, kind: "handover"} (no text: never the visitor's words)
     POST /agent/reply {visitor, text}        shows on their page at once
     POST /agent/react {visitor, message, emoji}
     GET  /agent/thread?visitor=<id>          that visitor's thread, oldest first
+    POST /agent/route {visitor, key_sha256}  owner only: from now on that key has the visitor (null: back to the owner)
 
     AGENT_KEY_SHA256=<64 hex> RELAY_DATA=~/web-chat RELAY_PORT=8000 python3 relay.py
 """
@@ -63,6 +67,12 @@ class Store:
               create table if not exists messages (seq integer primary key autoincrement, id text unique not null,
                 visitor text not null, mine integer not null, text text not null, created_at text not null, reactions text not null default '[]');
               create index if not exists messages_visitor on messages (visitor, seq);""")
+            # Routing: the key that has the visitor (null = the owner), and handover items in the inbox (kind).
+            # routed_seq: the holder sees this visitor's messages from that seq on (the past is in /agent/thread).
+            for table, column in (("visitors", "agent_sha256 text"), ("visitors", "routed_seq integer not null default 0"),
+                                  ("messages", "kind text not null default 'message'")):
+                if column.split()[0] not in [r["name"] for r in db.execute(f"pragma table_info({table})")]:
+                    db.execute(f"alter table {table} add column {column}")
 
     @contextmanager
     def db(self):
@@ -76,7 +86,7 @@ class Store:
     def new_visitor(self, page):
         token, vid = secrets.token_urlsafe(24), f"w{secrets.token_hex(4)}"
         with self.db() as db:
-            db.execute("insert into visitors values (?, ?, ?, ?)", (vid, sha(token), page, now()))
+            db.execute("insert into visitors (id, sha256, page, created_at) values (?, ?, ?, ?)", (vid, sha(token), page, now()))
         return vid, token
 
     def visitor(self, token):
@@ -92,14 +102,37 @@ class Store:
 
     def thread(self, vid, limit=200):
         with self.db() as db:
-            rows = db.execute("select * from messages where visitor = ? order by seq desc limit ?", (vid, limit)).fetchall()
+            rows = db.execute("select * from messages where visitor = ? and kind = 'message' order by seq desc limit ?", (vid, limit)).fetchall()
         return [dict(r) for r in reversed(rows)]
 
-    def inbox(self, after):
+    def inbox(self, after, key):
+        """What the visitors this key has wrote after seq, and its handovers. key None = the owner (unrouted visitors)."""
         with self.db() as db:
-            return [dict(r) for r in db.execute("""select m.seq, m.id, m.visitor, m.text, m.created_at, v.page,
-                not exists (select 1 from messages p where p.visitor = m.visitor and p.seq < m.seq) as first
-                from messages m join visitors v on v.id = m.visitor where m.mine = 1 and m.seq > ? order by m.seq limit 50""", (after,))]
+            rows = db.execute("""select m.seq, m.id, m.visitor, m.kind, m.text, m.created_at, v.page,
+                not exists (select 1 from messages p where p.visitor = m.visitor and p.kind = 'message' and p.seq < m.seq) as first
+                from messages m join visitors v on v.id = m.visitor
+                where m.mine = 1 and m.seq > ? and m.seq >= v.routed_seq and v.agent_sha256 is ? order by m.seq limit 50""", (after, key))
+            return [{"seq": r["seq"], "visitor": r["visitor"], "kind": "handover"} if r["kind"] == "handover"
+                    else {k: r[k] for k in r.keys()} for r in rows]
+
+    def holder(self, vid):
+        """(exists, key sha256 that has the visitor or None for the owner)."""
+        with self.db() as db:
+            row = db.execute("select agent_sha256 from visitors where id = ?", (vid,)).fetchone()
+        return (row is not None, row["agent_sha256"] if row else None)
+
+    def route(self, vid, key):
+        """Give the visitor to key (None: back to the owner); the new key gets one handover item."""
+        with self.db() as db:
+            db.execute("begin immediate")
+            if key:
+                seq = db.execute("insert into messages (id, visitor, mine, text, created_at, kind) values (?, ?, 1, '', ?, 'handover')",
+                                 (f"h{secrets.token_hex(5)}", vid, now())).lastrowid
+            else:  # back to the owner: from the next message on
+                seq = (db.execute("select max(seq) from messages").fetchone()[0] or 0) + 1
+            db.execute("update visitors set agent_sha256 = ?, routed_seq = ? where id = ?", (key, seq, vid))
+            db.execute("commit")
+
 
     def react(self, vid, mid, emoji):
         with self.db() as db:
@@ -141,8 +174,13 @@ class Relay:
         return len(recent) > most
 
     def agent(self, handler):
+        """"owner", or the sha256 of any other key: a new MyPlow polls before the owner routes it a visitor, and a key
+        sees nothing until one is routed to it (its inbox is an empty long-poll; every visitor call is a 404)."""
         got = handler.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        return bool(self.agent_sha) and hmac.compare_digest(sha(got), self.agent_sha)
+        if not got:
+            return None
+        got = sha(got)
+        return "owner" if self.agent_sha and hmac.compare_digest(got, self.agent_sha) else got
 
 
 class Fail(Exception):
@@ -202,12 +240,18 @@ def handler_for(relay):
                 if method == "GET" and url.path == "/events":
                     return self.events(self.visitor((q.get("token") or [""])[0]))
                 if url.path.startswith("/agent/"):
-                    if not relay.agent(self):
+                    who = relay.agent(self)
+                    if not who:
                         raise Fail(404, "not found")
-                    return self.agent_call(method, url.path, q)
+                    if relay.limited(f"agent {self.client()}", 120, 60):   # a real bridge polls a few times a minute
+                        raise Fail(429, "slow down")
+                    return self.agent_call(method, url.path, q, who)
                 raise Fail(404, "not found")
             except Fail as e:
                 self.send_json(e.status, {"error": {"status": e.status, "message": str(e)}})
+            except Exception as e:  # noqa: BLE001 - an answer, not a dropped connection; the type only, never a visitor's text
+                print(f"relay error on {method} {url.path}: {type(e).__name__}", flush=True)
+                self.send_json(500, {"error": {"status": 500, "message": "relay error"}})
 
         def post_message(self):
             b = self.body()
@@ -259,25 +303,42 @@ def handler_for(relay):
                     relay.streams.get(v["id"], set()).discard(q)
                 self.close_connection = True
 
-        def agent_call(self, method, path, q):
+        def agent_call(self, method, path, q, who):
+            key = None if who == "owner" else who   # the owner's visitors are the ones routed to no key
+
+            def mine(vid):  # a visitor this key has; anyone else's reads as unknown
+                found, holder = relay.store.holder(vid)
+                if not found or holder != key:
+                    raise Fail(404, f"no visitor {vid}")
+                return vid
+
             if method == "GET" and path == "/agent/inbox":
                 after, wait = int((q.get("after") or ["0"])[0]), min(float((q.get("wait") or ["0"])[0]), 50)
                 end = time.time() + wait
-                rows = relay.store.inbox(after)
+                rows = relay.store.inbox(after, key)
                 while not rows and time.time() < end:
                     with relay.arrived:
                         relay.arrived.wait(end - time.time())
-                    rows = relay.store.inbox(after)
+                    rows = relay.store.inbox(after, key)
                 return self.send_json(200, {"messages": rows})
             if method == "GET" and path == "/agent/thread":
-                vid = (q.get("visitor") or [""])[0]
-                if not relay.store.exists(vid):
-                    raise Fail(404, f"no visitor {vid}")
+                vid = mine((q.get("visitor") or [""])[0])
                 return self.send_json(200, {"visitor": vid, "messages": [view(m) for m in relay.store.thread(vid)]})
             b = self.body()
-            vid = str(b.get("visitor") or "")
-            if not relay.store.exists(vid):
-                raise Fail(404, f"no visitor {vid}")
+            if method == "POST" and path == "/agent/route":
+                new = b.get("key_sha256")
+                if who != "owner":
+                    raise Fail(403, "only the owner routes visitors")
+                if new is not None and not re.fullmatch(r"[0-9a-f]{64}", str(new)):
+                    raise Fail(422, "key_sha256 is the 64-hex sha256 of the new key, or null")
+                vid = str(b.get("visitor") or "")
+                if not relay.store.holder(vid)[0]:
+                    raise Fail(404, f"no visitor {vid}")
+                relay.store.route(vid, new)
+                with relay.arrived:
+                    relay.arrived.notify_all()
+                return self.send_json(200, {"visitor": vid, "routed": bool(new)})
+            vid = mine(str(b.get("visitor") or ""))
             if method == "POST" and path == "/agent/reply":
                 text = str(b.get("text") or "").strip()
                 if not text:

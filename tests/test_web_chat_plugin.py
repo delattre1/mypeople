@@ -109,10 +109,34 @@ class WebChatPlugin(unittest.TestCase):
                          [(True, "I want an email agent"), (True, "and my calendar"), (False, "On it!")])
         self.assertEqual(self.http("GET", f"/agent/thread?visitor={va}", token=a["token"])[0], 404, "never with a visitor token")
 
-        # Only the agent key opens /agent; a visitor token or a made-up one gets nothing.
-        self.assertEqual(self.http("GET", "/agent/inbox?after=0", token=a["token"])[0], 404)
+        # Any other key sees nothing: an empty inbox (a new MyPlow polls before a visitor is routed to it), 404 per visitor.
+        self.assertEqual(self.http("GET", "/agent/inbox?after=0", token=a["token"]), (200, {"messages": []}))
         self.assertEqual(self.http("POST", "/agent/reply", {"visitor": va, "text": "x"}, "wrong")[0], 404)
+        self.assertEqual(self.http("GET", f"/agent/thread?visitor={va}", token="wrong")[0], 404)
         self.assertEqual(self.http("GET", "/messages", token="made-up")[0], 401)
+
+        # Routing (card 71647100c5): the owner gives visitor A to a new MyPlow's key. From then on only that key has A:
+        # one handover item (no text), then A's messages; the owner neither sees nor answers A. Null gives A back.
+        new_sha = hashlib.sha256(b"new-key").hexdigest()
+        after = max(m["seq"] for m in self.plugin.call("GET", "/agent/inbox?after=0")["messages"])
+        self.assertEqual(self.http("POST", "/agent/route", {"visitor": va, "key_sha256": new_sha}, "new-key")[0], 403, "only the owner routes")
+        self.assertEqual(self.http("POST", "/agent/route", {"visitor": va, "key_sha256": "nope"}, "agent-key")[0], 422)
+        self.assertEqual(self.plugin.call("POST", "/agent/route", {"visitor": va, "key_sha256": new_sha}), {"visitor": va, "routed": True})
+        self.http("POST", "/messages", {"text": "hello new creator"}, a["token"])
+        self.http("POST", "/messages", {"text": "B again"}, b["token"])
+        got = self.http("GET", "/agent/inbox?after=0", token="new-key")[1]["messages"]
+        self.assertEqual([(m["kind"], m.get("text")) for m in got], [("handover", None), ("message", "hello new creator")])
+        self.assertEqual(set(got[0]), {"seq", "visitor", "kind"}, "a handover carries no visitor text")
+        owner = self.plugin.call("GET", f"/agent/inbox?after={after}")["messages"]
+        self.assertEqual([m["text"] for m in owner], ["B again"], "the owner stops seeing A")
+        self.assertEqual(self.http("POST", "/agent/reply", {"visitor": va, "text": "x"}, "agent-key")[0], 404)
+        self.assertEqual(self.http("POST", "/agent/reply", {"visitor": va, "text": "Hi, I'm yours now"}, "new-key")[0], 201)
+        self.assertEqual(self.http("GET", f"/agent/thread?visitor={va}", token="new-key")[1]["messages"][-1]["text"], "Hi, I'm yours now")
+        self.assertNotIn("handover", json.dumps(self.http("GET", "/messages", token=a["token"])[1]), "the page never shows it")
+        self.assertEqual(self.http("POST", "/agent/reply", {"visitor": self.sent()[1][2].split()[4], "text": "x"}, "new-key")[0], 404)
+        self.plugin.call("POST", "/agent/route", {"visitor": va, "key_sha256": None})
+        self.assertEqual(self.http("GET", f"/agent/thread?visitor={va}", token="new-key")[0], 404)
+        self.assertEqual(self.plugin.call("GET", f"/agent/thread?visitor={va}")["visitor"], va, "back with the owner")
 
     def test_handover_line_is_never_visitor_text(self):
         # The relay's handover item has no text; it reads as the relay's own line, with how to read the thread.
