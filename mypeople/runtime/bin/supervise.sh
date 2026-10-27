@@ -102,6 +102,9 @@ while true; do
   # A second, labelled bridge for one number on the owner's WhatsApp lab (whatsapp-linq-api): on while
   # its login exists; that file names the lab's URL and holds the number's own key.
   [ -f "$ID/state/plow-chat-lab/creds.json" ] && ensure "$ID/plugins/plow-chat/plow-chat.py serve lab$" "PLOW_CHAT_STATE_DIR='$ID/state/plow-chat-lab' exec python3 '$ID/plugins/plow-chat/plow-chat.py' serve lab"
+  # Web chat: people on a public web page chat with the Boss, through a cloud relay this Mac polls outbound. On while
+  # its login (the relay's URL and this Mac's agent key) exists; see the plugin's header.
+  [ -f "$ID/state/web-chat/creds.json" ] && ensure "$ID/plugins/web-chat/web-chat.py serve$" "exec python3 '$ID/plugins/web-chat/web-chat.py' serve"
   # Voice call: the owner phones the Boss and talks to it live. Off until queue.env sets VOICE_CALL
   # (see the plugin's header). Needs uv on PATH: it is the one plugin with a dependency (websockets).
   [ -n "${VOICE_CALL:-}" ] && ensure "$ID/plugins/voice-call/voice-call.py serve$" "exec uv run --script '$ID/plugins/voice-call/voice-call.py' serve"
