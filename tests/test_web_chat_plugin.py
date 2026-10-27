@@ -58,7 +58,10 @@ class WebChatPlugin(unittest.TestCase):
     def test_visitor_to_boss_and_back(self):
         status, page = self.http("GET", "/")
         self.assertEqual(status, 200)
-        self.assertIn(b"iMessage", page)
+        self.assertIn(b'<div class="live" id="chat">', page, "/ is the landing page, its phone holding the chat")
+        status, chat = self.http("GET", "/chat")
+        self.assertEqual(status, 200)
+        self.assertIn(b'placeholder="iMessage"', chat)
         self.assertEqual(self.http("POST", "/messages", {"text": "hi", "page": "Bad Slug"})[0], 422)
         _, a = self.http("POST", "/messages", {"text": "I want an email agent", "page": "assistant"})
         _, b = self.http("POST", "/messages", {"text": "hello from B"})

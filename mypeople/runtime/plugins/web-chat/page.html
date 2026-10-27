@@ -77,7 +77,7 @@ body{background:#F5F5F7;font-family:var(--ios);display:grid;place-items:center;-
 </form>
 </div></div>
 <script>
-const API = location.pathname.replace(/\/$/, '');
+const API = location.pathname.replace(/\/(chat\/?)?$/, '');
 const KEY = 'plow-web-token';
 const slug = (new URLSearchParams(location.search).get('agent') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40) || null;
 const $ = (id) => document.getElementById(id);

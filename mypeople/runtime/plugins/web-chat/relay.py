@@ -5,7 +5,8 @@ It serves the page (page.html, next to it) and the visitor API, and keeps each v
 reaches it OUTBOUND only (web-chat.py serve long-polls /agent/inbox), so the Mac serves nothing to the internet.
 
 Visitors (public):
-    GET  /                       the page
+    GET  /                       the landing page, its phone holding the chat (or the chat alone without landing.html)
+    GET  /chat                   the chat
     POST /messages {text, page?} their message; the first one makes them a visitor: {token, message}, token shown once
     GET  /messages               their thread (Authorization: Bearer <token>)
     GET  /events?token=          their live thread: server-sent events message / reaction / typing
@@ -35,7 +36,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 DATA = Path(os.environ.get("RELAY_DATA") or Path.home() / "web-chat")
-PAGE = Path(__file__).with_name("page.html")
+PAGE = Path(__file__).with_name("page.html")          # the chat, at /chat
+LANDING = Path(__file__).with_name("landing.html")    # the landing page around it, at / (the chat alone when absent)
 PORT = int(os.environ.get("RELAY_PORT") or 8000)
 SLUG = re.compile(r"[a-z0-9-]{1,40}")
 
@@ -186,8 +188,8 @@ def handler_for(relay):
             url = urlsplit(self.path)
             q = parse_qs(url.query)
             try:
-                if method == "GET" and url.path == "/":
-                    page = PAGE.read_bytes()
+                if method == "GET" and url.path in ("/", "/chat"):
+                    page = (LANDING if url.path == "/" and LANDING.exists() else PAGE).read_bytes()
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Content-Length", str(len(page)))
