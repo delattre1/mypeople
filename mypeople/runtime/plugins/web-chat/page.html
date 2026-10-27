@@ -12,9 +12,12 @@
 @media (prefers-color-scheme:dark){:root{--bg:#000;--them:#262628;--them-fg:#fff;--me:#0A84FF;--muted:#8E8E93;--icon:#fff;
   --glass:rgba(38,38,40,.66);--glass-line:rgba(255,255,255,.12);--glass-hi:rgba(255,255,255,.16);--veil:rgba(0,0,0,.4);--chip:#EBEBF0;--chip-fg:#000}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}[hidden]{display:none!important}
-html,body{height:100%;margin:0;background:var(--bg)}
+html,body{height:100%;margin:0;background:var(--bg);overscroll-behavior:none}
 body{font-family:var(--ios);-webkit-font-smoothing:antialiased;color:var(--them-fg);overflow:hidden}
-.screen{position:relative;height:100%;background:var(--bg);overflow:hidden}
+/* The screen is what Safari shows: with the keyboard up it shrinks to the visible part (chat.js follows visualViewport),
+   so the header and thread stay put and the composer sits on the keyboard. */
+.screen{position:fixed;left:0;right:0;top:var(--vvt,0px);height:var(--vvh,100%);background:var(--bg);overflow:hidden}
+.kb .composer{bottom:8px}
 .glass{background:var(--glass);-webkit-backdrop-filter:blur(22px) saturate(1.8);backdrop-filter:blur(22px) saturate(1.8);
   box-shadow:inset 0 .5px 0 var(--glass-hi),0 0 0 .5px var(--glass-line),0 8px 24px -14px rgba(0,0,0,.35)}
 
@@ -24,10 +27,10 @@ body{font-family:var(--ios);-webkit-font-smoothing:antialiased;color:var(--them-
 .status svg{height:12px;width:auto;fill:currentColor}.status .icons{display:flex;gap:6px;align-items:center}
 .framed .status{display:flex}
 
-/* Scroll edges: the thread fades and blurs under the header and the composer, as on iOS 26. */
-.edge{position:absolute;z-index:4;left:0;right:0;pointer-events:none;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
-.edge.top{top:0;height:calc(var(--head) + 26px);background:linear-gradient(var(--bg) 0%,color-mix(in srgb,var(--bg) 70%,transparent) 45%,transparent);
-  -webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent)}
+/* Scroll edges: the thread fades out under the header (solid behind it: no bubble shows through) and the composer. */
+.edge{position:absolute;z-index:4;left:0;right:0;pointer-events:none}
+.edge.top{top:0;height:calc(var(--head) + 26px);background:linear-gradient(var(--bg) calc(100% - 40px),transparent)}
+.edge.bottom{-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
 .edge.bottom{bottom:0;height:96px;background:linear-gradient(transparent,color-mix(in srgb,var(--bg) 80%,transparent) 60%,var(--bg));
   -webkit-mask-image:linear-gradient(transparent,#000 45%);mask-image:linear-gradient(transparent,#000 45%)}
 
@@ -88,6 +91,11 @@ button.back{cursor:pointer}button.back:focus-visible{outline:2px solid var(--me)
 /* Composer: + and the field, floating glass; the mic shows while it is empty, the blue arrow once there is text. */
 .composer{position:absolute;z-index:5;left:0;right:0;bottom:max(8px,env(safe-area-inset-bottom));display:flex;align-items:flex-end;gap:14px;padding:0 28px}
 .framed .composer{bottom:30px;padding:0 24px}
+/* Continue on iMessage, pinned over the composer once the thread has the link: it never scrolls out of view. */
+.pin{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;white-space:nowrap;
+  padding:6px 16px 6px 6px;border-radius:999px;font:600 15px/1 var(--ios);color:var(--them-fg);text-decoration:none}
+.pin[hidden]{display:none}.pin .wa{width:30px;height:30px;border-radius:50%;display:grid;place-items:center}.pin .wa svg{width:18px;height:18px}
+.pinned .thread{padding-bottom:150px}
 .plus{flex:none;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:var(--icon)}
 .plus svg{width:17px;height:17px;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .field{flex:1;min-width:0;min-height:38px;border-radius:19px;display:flex;align-items:flex-end;padding:0 4px 0 15px}
@@ -124,12 +132,12 @@ button.back{cursor:pointer}button.back:focus-visible{outline:2px solid var(--me)
 </div>
 <div class="edge top" aria-hidden="true"></div><div class="edge bottom" aria-hidden="true"></div>
 <div class="head">
-<button class="circle glass back" id="close" type="button" aria-label="Close the chat" tabindex="-1"><svg viewBox="0 0 12 21" aria-hidden="true"><path d="M10.5 1.5 2 10.5l8.5 9"/></svg></button>
+<button class="circle glass back" id="close" type="button" aria-label="Back" tabindex="-1"><svg viewBox="0 0 12 21" aria-hidden="true"><path d="M10.5 1.5 2 10.5l8.5 9"/></svg></button>
 <div class="who"><img src="data:image/webp;base64,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" alt=""><div class="name glass">Plow<svg viewBox="0 0 6 11" aria-hidden="true"><path d="m1 1 4 4.5L1 10"/></svg></div></div>
 <span class="circle glass video" aria-hidden="true"><svg viewBox="0 0 27 18"><rect x="1" y="1.5" width="17" height="15" rx="4"/><path d="M18.5 7.2 25.5 3v12l-7-4.2"/></svg></span>
 </div>
 <p class="err" id="err" role="alert"></p>
-<form class="composer" id="f"><span class="plus glass" aria-hidden="true"><svg viewBox="0 0 17 17"><path d="M8.5 1.5v14M1.5 8.5h14"/></svg></span>
+<form class="composer" id="f"><a class="pin glass" id="pin" hidden></a><span class="plus glass" aria-hidden="true"><svg viewBox="0 0 17 17"><path d="M8.5 1.5v14M1.5 8.5h14"/></svg></span>
 <span class="field glass"><textarea id="t" rows="1" aria-label="Message to Plow" placeholder="iMessage" autocomplete="off" maxlength="2000" enterkeyhint="send"></textarea>
 <span class="mic" aria-hidden="true"><svg viewBox="0 0 15 21"><rect x="4.2" y="1" width="6.6" height="12" rx="3.3"/><path d="M1.2 9.5a6.3 6.3 0 0 0 12.6 0M7.5 15.8V20"/></svg></span>
 <button class="csend" id="b" aria-label="Send"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button></span>
@@ -145,14 +153,13 @@ const screen = $('screen'), log = $('log'), typing = $('typing'), err = $('err')
 if (params.get('frame') === '1') screen.classList.add('framed'); // the page draws a phone around us: show its status bar
 const seen = new Map();    // message id -> its bubble
 const pending = new Map(); // text -> your bubble already on screen, until the relay gives it an id (its echo can come first)
-let token = null, events = null, statusEl = null, waitTimer = null, mine = false, sending = false, opened = false;
+let token = null, events = null, statusEl = null, waitTimer = null, mine = false, sending = false;
 try { token = localStorage.getItem(KEY); } catch {}
 const auth = () => (token ? { authorization: 'Bearer ' + token } : {});
 const time = (d) => new Date(d).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const tick = () => { $('clock').textContent = time(Date.now()).replace(/\s?[AP]M$/i, ''); };
 $('today').textContent = 'Today, ' + time(Date.now()); tick(); setInterval(tick, 30000);
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const up = (msg) => { try { parent.postMessage(msg, location.origin); } catch {} }; // the landing page around this chat
 const TAPBACKS = ['❤️', '👍', '👎', '😂', '‼️', '❓'];
 const IM = '<span class="wa" style="background:#34C759"><svg viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M12 3C6.5 3 2 6.6 2 11.1c0 2.6 1.5 4.9 3.8 6.4-.2 1.3-.9 2.6-2 3.5 2.2 0 4.1-.8 5.4-2 .9.2 1.8.3 2.8.3 5.5 0 10-3.6 10-8.1S17.5 3 12 3Z"/></svg></span>';
 const WA = '<span class="wa"><svg viewBox="0 0 24 24" fill="#fff" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.3-.7-2.8-1.1-4.6-4-4.7-4.2-.1-.2-1.1-1.5-1.1-2.9s.7-2.1 1-2.4c.3-.3.6-.3.8-.3h.6c.2 0 .4 0 .6.5l.9 2.1c.1.2.1.4 0 .5l-.4.6-.4.5c-.1.1-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.2.5.1.6-.1l.9-1c.2-.3.4-.2.6-.1l2 .9c.3.1.5.2.5.3.1.2.1.7-.1 1.3Z"/></svg></span>';
@@ -234,6 +241,11 @@ function card(url) {
     + '<svg class="chev" viewBox="0 0 8 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m1.5 1.5 5 5-5 5"/></svg>';
   return a;
 }
+function pin(url) {
+  const p = $('pin');
+  p.href = url; p.innerHTML = IM + 'Continue on iMessage'; p.hidden = false;
+  screen.classList.add('pinned');
+}
 // One status line under your latest message, as in Messages.
 function status(bubble, text, failed = false) {
   statusEl = statusEl || Object.assign(document.createElement('div'), { className: 'read' });
@@ -255,7 +267,10 @@ function bubble(text, isMine) {
   const prev = typing.previousElementSibling;
   if (prev?.classList.contains('b') && prev.classList.contains(isMine ? 'me' : 'them')) prev.classList.remove('tail'); // one tail per run
   if (b.textContent.trim()) log.insertBefore(b, typing);
-  for (const url of cards) log.insertBefore(card(url), typing);
+  for (const url of cards) {
+    log.insertBefore(card(url), typing);
+    if (url.startsWith('sms:')) pin(url); // the newest Continue on iMessage also stays pinned over the composer
+  }
   return b;
 }
 // Plow is typing from the moment it has your message until its answer lands (it answers in seconds, not instantly).
@@ -385,8 +400,8 @@ async function playIdeas() {
 // The field grows with what it holds, like Messages; return sends (shift+return is a new line).
 function fit() { input.style.height = '38px'; input.style.height = Math.min(input.scrollHeight, 110) + 'px'; form.classList.toggle('has', !!input.value.trim()); }
 const clear = () => { input.value = ''; fit(); };
-input.addEventListener('pointerdown', () => { if (!mine) { stopIdeas(); clear(); } });
-input.addEventListener('focus', () => { if (!mine) { stopIdeas(); clear(); } up({ type: 'plow-chat-focus' }); });
+// The idea clears once the field has focus, not on touch: a field shrinking under the finger loses the tap on iOS.
+input.addEventListener('focus', () => { if (!mine) { stopIdeas(); clear(); } });
 input.addEventListener('input', fit);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); } });
 
@@ -425,17 +440,31 @@ form.addEventListener('submit', (e) => {
   if (matchMedia('(pointer: fine)').matches) input.focus();
 });
 
-// Inside the landing page on a phone, the chat opens full screen; its back button closes it.
-addEventListener('message', (e) => {
-  if (e.origin !== location.origin) return;
-  if (e.data?.type === 'plow-chat-open') { opened = true; $('close').tabIndex = 0; }
-  if (e.data?.type === 'plow-chat-closed') { opened = false; $('close').tabIndex = -1; }
-  if (e.data?.type === 'plow-chat-type') { stopIdeas(); clear(); input.focus(); }
-  if (e.data?.type === 'plow-chat-ask' && typeof e.data.text === 'string') { // a template's ask, ready to send
-    stopIdeas(); input.value = e.data.text.slice(0, 500); fit();
-  }
-});
-$('close').addEventListener('click', () => { if (opened) { input.blur(); up({ type: 'plow-chat-close' }); } });
+// On a phone this is the page itself (the landing sends phones here). The screen follows what Safari shows
+// (visualViewport): with the keyboard up the header and thread stay put, the composer sits on the keyboard and the
+// latest message stays in view. Its back chevron leads to the rest of the page.
+if (window.top === window) {
+  const vv = window.visualViewport;
+  // Were you reading the latest message? Then it stays in view as the keyboard comes and goes. iOS moves the thread
+  // itself while the keyboard animates, so those scrolls don't count, and the end is pinned again once it settles.
+  let atEnd = true, moving = 0, settle;
+  log.addEventListener('scroll', () => { if (Date.now() > moving) atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 60; }, { passive: true });
+  const toEnd = () => { if (atEnd) log.scrollTop = log.scrollHeight; };
+  const follow = () => {
+    moving = Date.now() + 600;
+    screen.style.setProperty('--vvh', vv.height + 'px');
+    screen.style.setProperty('--vvt', vv.offsetTop + 'px');
+    screen.classList.toggle('kb', innerHeight - vv.height > 120);
+    requestAnimationFrame(toEnd);
+    clearTimeout(settle); settle = setTimeout(toEnd, 450);
+  };
+  if (vv) { vv.addEventListener('resize', follow); vv.addEventListener('scroll', follow); follow(); }
+  const page = API + '/?page=1' + (slug ? '&agent=' + slug : '');
+  $('close').tabIndex = 0;
+  $('close').addEventListener('click', () => {
+    if (document.referrer.startsWith(location.origin + API + '/?page')) history.back(); else location.assign(page);
+  });
+}
 
 bubble('What do you want an agent to do for you?', false).classList.add('greet');
 if (token) refill().then(() => { if (!mine) playIdeas(); token && listen(); });
