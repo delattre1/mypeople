@@ -45,6 +45,7 @@ from urllib.parse import parse_qs, urlsplit
 DATA = Path(os.environ.get("RELAY_DATA") or Path.home() / "web-chat")
 PAGE = Path(__file__).with_name("page.html")          # the chat, at /chat
 LANDING = Path(__file__).with_name("landing.html")    # the landing page around it, at / (the chat alone when absent)
+VERSIONS = ("a", "b", "c")                            # /?v=a is landing-a.html: other takes on the page, side by side
 PORT = int(os.environ.get("RELAY_PORT") or 8000)
 SLUG = re.compile(r"[a-z0-9-]{1,40}")
 TAPBACKS = ("❤️", "👍", "👎", "😂", "‼️", "❓")  # iMessage's six
@@ -257,7 +258,10 @@ def handler_for(relay):
             q = parse_qs(url.query)
             try:
                 if method == "GET" and url.path in ("/", "/chat"):
-                    page = (LANDING if url.path == "/" and LANDING.exists() else PAGE).read_bytes()
+                    v = q.get("v", [""])[0]
+                    alt = LANDING.with_name(f"landing-{v}.html") if v in VERSIONS else None
+                    page = (alt if url.path == "/" and alt and alt.exists()
+                            else LANDING if url.path == "/" and LANDING.exists() else PAGE).read_bytes()
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Content-Length", str(len(page)))

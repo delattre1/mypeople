@@ -138,6 +138,15 @@ class WebChatPlugin(unittest.TestCase):
         self.assertEqual(self.http("GET", f"/agent/thread?visitor={va}", token="new-key")[0], 404)
         self.assertEqual(self.plugin.call("GET", f"/agent/thread?visitor={va}")["visitor"], va, "back with the owner")
 
+    def test_page_versions(self):
+        """/?v=a serves landing-a.html (the versions Daniel picks from); anything else is the page as it is."""
+        default = self.http("GET", "/")[1]
+        for v in ("a", "b", "c"):
+            self.assertEqual(self.http("GET", f"/?v={v}")[1], (PLUGIN / f"landing-{v}.html").read_bytes())
+        for q in ("?v=d", "?v=../landing", "?v=", "?v=a&v=b"):
+            self.assertEqual(self.http("GET", "/" + q)[1], default if q != "?v=a&v=b" else (PLUGIN / "landing-a.html").read_bytes())
+        self.assertIn(b'placeholder="iMessage"', self.http("GET", "/chat?v=a")[1], "the chat page has no versions")
+
     def test_handover_line_is_never_visitor_text(self):
         # The relay's handover item has no text; it reads as the relay's own line, with how to read the thread.
         line = self.plugin.envelope({"seq": 9, "visitor": "w1", "kind": "handover"})
