@@ -614,6 +614,21 @@ class CloudTest(unittest.TestCase):
             self.assertEqual(hellos, [("POST", "/v1/chats/cht_c/messages",
                                        {"body": pc.WELCOME}, "proxied")])
 
+    def test_routed_myplow_sends_no_generic_welcome(self):
+        """Build an Agent routes a person's own MyPlow (creds carry owner_handle); its Boss greets them itself, so the
+        bridge's generic hello would be a second, worse greeting (Daniel 10-28)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pc = load("plow_chat_routed", "plow-chat/plow-chat.py", {"PLOW_CHAT_STATE_DIR": tmp, "HOST_ID": "h"})
+            creds = {"token": "tok", "chat_uid": "", "cloud": True, "owner_handle": "+15550100001", "line_uid": "ln_p8"}
+            calls = []
+
+            def api(method, path, body=None, token=None):
+                calls.append((method, path))
+                return 200, {"data": [{"uid": "m1", "direction": "inbound", "body": "Plow Activate: X", "chat_uid": "cht_r"}]}
+            pc.api = api
+            pc.poll_chat(creds, "cht_r")
+            self.assertEqual([c for c in calls if c[0] == "POST"], [], "no generic hello for a routed MyPlow")
+
 
     def test_cloud_agent_works_once_plow_drops_the_legacy_me_path(self):
         """Plow keeps GET /v1/agents/cloud/me only until images move off it; the bridge reads /v1/agents/me."""

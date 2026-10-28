@@ -760,9 +760,12 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
     note_tapbacks(msgs, chat_uid, seed)
     if first:
         log(f"seeded {len(msgs)} existing message(s) in {chat_uid} as already handled")
-        if creds.get("cloud"):
+        if creds.get("cloud") and not creds.get("owner_handle"):
             # A fresh cloud agent's first text was the signup phrase, which the
             # seed just swallowed; without this the new owner hears nothing.
+            # A MyPlow routed to its person by Build an Agent (route sets owner_handle) greets them itself, by
+            # name and about their ask (first-text.py): a generic hello first reads as a second, worse greeting
+            # (Daniel 10-28).
             try:
                 send_message(WELCOME, chat_uid, creds)
             except SystemExit as e:  # a failed hello must not take the bridge down
