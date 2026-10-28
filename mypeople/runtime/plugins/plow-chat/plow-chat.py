@@ -102,26 +102,6 @@ SPEAKER = re.compile(r"(?:\n|^)~([A-Z][A-Za-z0-9]{1,19})\s*$")
 def signed_by(body: str) -> str:
     named = SPEAKER.search(body or "")
     return named.group(1) if named else ""
-
-
-# Who sent each reply, from the sender's own AGENT_ID, for a reply that carries no "~Name": Build an Agent homes sign
-# nothing (10-28), and without this the router lost who answered last, so Daniel's "Yes" to Lin's offer went to the
-# Boss and he got two replies.
-ANSWERED = STATE_DIR / "answered.json"  # {message uid: agent name}, the newest 200
-
-
-def note_answer(data: dict) -> None:
-    agent = (os.environ.get("AGENT_ID") or "").rsplit(":", 1)[-1]
-    uid = (data or {}).get("uid")
-    if agent and uid:
-        seen = read_json(ANSWERED, {})
-        seen[uid] = agent
-        write_json(ANSWERED, dict(list(seen.items())[-200:]))
-
-
-def answered_by(m: dict) -> str:
-    """The agent behind an outbound message: its signature, else the record its reply left."""
-    return signed_by(m.get("body")) or read_json(ANSWERED, {}).get(m.get("uid") or "", "")
 # A pass over every chat runs on each (re)connect, every SWEEP_SECONDS on a live socket (Plow's
 # events are best-effort, so a frame can go missing), and every POLL_SECONDS while the socket is
 # down or a text waits on the Boss.
@@ -429,7 +409,7 @@ def conversation(answer, message) -> tuple:
         minutes = None  # no readable times: who answered last still counts
     if minutes is not None and minutes > FOLLOW_MINUTES:
         return ()
-    return answered_by(answer), minutes, answer["body"]
+    return signed_by(answer["body"]), minutes, answer["body"]
 
 
 def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
@@ -793,7 +773,7 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
         return 0
     routed, last = 0, None
     for m in sorted(msgs, key=order):
-        if m.get("direction") == "outbound" and answered_by(m):
+        if m.get("direction") == "outbound" and signed_by(m.get("body")):
             last = m  # who answered last, for the router
         r = route_message(m, chat_uid, conversation(last, m))
         if not r.startswith("skip"):
@@ -904,9 +884,7 @@ def main():
             args = args[2:]
         if not args and not files:
             raise SystemExit(f"usage: {SELF} reply [cht_x] [--file PATH ...] \"text\"")
-        data = send_message(" ".join(args), chat_uid, files=files)
-        note_answer(data)
-        print(json.dumps(data))
+        print(json.dumps(send_message(" ".join(args), chat_uid, files=files)))
     elif cmd == "react":
         flag = next((a for a in args if a in HELP or a.startswith("--")), None)
         if flag in HELP:
