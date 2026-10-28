@@ -118,15 +118,32 @@ def _plow_chat():
     return _router
 
 
+ANSWERED = STATE_DIR / "answered.json"  # {visitor: {agent, at, text}}: who answered each visitor last, for the router
+
+
+def note_answer(visitor, text):
+    """Remember which agent (its AGENT_ID) answered this visitor, when, and what it said: a bare follow-up like "Yes"
+    then goes to whoever made the offer (Daniel 10-28: his "Yes" to Lin's offer went to the Boss, two replies)."""
+    agent = (os.environ.get("AGENT_ID") or "").rsplit(":", 1)[-1]
+    if agent:
+        seen = read_json(ANSWERED, {})
+        seen[visitor] = {"agent": agent, "at": time.time(), "text": text[:300]}
+        write_json(ANSWERED, dict(list(seen.items())[-500:]))
+
+
 def target_for(m):
     """PLOW_CHAT_ROUTER=jev (Daniel 10-28): a visitor's text goes straight to the live agent that owns it, picked the
-    way plow-chat picks for iMessage, so the Boss does not route by thinking. A handover, the router off, or anything
-    failing goes to the Boss. ponytail: no "who answered last" context yet (plow-chat passes it); a bare follow-up the
-    router can't place goes to the Boss."""
+    way plow-chat picks for iMessage (with who answered them last as context), so the Boss does not route by
+    thinking. A handover, the router off, or anything failing goes to the Boss."""
     if os.environ.get("PLOW_CHAT_ROUTER") != "jev" or m.get("kind") == "handover" or not m.get("text"):
         return TARGET
     try:
-        return _plow_chat().pick_agent(m["text"], {})
+        pc = _plow_chat()
+        last = read_json(ANSWERED, {}).get(m.get("visitor") or "") or {}
+        minutes = (time.time() - last["at"]) / 60 if last else None
+        if last and minutes <= pc.FOLLOW_MINUTES:
+            return pc.pick_agent(m["text"], {}, last["agent"], minutes, last["text"])
+        return pc.pick_agent(m["text"], {})
     except Exception as e:  # noqa: BLE001 - a router that fails must never lose the text
         log(f"router: {type(e).__name__}; to the Boss")
         return TARGET
@@ -180,7 +197,9 @@ def main():
     if cmd == "serve":
         serve()
     elif cmd == "reply" and len(args) >= 2 and not args[1].startswith("--"):
-        print(json.dumps(call("POST", "/agent/reply", {"visitor": args[0], "text": " ".join(args[1:])})))
+        text = " ".join(args[1:])
+        print(json.dumps(call("POST", "/agent/reply", {"visitor": args[0], "text": text})))
+        note_answer(args[0], text)
     elif cmd == "react" and len(args) >= 2:
         print(json.dumps(call("POST", "/agent/react", {"visitor": args[0], "message": args[1], "emoji": args[2] if len(args) > 2 else ""})))
     elif cmd == "history" and len(args) == 1:

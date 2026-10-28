@@ -614,6 +614,19 @@ class CloudTest(unittest.TestCase):
             self.assertEqual(hellos, [("POST", "/v1/chats/cht_c/messages",
                                        {"body": pc.WELCOME}, "proxied")])
 
+    def test_router_knows_who_answered_without_a_signature(self):
+        """Build an Agent homes sign nothing (10-28): the reply's sender (AGENT_ID) is recorded, so a bare "Yes" to
+        Lin's offer still has Lin as who answered last (without it, Daniel got two replies)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pc = load("plow_chat_answered", "plow-chat/plow-chat.py", {"PLOW_CHAT_STATE_DIR": tmp, "HOST_ID": "h"})
+            with mock.patch.dict(os.environ, {"AGENT_ID": "h/main:Lin"}):
+                pc.note_answer({"uid": "msg_1"})
+            self.assertEqual(pc.answered_by({"body": "Want it in Chinese too?", "uid": "msg_1"}), "Lin")
+            self.assertEqual(pc.answered_by({"body": "hello\n~Sunny", "uid": "msg_2"}), "Sunny")
+            self.assertEqual(pc.answered_by({"body": "no record, no name", "uid": "msg_3"}), "")
+            offer = {"body": "Want it in Chinese too?", "uid": "msg_1", "created_at": "2026-10-28T18:00:00Z"}
+            self.assertEqual(pc.conversation(offer, {"created_at": "2026-10-28T18:01:00Z"})[0], "Lin")
+
     def test_routed_myplow_sends_no_generic_welcome(self):
         """Build an Agent routes a person's own MyPlow (creds carry owner_handle); its Boss greets them itself, so the
         bridge's generic hello would be a second, worse greeting (Daniel 10-28)."""

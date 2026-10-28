@@ -150,6 +150,21 @@ class WebChatPlugin(unittest.TestCase):
             self.assertEqual(self.http("GET", "/" + q)[1], default if q != "?v=a&v=b" else (PLUGIN / "landing-a.html").read_bytes())
         self.assertIn(b'placeholder="iMessage"', self.http("GET", "/chat?v=a")[1], "the chat page has no versions")
 
+    def test_router_gets_who_answered_the_visitor_last(self):
+        # Daniel 10-28: a bare "Yes" to Lin's offer must reach Lin, so the router hears who answered last.
+        import types
+        calls = []
+        os.environ["PLOW_CHAT_ROUTER"] = "jev"
+        try:
+            self.plugin._router = types.SimpleNamespace(FOLLOW_MINUTES=30, pick_agent=lambda *a: calls.append(a) or "mac/main:Lin")
+            os.environ["AGENT_ID"] = "mac/main:Lin"
+            self.plugin.note_answer("w1", "Want it in Chinese too?")
+            os.environ.pop("AGENT_ID")
+            self.assertEqual(self.plugin.target_for({"visitor": "w1", "text": "Yes"}), "mac/main:Lin")
+        finally:
+            os.environ.pop("PLOW_CHAT_ROUTER", None)
+        self.assertEqual((calls[0][0], calls[0][2], calls[0][4]), ("Yes", "Lin", "Want it in Chinese too?"))
+
     def test_router_sends_a_text_to_the_agent_that_owns_it(self):
         # PLOW_CHAT_ROUTER=jev (Daniel 10-28): plow-chat's pick_agent decides; handover, router off or failure: Boss.
         import types
