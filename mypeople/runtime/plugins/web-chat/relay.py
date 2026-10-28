@@ -301,7 +301,10 @@ def handler_for(relay):
             if self.headers.get("Authorization"):
                 v = self.visitor()
             else:
-                if relay.limited(f"new {ip}", 5, 3600):
+                # 60 an hour: a household (or a demo room) shares one address, and each page version and each Start over is
+                # a new chat; 5 an hour turned the sixth away (10-28). ponytail: per address only, a shared store if it ever
+                # needs to stop a real flood.
+                if relay.limited(f"new {ip}", 60, 3600):
                     raise Fail(429, "too many new chats from here; try again in an hour")
                 vid, token = relay.store.new_visitor(page)
                 v = {"id": vid}
