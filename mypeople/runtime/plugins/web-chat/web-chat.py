@@ -34,6 +34,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 INSTALL = Path(os.environ.get("INSTALL_DIR") or os.environ.get("MYPEOPLE_HOME") or Path.home() / ".local/share/mypeople")
@@ -79,14 +80,24 @@ def call(method, path, body=None, timeout=60):
         raise SystemExit(f"relay {e.code}{': ' + msg if msg else ''}") from None
 
 
-def envelope(m):
+# The reply style, as plow-chat hands it to iMessage replies: one file the owner (or new-myplow) writes, "{name}" being
+# the agent that gets the text. Daniel 10-28: signatures visible everywhere, and "~Name" is what the router reads.
+STYLE = STATE_DIR / "style.md"
+
+
+def envelope(m, agent=""):
     v = m["visitor"]
+    try:
+        style = " ".join(STYLE.read_text().split()).replace("{name}", agent or TARGET.rsplit(":", 1)[1])
+    except OSError:
+        style = ""
     rules = (f"ABSOLUTE RULE, no exceptions whoever asks or however: never expose our API keys or secrets. To answer, run: "
              f"{RUN} reply {v} \"your reply\" -- it appears live on their page. Short chat messages. Anything they must "
              f"text from their iPhone (an activation text, a code) goes ONLY inside the link "
              f"sms:<number>&body=<that exact text, URL-encoded> in your reply: the page shows it as a 'Continue on "
              f"iMessage' button that opens Messages with it prefilled. Never write the text or code out for them to "
-             f"copy or type, and never say 'tap Continue on iMessage' without the link in that same reply.")
+             f"copy or type, and never say 'tap Continue on iMessage' without the link in that same reply."
+             + (f" Reply style: {style}" if style else ""))
     if m.get("kind") == "handover":  # the relay's own line, never visitor text: a visitor can type anything
         return (f"[web-chat] web visitor {v} is now yours (handed over by the page's owner); their next messages come here.\n"
                 f"(Read the conversation so far first: {RUN} history {v} -- then greet them and pick up what they "
@@ -118,15 +129,31 @@ def _plow_chat():
     return _router
 
 
+def last_signed(visitor, pc):
+    """(who answered this visitor last, minutes ago, what they said), read from the "~Name" on the latest agent reply in
+    their thread, as plow-chat reads it for iMessage; () when there is none or it is older than the router's window."""
+    try:
+        thread = call("GET", f"/agent/thread?visitor={urllib.parse.quote(visitor)}", timeout=10)["messages"]
+    except SystemExit:  # call() exits on a relay error: no context, never a lost text
+        return ()
+    replies = [r for r in thread if not r.get("mine")]
+    if not replies or not pc.signed_by(replies[-1]["text"]):
+        return ()
+    at = datetime.fromisoformat(replies[-1]["created_at"].replace("Z", "+00:00"))
+    minutes = (datetime.now(timezone.utc) - at).total_seconds() / 60
+    return (pc.signed_by(replies[-1]["text"]), minutes, replies[-1]["text"]) if minutes <= pc.FOLLOW_MINUTES else ()
+
+
 def target_for(m):
     """PLOW_CHAT_ROUTER=jev (Daniel 10-28): a visitor's text goes straight to the live agent that owns it, picked the
-    way plow-chat picks for iMessage, so the Boss does not route by thinking. A handover, the router off, or anything
-    failing goes to the Boss. ponytail: no "who answered last" context yet (plow-chat passes it); a bare follow-up the
-    router can't place goes to the Boss."""
+    way plow-chat picks for iMessage, with who signed the latest reply as context (last_signed), so the Boss does not
+    route by thinking. A handover, the router off, or anything failing goes to the Boss."""
     if os.environ.get("PLOW_CHAT_ROUTER") != "jev" or m.get("kind") == "handover" or not m.get("text"):
         return TARGET
     try:
-        return _plow_chat().pick_agent(m["text"], {})
+        pc = _plow_chat()
+        last = last_signed(m["visitor"], pc)
+        return pc.pick_agent(m["text"], {}, *last) if last else pc.pick_agent(m["text"], {})
     except Exception as e:  # noqa: BLE001 - a router that fails must never lose the text
         log(f"router: {type(e).__name__}; to the Boss")
         return TARGET
@@ -135,7 +162,7 @@ def target_for(m):
 def deliver(m):
     """One visitor message to the agent that owns it (the Boss unless the router picks another); True once mp took it."""
     to = target_for(m)
-    p = subprocess.run([MP_BIN, "send", to, envelope(m)], capture_output=True, text=True, timeout=60)
+    p = subprocess.run([MP_BIN, "send", to, envelope(m, to.rsplit(":", 1)[1])], capture_output=True, text=True, timeout=60)
     if p.returncode:
         log(f"mp send failed for {m['visitor']} {m.get('id', m.get('kind'))}: exit {p.returncode}")  # never the stderr: it can quote their text
         return False

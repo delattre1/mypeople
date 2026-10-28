@@ -150,6 +150,26 @@ class WebChatPlugin(unittest.TestCase):
             self.assertEqual(self.http("GET", "/" + q)[1], default if q != "?v=a&v=b" else (PLUGIN / "landing-a.html").read_bytes())
         self.assertIn(b'placeholder="iMessage"', self.http("GET", "/chat?v=a")[1], "the chat page has no versions")
 
+    def test_router_reads_who_signed_the_visitors_last_reply(self):
+        # Daniel 10-28: signatures visible on the page too, and a bare "Yes" to Lin's offer goes straight to Lin.
+        self.http("POST", "/messages", {"text": "teach me hello in Chinese"})
+        v = self.plugin.call("GET", "/agent/inbox?after=0&wait=0")["messages"][-1]["visitor"]
+        self.plugin.call("POST", "/agent/reply", {"visitor": v, "text": "Hello is 你好. Want thank you too?\n~Lin"})
+        pc = load("plow_chat_for_web", PLUGIN.parent / "plow-chat" / "plow-chat.py")
+        calls = []
+        pc.pick_agent = lambda *a: calls.append(a) or "mac/main:Lin"
+        self.plugin._router = pc
+        os.environ["PLOW_CHAT_ROUTER"] = "jev"
+        try:
+            self.assertEqual(self.plugin.target_for({"visitor": v, "text": "Yes"}), "mac/main:Lin")
+            self.assertEqual((calls[-1][0], calls[-1][2]), ("Yes", "Lin"))
+            self.plugin.target_for({"visitor": "w00000000", "text": "hi"})  # unknown visitor: no context, no crash
+            self.assertEqual(len(calls[-1]), 2)
+        finally:
+            os.environ.pop("PLOW_CHAT_ROUTER", None)
+        (self.dir / "state/style.md").write_text('An agent signs once: "~" and its own agent name (e.g. "~Lin").')
+        self.assertIn('Reply style: An agent signs once', self.plugin.envelope({"visitor": v, "id": "m1", "text": "x"}, "Lin"))
+
     def test_router_sends_a_text_to_the_agent_that_owns_it(self):
         # PLOW_CHAT_ROUTER=jev (Daniel 10-28): plow-chat's pick_agent decides; handover, router off or failure: Boss.
         import types
