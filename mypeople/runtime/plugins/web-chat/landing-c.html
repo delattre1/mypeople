@@ -800,18 +800,25 @@ function handover(url, big = false) {
   const a = Object.assign(document.createElement('a'), { className: 'ho-btn', href: url });
   a.innerHTML = '<span class="ho-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3C6.5 3 2 6.6 2 11.1c0 2.6 1.5 4.9 3.8 6.4-.2 1.3-.9 2.6-2 3.5 2.2 0 4.1-.8 5.4-2 .9.2 1.8.3 2.8.3 5.5 0 10-3.6 10-8.1S17.5 3 12 3Z"/></svg></span><span>Continue on iMessage</span>';
   const note = Object.assign(document.createElement('p'), { className: 'ho-note' });
+  const m = url.match(/^sms:([^?&]*)(?:[?&]+body=([^&]*))?/);
+  const to = decodeURIComponent(m?.[1] || ''), body = decodeURIComponent((m?.[2] || '').replace(/\+/g, ' '));
+  // One text straight to the agent (#2558): any number but Plow's own (628) 246-3032 is the agent's own; say so. The
+  // text can still be 'Plow Activate: CODE' (it signs them in on the agent's number), so the number decides, not the text.
+  const nice = to.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, '($1) $2-$3');
+  const direct = to && to.replace(/\D/g, '') !== '16282463032';
   if (phone || !window.qrcode) {
-    note.textContent = 'Opens Messages with one text ready. Send it and your agent texts you back.';
+    note.textContent = direct ? `Opens Messages to your agent, ${nice}. Send it and your agent answers.`
+      : 'Opens Messages with one text ready. Send it and your agent texts you back.';
     el.append(a, note);
     return el;
   }
-  const m = url.match(/^sms:([^?&]*)(?:[?&]+body=([^&]*))?/);
   const qr = window.qrcode(0, 'M');
-  qr.addData('SMSTO:' + decodeURIComponent(m?.[1] || '') + ':' + decodeURIComponent((m?.[2] || '').replace(/\+/g, ' ')));
+  qr.addData('SMSTO:' + to + ':' + body);
   qr.make();
   const code = Object.assign(document.createElement('div'), { className: 'ho-qr', innerHTML: qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true }) });
   code.setAttribute('aria-label', 'QR code: scan with your iPhone to text your agent');
-  note.innerHTML = '<b>Scan with your iPhone camera</b>, then hit Send. Your agent texts you back.';
+  note.innerHTML = direct ? `<b>Scan with your iPhone camera</b> to text your agent at ${nice}, then hit Send.`
+    : '<b>Scan with your iPhone camera</b>, then hit Send. Your agent texts you back.';
   const mac = Object.assign(document.createElement('a'), { className: 'ho-mac', href: url, textContent: 'Or open Messages on this Mac' });
   const side = document.createElement('div');
   side.append(note, mac);
