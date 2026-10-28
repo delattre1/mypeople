@@ -265,68 +265,91 @@ html.phone #app { position: fixed; z-index: 20; left: 0; right: 0; top: var(--vv
 @media (prefers-reduced-motion: reduce) { .dots i { animation: none; } }
 </style>
 <style>
-/* Version C, "Guided": the three steps on top (Describe, Plow asks, Text your agent), the conversation in bubbles under
-   them, one field. Light paper with Plow's volt. */
-.vc { --c-ink: #13130F; --c-ink-2: #57574F; --c-ink-3: #8B8B82; --c-line: #E3E3DC; --c-chip: #fff; --c-ho: #fff; --c-focus: #13130F;
-  width: min(760px, 100%); margin: 34px auto 0; text-align: left; display: flex; flex-direction: column; background: #FAFAF8;
-  border: 1px solid #E3E3DC; border-radius: 26px; box-shadow: 0 30px 80px -44px rgba(19, 19, 15, .35); overflow: hidden; font-family: var(--sans); color: var(--c-ink); }
-.vc-top { display: flex; align-items: center; gap: 12px; padding: 18px 24px; border-bottom: 1px solid var(--c-line); background: #fff; }
-.vc-track { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; flex: 1; min-width: 0; counter-reset: s; }
-.vc-track li { counter-increment: s; display: flex; align-items: center; gap: 8px; font: 500 13.5px/1 var(--sans); color: #A3A39A; white-space: nowrap; }
-.vc-track li::before { content: counter(s); width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 500 12px/1 var(--mono);
-  border: 1.5px solid #DBDBD3; background: #fff; transition: all .3s; }
-.vc-track li:not(:last-child) { padding-right: 8px; }
-.vc-track li:not(:last-child)::after { content: ''; width: 22px; height: 1.5px; background: #DBDBD3; margin-left: 8px; }
-.vc[data-step="1"] .vc-track li:nth-child(1), .vc[data-step="2"] .vc-track li:nth-child(2), .vc[data-step="3"] .vc-track li:nth-child(3) { color: #13130F; }
-.vc[data-step="1"] .vc-track li:nth-child(1)::before, .vc[data-step="2"] .vc-track li:nth-child(2)::before, .vc[data-step="3"] .vc-track li:nth-child(3)::before { border-color: #13130F; }
-.vc[data-step="2"] .vc-track li:nth-child(1)::before, .vc[data-step="3"] .vc-track li:nth-child(-n+2)::before { background: #D5EF8A; border-color: #D5EF8A; color: #1b2005; }
-.vc-reset { border: 0; background: none; font: 500 13.5px/1 var(--sans); color: var(--c-ink-3); cursor: pointer; padding: 6px 2px; }
-.vc-reset:hover { color: var(--c-ink); }
-.vc-stage { padding: 22px 22px 10px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; overscroll-behavior: contain; }
-.vc:not([data-step="1"]) .vc-stage { height: min(52vh, 480px); }
-.vc-title { margin: 6px 4px 6px; font: 500 clamp(28px, 3.4vw, 36px)/1.1 var(--display); letter-spacing: -.035em; }
-.vc-b { position: relative; max-width: 80%; padding: 10px 14px; border-radius: 20px; font: 400 16px/1.45 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere;
+/* Version C: the Plow agent builder. A contact card on top, three steps, then the chat: Plow opens with Mary's line, three
+   one-tap starts that show the texts you'd get, a field that's plainly a field, a "building" state while the agent spins
+   up, and "your agent is ready" at the end. Light, Plow's volt (Daniel: no need to be dark). Mary, 10-27, verbatim. */
+h1.hero-title { max-width: none; } /* 'Build your texting agent' on one line when there's room (Daniel) */
+.vc { --c-ink: #13130F; --c-ink-2: #57574F; --c-ink-3: #8B8B82; --c-line: #E6E6DF; --c-chip: #fff; --c-ho: #fff; --c-focus: #13130F;
+  width: min(780px, 100%); margin: 32px auto 0; text-align: left; display: flex; flex-direction: column; background: #FAFAF8;
+  border: 1px solid #E3E3DC; border-radius: 26px; box-shadow: 0 1px 0 rgba(19, 19, 15, .03), 0 34px 80px -46px rgba(19, 19, 15, .4); overflow: hidden;
+  font-family: var(--sans); color: var(--c-ink); }
+.vc-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px 12px; background: #fff; }
+.vc-av { width: 44px; height: 44px; border-radius: 50%; flex: none; }
+.vc-who { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.vc-who b { font: 600 16.5px/1.1 var(--sans); letter-spacing: -.01em; }
+.vc-who span { font: 400 13.5px/1.2 var(--sans); color: var(--c-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vc-who span.busy { color: #4c6606; }
+.vc-reset { margin-left: auto; border: 1px solid var(--c-line); background: #fff; border-radius: 999px; padding: 8px 14px; font: 500 13px/1 var(--sans);
+  color: var(--c-ink-2); cursor: pointer; white-space: nowrap; }
+.vc-reset:hover { border-color: #13130F; color: #13130F; }
+.vc-track { list-style: none; margin: 0; padding: 0 20px 14px; display: flex; gap: 8px; background: #fff; border-bottom: 1px solid var(--c-line); counter-reset: s; }
+.vc-track li { counter-increment: s; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; font: 500 12.5px/1.2 var(--sans); color: #A3A39A; }
+.vc-track li::before { content: ''; height: 3px; border-radius: 3px; background: #E6E6DF; transition: background .4s; }
+.vc[data-step="1"] .vc-track li:nth-child(1), .vc[data-step="2"] .vc-track li:nth-child(-n+2), .vc[data-step="3"] .vc-track li { color: #13130F; }
+.vc[data-step="1"] .vc-track li:nth-child(1)::before, .vc[data-step="2"] .vc-track li:nth-child(-n+2)::before, .vc[data-step="3"] .vc-track li::before { background: #13130F; }
+.vc[data-step="2"] .vc-track li:nth-child(1)::before, .vc[data-step="3"] .vc-track li:nth-child(-n+2)::before { background: #9DC23A; }
+.vc-stage { height: clamp(360px, 52vh, 500px); padding: 20px 18px 12px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; overscroll-behavior: contain; }
+.vc-b { position: relative; max-width: 78%; padding: 10px 14px; border-radius: 20px; font: 400 16px/1.45 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere;
   animation: vc-in .25s ease both; }
 @keyframes vc-in { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
 .vc-b.me { align-self: flex-end; background: #13130F; color: #fff; border-bottom-right-radius: 6px; }
 .vc-b.me.pending { opacity: .55; }
 .vc-b.plow { align-self: flex-start; background: #fff; color: var(--c-ink); border: 1px solid var(--c-line); border-bottom-left-radius: 6px; }
 .vc-b.plow a { color: inherit; text-underline-offset: 3px; }
-.vc-b + .vc-b.me, .vc-b.me + .vc-b.plow, .vc-b + .handover, .handover + .vc-b, .vc-b + .vc-typing { margin-top: 12px; }
+.vc-stage > * + .vc-b.me, .vc-b.me + .vc-b.plow, .vc-b + .vc-ready, .vc-b + .vc-building, .vc-b + .vc-typing { margin-top: 12px; }
 .vc-b.me.has-tb { margin-top: 26px; }
-/* Plow's reaction (its 👀) on your bubble's corner, as in Messages */
 .vc-tb { position: absolute; top: -16px; left: -12px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 15px;
   background: #fff; box-shadow: 0 0 0 2px #FAFAF8, 0 2px 6px rgba(19, 19, 15, .18); animation: vc-pop .35s cubic-bezier(.2, 1.4, .4, 1) both; }
 @keyframes vc-pop { from { transform: scale(.3); opacity: 0 } to { transform: none; opacity: 1 } }
 .vc-fail { align-self: flex-end; border: 0; background: none; padding: 4px 4px 0; font: 500 12px/1 var(--sans); color: #C2410C; cursor: pointer; }
 .vc-typing { align-self: flex-start; background: #fff; border: 1px solid var(--c-line); border-radius: 20px; padding: 13px 15px; color: var(--c-ink-3); }
-.vc .handover { align-self: stretch; margin-top: 8px; }
-.vc-form { padding: 14px 22px 20px; display: flex; flex-direction: column; gap: 12px; border-top: 1px solid transparent; }
-.vc:not([data-step="1"]) .vc-form { border-top-color: var(--c-line); background: #fff; }
-.vc-field { position: relative; background: #fff; border: 1px solid #DBDBD3; border-radius: 18px; transition: border-color .15s, box-shadow .15s; }
-.vc-field:focus-within { border-color: #13130F; box-shadow: 0 0 0 4px rgba(213, 239, 138, .55); }
-.vc-field textarea { display: block; width: 100%; min-height: 50px; border: 0; outline: 0; resize: none; background: transparent; padding: 14px 18px;
-  font: 400 16.5px/1.45 var(--sans); color: var(--c-ink); }
-.vc[data-step="1"] .vc-field textarea { min-height: 96px; font-size: 17px; }
-.vc-field textarea::placeholder { color: #A3A39A; }
-.vc-row { display: flex; align-items: center; gap: 12px; }
-.vc-chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
-html.phone .vc-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; } /* a phone scrolls them sideways */
-.vc-chips::-webkit-scrollbar { display: none; }
-.vc:not([data-step="1"]) .vc-chips { display: none; }
-.vc-go { margin-left: auto; height: 46px; padding: 0 22px; border: 0; border-radius: 999px; background: #13130F; color: #fff; font: 600 15px/1 var(--sans);
-  cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; opacity: .35; transition: opacity .15s; }
-.vc-form.has .vc-go { opacity: 1; }
+/* Three ways to start, each showing the text that agent would send you (show, don't tell). */
+.vc-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; animation: vc-in .3s .1s ease both; }
+.vc-tile { display: flex; flex-direction: column; gap: 10px; text-align: left; padding: 13px 13px 14px; border: 1px solid var(--c-line); border-radius: 16px;
+  background: #fff; cursor: pointer; font: inherit; color: inherit; transition: border-color .15s, transform .15s, box-shadow .15s; }
+.vc-tile:hover { border-color: #13130F; transform: translateY(-2px); box-shadow: 0 12px 24px -18px rgba(19, 19, 15, .5); }
+.vc-tile:focus-visible { outline: 2px solid #13130F; outline-offset: 2px; }
+.vc-tile b { font: 600 14.5px/1.25 var(--sans); }
+.vc-tile small { font: 500 10.5px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--c-ink-3); }
+.vc-tile .vc-sample { align-self: flex-start; background: #E9E9EB; color: #000; border-radius: 15px; border-bottom-left-radius: 5px; padding: 8px 11px;
+  font: 400 13.5px/1.35 -apple-system, system-ui, var(--sans); }
+/* While Plow spins the agent up: it says so, and keeps saying so, until the agent is ready. */
+.vc-building { align-self: flex-start; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 16px; background: #F1F6DF;
+  border: 1px solid #DCE9B0; color: #2f3d07; font: 500 14.5px/1.3 var(--sans); }
+.vc-building time { font: 500 12.5px/1 var(--mono); color: #6b7f2c; }
+.vc-spin { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid #C9DD8A; border-top-color: #4c6606; animation: vc-rot .9s linear infinite; }
+@keyframes vc-rot { to { transform: rotate(360deg) } }
+.vc-ready { align-self: stretch; display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 18px; background: #fff;
+  border: 1px solid #D5EF8A; box-shadow: 0 0 0 4px rgba(213, 239, 138, .35); animation: vc-in .35s ease both; }
+.vc-ready h3 { margin: 0; display: flex; align-items: center; gap: 8px; font: 600 16px/1.2 var(--sans); }
+.vc-ready h3::before { content: ''; width: 22px; height: 22px; border-radius: 50%; background: #D5EF8A url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231b2005' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 12.5l4 4 8-9'/%3E%3C/svg%3E") center/14px no-repeat; }
+.vc-ready .handover { border: 0; padding: 0; background: none; }
+.vc-form { padding: 12px 16px 16px; background: #fff; border-top: 1px solid var(--c-line); }
+/* Once the agent is ready, its button stays in reach above the field whenever the ready card has scrolled away (Daniel). */
+.vc-pin { display: flex; align-items: center; justify-content: center; gap: 9px; height: 44px; margin-bottom: 10px; border-radius: 999px; background: #34C759;
+  color: #fff; font: 600 15px/1 var(--sans); text-decoration: none; animation: vc-in .25s ease both; }
+.vc-pin svg { width: 18px; height: 18px; fill: #fff; }
+.vc-field { position: relative; background: #fff; border: 1.5px solid #CFCFC6; border-radius: 22px; transition: border-color .15s, box-shadow .15s; }
+.vc-field:focus-within { border-color: #13130F; box-shadow: 0 0 0 4px rgba(213, 239, 138, .6); }
+.vc-field textarea { display: block; width: 100%; min-height: 48px; border: 0; outline: 0; resize: none; background: transparent; padding: 13px 56px 13px 16px;
+  font: 400 16.5px/1.4 var(--sans); color: var(--c-ink); caret-color: #4c6606; }
+.vc-field textarea::placeholder { color: #9A9A91; }
+.vc-send { position: absolute; right: 7px; bottom: 6px; width: 36px; height: 36px; border-radius: 50%; border: 0; background: #13130F; color: #fff;
+  display: grid; place-items: center; cursor: pointer; opacity: .25; transition: opacity .15s, transform .15s; }
+.vc-form.has .vc-send { opacity: 1; }
+.vc-send:active { transform: scale(.94); }
+.vc-send svg { width: 17px; height: 17px; }
 html.phone .vc { background: #FAFAF8; }
-html.phone .vc-top { padding: 12px 16px; }
-html.phone .vc-track li { font-size: 0; gap: 0; }
-html.phone .vc-track li::before { font-size: 12px; }
-html.phone .vc-track li:not(:last-child)::after { width: 18px; }
-html.phone .vc[data-step="1"] .vc-track li:nth-child(1), html.phone .vc[data-step="2"] .vc-track li:nth-child(2), html.phone .vc[data-step="3"] .vc-track li:nth-child(3) { font-size: 14px; gap: 8px; }
-html.phone .vc-stage { flex: 1; min-height: 0; height: auto; padding: 18px 14px 8px; }
-html.phone .vc-form { padding: 10px 12px max(12px, env(safe-area-inset-bottom)); }
+html.phone .vc-head { padding: 10px 14px 10px; }
+html.phone .vc-av { width: 38px; height: 38px; }
+html.phone .vc-track { padding: 0 14px 10px; }
+html.phone .vc-stage { flex: 1; min-height: 0; height: auto; padding: 16px 12px 10px; }
+html.phone .vc-tiles { grid-template-columns: 1fr; gap: 8px; }
+html.phone .vc-tile { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; }
+html.phone .vc-tile small { display: none; }
+html.phone .vc-tile .vc-sample { font-size: 12.5px; max-width: 58%; }
+html.phone .vc-form { padding: 8px 10px max(10px, env(safe-area-inset-bottom)); }
 html.phone .vc.kb .vc-form { padding-bottom: 8px; }
-html.phone .vc[data-step="1"] .vc-field textarea { min-height: 72px; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
 </head>
@@ -368,16 +391,17 @@ html.phone .vc[data-step="1"] .vc-field textarea { min-height: 72px; }
     <h1 class="hero-title">Build your texting agent</h1>
 
     <div id="app" class="vc" data-step="1">
-  <div class="vc-top">
-    <ol class="vc-track" aria-label="Steps"><li>Describe</li><li>Plow asks</li><li>Text your agent</li></ol>
-    <button type="button" class="vc-reset" id="reset" hidden>Start over</button>
-  </div>
-  <div class="vc-stage" id="stage" role="log" aria-live="polite" aria-label="Conversation with Plow">
-    <h2 class="vc-title" id="title">What should your agent do?</h2>
+  <div class="vc-head"><img class="vc-av" src="data:image/webp;base64,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" alt=""><div class="vc-who"><b>Plow agent builder</b><span id="status">Builds an agent you can text</span></div>
+    <button type="button" class="vc-reset" id="reset" hidden>Start over</button></div>
+  <ol class="vc-track" aria-label="Steps"><li>Describe</li><li>Plow builds it</li><li>Text your agent</li></ol>
+  <div class="vc-stage" id="stage" role="log" aria-live="polite" aria-label="Conversation with the Plow agent builder">
+    <div class="vc-b plow" id="hello">Hey, I'm Plow, here to help you create an agent you can text. What problem do you need solved today?</div>
+    <div class="vc-tiles" id="tiles" aria-label="Start with one of these"></div>
   </div>
   <form class="vc-form" id="form">
-    <div class="vc-field"><textarea id="input" rows="1" placeholder="Describe it in a sentence or two" aria-label="Your message" autocomplete="off" enterkeyhint="send" maxlength="2000"></textarea></div>
-    <div class="vc-row"><div class="vc-chips" id="chips" aria-label="Examples"></div><button class="vc-go" id="go">Build my agent <span aria-hidden="true">→</span></button></div>
+    <a class="vc-pin" id="pin" hidden></a>
+    <div class="vc-field"><textarea id="input" rows="1" placeholder="Describe it in your own words" aria-label="Message the Plow agent builder" autocomplete="off" enterkeyhint="send" maxlength="2000"></textarea>
+      <button class="vc-send" aria-label="Send"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button></div>
   </form>
 </div>
   </div>
@@ -640,7 +664,7 @@ document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 <script>
 // --- The chat engine every version of the page shares: the relay's visitor API (history, live events, sending, start
 // over). A version only draws; `ui` is how: message(m, live), pending(text) -> handle, confirm(handle, m),
-// failed(handle, why, retry), typing(on), reaction(id, emoji), clear(). Each version keeps its own visitor.
+// failed(handle, why, retry), typing(on), reaction(id, emoji, live), clear(). Each version keeps its own visitor.
 function plowChat(version, ui) {
   const API = location.pathname.replace(/\/(chat\/?)?$/, '').replace(/\/$/, '');
   const KEY = 'plow-web-token-' + version;
@@ -651,11 +675,11 @@ function plowChat(version, ui) {
   const mine = new Map(); // text -> its handle on screen, until the relay names its id (its echo can beat the answer)
   const auth = () => (token ? { authorization: 'Bearer ' + token } : {});
   const take = (m, live) => {
-    if (seen.has(m.id)) { if (m.mine && m.reactions?.[0]) ui.reaction(m.id, m.reactions[0]); return; }
+    if (seen.has(m.id)) { if (m.mine && m.reactions?.[0]) ui.reaction(m.id, m.reactions[0], live); return; }
     seen.add(m.id);
     if (m.mine && mine.has(m.text)) { ui.confirm(mine.get(m.text), m); mine.delete(m.text); return; }
     ui.message(m, live);
-    if (m.mine && m.reactions?.[0]) ui.reaction(m.id, m.reactions[0]);
+    if (m.mine && m.reactions?.[0]) ui.reaction(m.id, m.reactions[0], live);
   };
   async function refill() {
     const r = await fetch(API + '/messages', { headers: auth() });
@@ -670,7 +694,7 @@ function plowChat(version, ui) {
     events = new EventSource(API + '/events?token=' + encodeURIComponent(token));
     events.addEventListener('message', (e) => take(JSON.parse(e.data), true));
     events.addEventListener('typing', (e) => ui.typing(JSON.parse(e.data).on));
-    events.addEventListener('reaction', (e) => { const d = JSON.parse(e.data); ui.reaction(d.message_id, d.emoji); });
+    events.addEventListener('reaction', (e) => { const d = JSON.parse(e.data); ui.reaction(d.message_id, d.emoji, true); });
     events.onopen = refill; // after a drop, catch up on what came meanwhile
   }
   function forget() {
@@ -794,36 +818,132 @@ function handover(url, big = false) {
   el.append(code, side);
   return el;
 }
+// --- Sounds: our own, made here (Apple's files are Apple's). Sent and received are each one sine with quiet 4th, 9th
+// and 16th harmonics; every 5 ms their pitch, loudness and each harmonic's level under it follow what the real ones
+// measure (resynth_sfx.py): [lead-in ms, [Hz, dBFS, dB×3, ...]]; the lead-in keeps their timing against the bubble. Each tapback plucks its own little figure. Silent until the visitor's
+// first tap, as browsers require.
+const SWEEPS = {
+  sent: [51,[342,-55.9,-26,-34,-24,340,-53.3,-26,-35,-25,341,-51.0,-27,-37,-25,343,-48.4,-28,-40,-26,346,-46.2,-29,-41,-27,348,-44.4,-31,-41,-28,348,-42.7,-33,-41,-27,349,-41.1,-35,-41,-28,349,-39.6,-35,-42,-28,350,-37.9,-33,-42,-29,350,-36.4,-32,-43,-30,352,-34.9,-31,-44,-33,352,-33.6,-30,-45,-35,351,-32.6,-30,-44,-35,352,-31.4,-30,-42,-35,355,-30.0,-31,-43,-34,355,-28.9,-31,-35,-33,354,-28.1,-32,-35,-32,354,-27.1,-32,-34,-31,355,-26.0,-32,-35,-31,355,-25.1,-32,-35,-32,355,-24.2,-32,-42,-33,355,-23.0,-32,-42,-36,357,-21.6,-32,-46,-38,359,-20.7,-33,-47,-38,359,-20.3,-33,-49,-37,357,-20.1,-33,-50,-38,355,-19.9,-33,-50,-37,356,-18.9,-33,-51,-37,364,-17.3,-34,-52,-37,368,-16.3,-35,-52,-38,367,-15.9,-36,-53,-39,374,-15.0,-36,-54,-40,390,-13.3,-37,-53,-42,400,-11.9,-37,-54,-46,406,-11.1,-37,-55,-49,412,-10.7,-37,-56,-49,418,-10.9,-37,-56,-49,422,-11.5,-37,-60,-51,424,-12.1,-36,-63,-53,429,-13.0,-36,-57,-53,436,-14.2,-34,-57,-55,440,-15.6,-32,-56,-55,445,-17.7,-31,-56,-54,456,-20.2,-29,-55,-52,463,-22.1,-29,-58,-50,461,-22.6,-29,-58,-48,458,-22.4,-29,-59,-47,457,-22.4,-30,-60,-47,456,-22.6,-30,-63,-47,456,-23.1,-31,-63,-49,455,-23.9,-31,-62,-51,454,-24.8,-32,-61,-55,454,-26.1,-32,-61,-58,456,-27.8,-33,-62,-60,455,-29.4,-33,-63,-61,455,-30.9,-34,-64,-61,455,-32.6,-34,-66,-60,457,-34.6,-35,-66,-59,459,-36.8,-35,-66,-59,458,-38.6,-35,-65,-59,454,-39.9,-34,-64,-59,453,-41.5,-34,-64,-60,454,-43.6,-33,-64,-61,456,-45.8,-33,-64,-60,455,-47.8,-33,-64,-59,451,-49.9,-34,-64,-56,450,-52.2,-35,-61,-54,451,-54.7,-38,-56,-51,453,-57.3,-41,-52,-47,457,-60.2,-46,-49,-43,458,-62.8,-46,-46,-40,456,-64.7,-44,-44,-34,451,-65.8,-44,-43,-32,447,-66.2,-43,-41,-29,444,-67.1,-43,-39,-28,440,-69.1,-43,-38,-27]],
+  received: [10,[400,-58.6,-29,-29,-28,395,-51.8,-28,-30,-30,388,-46.3,-28,-32,-31,386,-43.2,-28,-35,-34,389,-41.9,-28,-37,-38,393,-40.4,-29,-38,-41,392,-38.3,-30,-38,-43,391,-36.4,-33,-38,-44,390,-35.3,-34,-37,-42,393,-34.9,-34,-36,-40,393,-34.1,-33,-35,-39,390,-32.4,-33,-35,-39,387,-31.1,-33,-35,-39,389,-30.0,-33,-35,-40,388,-28.1,-34,-36,-42,382,-25.9,-33,-37,-43,374,-24.4,-33,-38,-45,367,-23.4,-33,-39,-46,371,-22.8,-33,-40,-48,377,-21.8,-32,-41,-49,370,-20.4,-32,-42,-50,360,-19.2,-32,-42,-50,354,-18.3,-32,-42,-47,356,-17.5,-33,-42,-45,359,-16.6,-33,-42,-45,356,-15.6,-34,-43,-45,352,-14.9,-34,-44,-45,349,-14.7,-35,-47,-46,346,-14.5,-35,-49,-48,338,-14.6,-36,-49,-48,339,-14.6,-38,-48,-48,344,-14.1,-37,-46,-49,339,-13.7,-34,-45,-50,328,-13.9,-33,-44,-49,316,-14.7,-31,-43,-46,309,-15.4,-30,-43,-45,307,-15.4,-30,-41,-46,302,-15.7,-30,-38,-46,293,-16.4,-30,-37,-46,288,-16.5,-30,-36,-49,288,-15.8,-31,-37,-51,288,-15.0,-32,-38,-50,288,-14.3,-32,-40,-51,288,-13.8,-33,-45,-52,288,-13.4,-34,-48,-56,288,-13.3,-34,-49,-60,288,-13.3,-35,-49,-63,287,-13.6,-35,-50,-65,287,-14.0,-35,-54,-66,286,-14.5,-35,-59,-65,286,-15.1,-35,-60,-64,286,-15.5,-35,-59,-63,286,-15.9,-35,-58,-61,286,-16.4,-36,-58,-61,286,-16.8,-36,-58,-61,286,-17.3,-36,-58,-61,286,-17.9,-36,-58,-62,285,-18.6,-36,-59,-65,285,-19.2,-36,-60,-68,285,-19.9,-37,-61,-69,285,-20.7,-37,-62,-68,285,-21.7,-38,-63,-68,284,-22.6,-38,-63,-68,284,-23.5,-38,-64,-69,284,-24.5,-38,-64,-68,284,-25.5,-38,-64,-66,283,-26.4,-37,-64,-64,283,-27.4,-37,-64,-64,283,-28.4,-37,-63,-64,283,-29.4,-36,-62,-64,283,-30.5,-36,-61,-66,283,-31.6,-37,-61,-68,283,-32.6,-37,-61,-69,283,-33.6,-37,-60,-69,283,-34.5,-37,-60,-69,283,-35.6,-38,-60,-70,282,-36.7,-37,-60,-70,282,-37.8,-37,-59,-54,282,-38.8,-38,-57,-54,282,-39.8,-38,-56,-54,282,-40.9,-38,-56,-54,282,-42.0,-38,-55,-54,282,-43.0,-38,-55,-62,282,-44.1,-38,-55,-59,282,-45.2,-38,-55,-57,282,-46.2,-39,-54,-56,282,-47.2,-40,-54,-54,282,-48.2,-41,-55,-54,282,-49.4,-42,-54,-55,281,-50.6,-41,-53,-55,281,-51.9,-41,-52,-57,281,-53.3,-40,-51,-58,281,-54.9,-38,-50,-56,281,-56.8,-37,-49,-52,279,-59.6,-36,-45,-44,276,-63.6,-35,-43,-41,279,-68.5,-35,-42,-40]],
+};
+const NOTES = { '❤️': [882, 1313, 1765], '👍': [882, 1765], '👎': [1313, 882], '😂': [1399, 1184], '‼️': [882, 882], '❓': [753, 904, 1033] };
+const HARMS = [4, 9, 16], ROW = 2 + HARMS.length;
+const sweeps = new Map();
+function sweep(ctx, kind) { // rendered once per sample rate
+  const key = kind + ctx.sampleRate;
+  if (sweeps.has(key)) return sweeps.get(key);
+  const [lead, t] = SWEEPS[kind], sr = ctx.sampleRate, hop = sr * 0.005, n = t.length / ROW, at = Math.round(sr * lead / 1000);
+  const buf = ctx.createBuffer(1, at + Math.ceil(n * hop), sr), d = buf.getChannelData(0);
+  for (let i = 0, ph = 0; i < n * hop; i++) {
+    const j = Math.floor(i / hop), x = i / hop - j, a = ROW * j, b = ROW * Math.min(j + 1, n - 1);
+    const at_ = (v) => t[a + v] + (t[b + v] - t[a + v]) * x; // this row's value, eased into the next
+    ph += 2 * Math.PI * at_(0) / sr;
+    d[at + i] = 10 ** (at_(1) / 20) * HARMS.reduce((s, h, c) => s + 10 ** (at_(2 + c) / 20) * Math.sin(h * ph), Math.sin(ph));
+  }
+  sweeps.set(key, buf);
+  return buf;
+}
+function voice(ctx, out, t0, kind) {
+  if (SWEEPS[kind]) { const s = ctx.createBufferSource(); s.buffer = sweep(ctx, kind); s.connect(out); s.start(t0); return; }
+  const env = (g, t, peak, rise, fall) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + rise); g.gain.exponentialRampToValueAtTime(0.0001, t + rise + fall); };
+  const tone = (f, t, dur, peak, rise) => {
+    const o = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain(), g2 = ctx.createGain();
+    o.frequency.value = f; o2.frequency.value = f * 2;
+    g2.gain.value = 0.18; env(g, t, peak, rise, dur - rise);
+    o.connect(g); o2.connect(g2).connect(g); g.connect(out);
+    o.start(t); o2.start(t); o.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
+  };
+  (NOTES[kind] || []).forEach((f, i) => tone(f, t0 + i * 0.08, 0.16, 0.22, 0.005));
+}
+const sfx = (() => {
+  let ctx = null, unlocked = false;
+  const unlock = () => {
+    unlocked = true;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = ctx || new AC();
+    if (ctx.state === 'suspended') ctx.resume();
+  };
+  for (const ev of ['pointerdown', 'keydown', 'touchend']) addEventListener(ev, unlock, { capture: true, passive: true });
+  window.__sfx = { events: [], voice };  // the proof recording renders these same voices at the same moments
+  return (kind) => {
+    window.__sfx.events.push({ kind, at: Date.now() });
+    if (!unlocked || !ctx) return;
+    const out = ctx.createGain(); out.gain.value = 0.9; out.connect(ctx.destination);
+    voice(ctx, out, ctx.currentTime + 0.01, kind);
+  };
+})();
 </script>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const app = $('app'), stage = $('stage'), form = $('form'), input = $('input'), go = $('go'), reset = $('reset'), title = $('title');
+  const app = $('app'), stage = $('stage'), form = $('form'), input = $('input'), reset = $('reset'), tiles = $('tiles'), status = $('status');
+  const STATUS = 'Builds an agent you can text';
+  // Three ways to start. Each shows a text that agent would send you: the page shows what you're building.
+  const STARTS = [
+    ['Answer my customers', "Answer my restaurant's customer messages: hours, menu and reservations.", "Hi! We're open 12 to 11 tonight. Want me to book you a table for 2 at 8?"],
+    ['Morning news brief', 'Text me the top Hacker News stories every morning at 8.', 'Good morning! Top 3 on Hacker News today: 1. A new open-source…'],
+    ['Catch missing receipts', 'Match my receipts to my card charges and text me when one is missing.', 'No receipt yet for $42.10 at Uber on Tuesday. Want me to ask them for it?'],
+  ];
   shell(app);
   const fit = field(input, form, 140);
-  chips($('chips'), input, fit);
   const s = stick(stage, app);
-  const rows = new Map();
-  let typingEl = null, linked = false;
+  for (const [title, ask, sample] of STARTS) {
+    const t = Object.assign(document.createElement('button'), { type: 'button', className: 'vc-tile' });
+    t.append(Object.assign(document.createElement('b'), { textContent: title }), Object.assign(document.createElement('small'), { textContent: 'Your agent texts you' }),
+      Object.assign(document.createElement('span'), { className: 'vc-sample', textContent: sample }));
+    t.setAttribute('aria-label', title + ': ' + ask);
+    t.addEventListener('click', () => chat.send(ask));
+    tiles.append(t);
+  }
+  const rows = new Map(), pin = $('pin');
+  let typingEl = null, building = null, buildTimer = null, buildStart = 0, readyCard = null;
+  const seen = new IntersectionObserver((es) => { for (const e of es) pin.hidden = e.isIntersecting; }, { root: stage, threshold: .5 });
+  const pinTo = (link, card) => {
+    pin.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3C6.5 3 2 6.6 2 11.1c0 2.6 1.5 4.9 3.8 6.4-.2 1.3-.9 2.6-2 3.5 2.2 0 4.1-.8 5.4-2 .9.2 1.8.3 2.8.3 5.5 0 10-3.6 10-8.1S17.5 3 12 3Z"/></svg>'
+      + (phone ? 'Continue on iMessage' : 'Your agent is ready: scan to text it');
+    pin.href = phone ? link : '#';
+    pin.onclick = phone ? null : (e) => { e.preventDefault(); card.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
+    if (readyCard) seen.unobserve(readyCard);
+    readyCard = card; seen.observe(card);
+  };
   const step = (k) => {
     k = Math.max(k, +app.dataset.step);
     app.dataset.step = k;
-    title.hidden = k !== 1;
+    tiles.hidden = k !== 1;
     reset.hidden = k === 1;
-    go.firstChild.textContent = k === 1 ? 'Build my agent ' : 'Send ';
-    input.placeholder = k === 1 ? 'Describe it in a sentence or two' : 'Message Plow';
+    input.placeholder = k === 1 ? 'Describe it in your own words' : 'Message the Plow agent builder';
   };
+  const say = (text, busy) => { status.textContent = text; status.classList.toggle('busy', !!busy); };
   const add = (el) => { stage.insertBefore(el, typingEl?.isConnected ? typingEl : null); return el; };
   const bubble = (text, who) => add(Object.assign(document.createElement('div'), { className: 'vc-b ' + who, textContent: text }));
+  // Plow says it's creating the agent: from then on the page shows it working, with a clock, until the agent is ready.
+  const SPINNING = /\b(creat|setting (it |your \w+ )?up|set(ting)? up your|building|spinning up|one moment|a moment|a minute)/i;
+  const buildOn = () => {
+    if (building?.isConnected) return;
+    buildStart = Date.now();
+    building = Object.assign(document.createElement('div'), { className: 'vc-building', innerHTML: '<span class="vc-spin" aria-hidden="true"></span><span>Building your agent</span><time>0:00</time>' });
+    stage.append(building);
+    say('Building your agent…', true);
+    buildTimer = setInterval(() => { const t = Math.floor((Date.now() - buildStart) / 1000); building.querySelector('time').textContent = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }, 1000);
+    s.end(true);
+  };
+  const buildOff = () => { clearInterval(buildTimer); building?.remove(); building = null; say(STATUS); };
   const plow = (text) => {
     const b = Object.assign(document.createElement('div'), { className: 'vc-b plow' });
     const link = rich(b, text);
     if (b.textContent) add(b);
-    if (link) { linked = true; add(handover(link, true)); step(3); }
+    if (link) {
+      buildOff();
+      const ready = Object.assign(document.createElement('div'), { className: 'vc-ready' });
+      ready.append(Object.assign(document.createElement('h3'), { textContent: 'Your agent is ready' }), handover(link, true));
+      add(ready); step(3); pinTo(link, ready);
+    } else if (SPINNING.test(text) && +app.dataset.step < 3) buildOn();
+    else buildOff();
   };
   const ui = {
-    message(m) { step(2); if (m.mine) rows.set(m.id, bubble(m.text, 'me')); else { ui.typing(false); plow(m.text); } s.end(true); },
-    pending(text) { step(2); const b = bubble(text, 'me'); b.classList.add('pending'); s.force(); return b; },
+    message(m, live) { step(2); if (m.mine) rows.set(m.id, bubble(m.text, 'me')); else { ui.typing(false); plow(m.text); if (live) sfx('received'); } s.end(true); },
+    pending(text) { step(2); const b = bubble(text, 'me'); b.classList.add('pending'); sfx('sent'); s.force(); return b; },
     confirm(b, m) { b.classList.remove('pending'); rows.set(m.id, b); },
     failed(b, why, retry) {
       b.classList.remove('pending');
@@ -832,21 +952,23 @@ function handover(url, big = false) {
       b.after(f);
     },
     typing(on) {
-      if (on && !typingEl?.isConnected) {
+      if (on && !typingEl?.isConnected && !building?.isConnected) {
         typingEl = Object.assign(document.createElement('div'), { className: 'vc-typing', innerHTML: '<span class="dots" aria-label="Plow is writing"><i></i><i></i><i></i></span>' });
-        stage.append(typingEl); s.end(true);
-      } else if (!on) typingEl?.remove();
+        stage.append(typingEl); s.end(true); say('Writing…', true);
+      } else if (!on) { typingEl?.remove(); if (!building?.isConnected) say(STATUS); }
     },
-    reaction(id, emoji) {
+    reaction(id, emoji, live) {
       const b = rows.get(id);
       if (!b) return;
+      if (live && emoji && !b.querySelector('.vc-tb')) sfx(NOTES[emoji] ? emoji : '👍'); // Plow's tapback lands: its little figure, as in the chat
       b.querySelector('.vc-tb')?.remove();
       b.classList.toggle('has-tb', !!emoji);
       if (emoji) b.append(Object.assign(document.createElement('span'), { className: 'vc-tb', textContent: emoji, ariaLabel: 'Plow reacted ' + emoji }));
     },
     clear() {
-      stage.querySelectorAll('.vc-b, .vc-fail, .vc-typing, .handover').forEach((e) => e.remove());
-      rows.clear(); typingEl = null; linked = false; app.dataset.step = 1; step(1);
+      stage.querySelectorAll('.vc-b:not(#hello), .vc-fail, .vc-typing, .vc-ready, .vc-building').forEach((e) => e.remove());
+      buildOff(); rows.clear(); typingEl = null; app.dataset.step = 1; step(1);
+      if (readyCard) seen.unobserve(readyCard); readyCard = null; pin.hidden = true;
     },
   };
   const chat = plowChat('c', ui);
@@ -857,7 +979,8 @@ function handover(url, big = false) {
     input.value = ''; fit();
     chat.send(text);
   });
-  reset.addEventListener('click', () => { chat.restart(); input.value = ''; fit(); });
+  reset.addEventListener('click', () => { chat.restart(); input.value = ''; fit(); if (!phone) input.focus({ preventScroll: true }); });
+  if (!phone) input.focus({ preventScroll: true }); // the caret is already blinking: plainly a field you type in
 })();
 </script>
 <script>
