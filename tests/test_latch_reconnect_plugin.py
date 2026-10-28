@@ -53,7 +53,9 @@ class LatchReconnectTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.m = load(self.tmp.name)
-        self.m.time.sleep = lambda s: None
+        sleep = mock.patch.object(self.m.time, "sleep")
+        sleep.start()
+        self.addCleanup(sleep.stop)
         self.tmux = FakeTmux()
         self.m.tmux = self.tmux
         self.m.CLAUDE_JSON = Path(self.tmp.name) / "claude.json"  # never the operator's real one

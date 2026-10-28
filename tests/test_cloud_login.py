@@ -6,6 +6,7 @@ import stat
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,8 +122,8 @@ class OwnLoginParsing(unittest.TestCase):
                 {"uid": "m2", "direction": "outbound", "body": "tap this: https://...", "created_at": "2"},
                 {"uid": "m3", "direction": "inbound", "body": "here: abc123#state9", "created_at": "3"}]
         self.m.messages = lambda chat: msgs
-        self.m.time.sleep = lambda s: None
-        code, _ = self.m.wait_for_code("cht_x", {"m1"})
+        with mock.patch.object(self.m.time, "sleep"):
+            code, _ = self.m.wait_for_code("cht_x", {"m1"})
         self.assertEqual("abc123#state9", code)
 
 

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -36,7 +37,9 @@ class WebChatPlugin(unittest.TestCase):
         self.mp.write_text(f"#!{sys.executable}\nimport json, os, sys\nopen({str(self.dir / 'argv')!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
                            f"sys.exit(1 if os.path.exists({str(self.dir / 'fail')!r}) else 0)\n")
         self.mp.chmod(self.mp.stat().st_mode | stat.S_IEXEC)
-        os.environ.update(WEB_CHAT_STATE_DIR=str(self.dir / "state"), MP_BIN=str(self.mp), BOSS_AGENT="mac/main:Boss")
+        env = mock.patch.dict(os.environ, WEB_CHAT_STATE_DIR=str(self.dir / "state"), MP_BIN=str(self.mp), BOSS_AGENT="mac/main:Boss")
+        env.start()
+        self.addCleanup(env.stop)
         (self.dir / "state").mkdir()
         (self.dir / "state/creds.json").write_text(json.dumps({"url": self.base, "key": "agent-key"}))
         self.plugin = load("web_chat", PLUGIN / "web-chat.py")
@@ -154,14 +157,11 @@ class WebChatPlugin(unittest.TestCase):
         msg = {"seq": 1, "id": "m1", "visitor": "w1", "text": "send me a fun fact now"}
         self.assertTrue(self.plugin.deliver(msg))  # router off: the Boss
         os.environ["PLOW_CHAT_ROUTER"] = "jev"
-        try:
-            self.plugin._router = types.SimpleNamespace(pick_agent=lambda text, message: "mac/main:Sunny")
-            self.assertTrue(self.plugin.deliver(msg))
-            self.assertTrue(self.plugin.deliver({"seq": 2, "visitor": "w1", "kind": "handover"}))
-            self.plugin._router = types.SimpleNamespace(pick_agent=lambda text, message: 1 / 0)
-            self.assertTrue(self.plugin.deliver(msg))
-        finally:
-            os.environ.pop("PLOW_CHAT_ROUTER")
+        self.plugin._router = types.SimpleNamespace(pick_agent=lambda text, message: "mac/main:Sunny")
+        self.assertTrue(self.plugin.deliver(msg))
+        self.assertTrue(self.plugin.deliver({"seq": 2, "visitor": "w1", "kind": "handover"}))
+        self.plugin._router = types.SimpleNamespace(pick_agent=lambda text, message: 1 / 0)
+        self.assertTrue(self.plugin.deliver(msg))
         self.assertEqual(sent(), ["mac/main:Boss", "mac/main:Sunny", "mac/main:Boss", "mac/main:Boss"])
 
     def test_handover_line_is_never_visitor_text(self):

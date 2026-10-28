@@ -314,9 +314,8 @@ class HookHandlerTests(unittest.TestCase):
         hh.C = mock.Mock(claim_notification_routes=lambda aid: claimed or [],
                          open_notification_routes=lambda aid, text: opened.append(text),
                          http_json=lambda *a, **k: sent.append((a[2]["target_agent"], a[2]["payload"]["message"])))
-        hh.time.sleep = lambda s: None
         with mock.patch.object(sys, "stdin", __import__("io").StringIO(json.dumps(payload))), \
-                mock.patch.object(sys, "argv", ["hook-handler.py", "Stop"]):
+                mock.patch.object(sys, "argv", ["hook-handler.py", "Stop"]), mock.patch.object(hh.time, "sleep"):
             hh.main()
         return [m for _, m in sent] if claimed is None else sent
 
@@ -436,7 +435,9 @@ class NestedCliHookTests(unittest.TestCase):
             hh = importlib.util.module_from_spec(spec)
             loader.exec_module(hh)
         hh.process_table = lambda: procs
-        hh.time.sleep = lambda s: None
+        sleep = mock.patch.object(hh.time, "sleep")
+        sleep.start()
+        self.addCleanup(sleep.stop)
         hh.test_pid = max(procs)  # the hook process is the deepest pid in each table
         return hh
 
