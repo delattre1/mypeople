@@ -116,7 +116,7 @@ flowchart TD
 
 - **Only a tagged release reaches the live install.** `make live` refuses any commit that is not the
   tag for its version, and refuses uncommitted changes, so what runs on the owner's Mac is always a
-  release you can name.
+  release you can name. It runs `make test` first, the whole suite, and installs nothing if a test fails.
 - **Verified, not assumed.** After a release the engineer checks the files on disk match the tag and
   the running server serves the new behaviour, then texts the owner one line.
 

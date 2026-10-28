@@ -46,6 +46,10 @@ class ReleasedGuardTests(unittest.TestCase):
         sh(self.d, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "Release 9.9.9 again")
         self.assertFalse(self.released(), "8064953 read 5.21.17 too; the tag names d7961d3 only")
 
+    def test_live_runs_the_whole_suite_first(self):
+        rule = next(l for l in (ROOT / "Makefile").read_text().splitlines() if l.startswith("live:"))
+        self.assertIn("test", rule.split(":", 1)[1].split(), "5.22.113 shipped failing tests: no make live without make test")
+
 
 FAKE_UV = """#!/bin/sh
 echo "$*" >> "$UV_CALLS"

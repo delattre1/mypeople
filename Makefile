@@ -2,7 +2,7 @@
 # images from 0.3.2 source).
 VERSION := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' mypeople/__init__.py)
 
-.PHONY: wheel image verify clean live app released cloud cli
+.PHONY: wheel image verify clean live app released cloud cli test
 
 wheel:
 	uv build --wheel --out-dir dist
@@ -20,8 +20,6 @@ clean:
 # the runtime into INSTALL_DIR and only then stamps VERSION, restarts every daemon and plugin still
 # serving older code, and stamps run/serving.version -- so the version shown is the code running.
 # Never write those two files by hand: on 10-03 three fixes were stamped live that were not running.
-# env -i because daemons inherit this environment and an agent's shell carries its own AGENT_ID,
-# TMUX and session; PATH is the one the desktop app gives them (desktop/src-tauri/src/main.rs).
 # A version number names exactly one tree. On 10-03 two commits both read 5.21.17, and untagged
 # 5.21.26-28 reached the live install by hand. So only the commit tagged v$(VERSION), with nothing
 # uncommitted under mypeople/, may become a live install or an app.
@@ -32,6 +30,23 @@ released:
 	  { echo "uncommitted changes under mypeople/ would ship as v$(VERSION)" >&2; exit 1; }
 
 APP_RT := /Applications/MyPlow.app/Contents/Resources/runtime
+# What daemons (and the tests) run in: env -i, because an agent's shell carries its own AGENT_ID, TMUX
+# and session; PATH is the one the desktop app gives them (desktop/src-tauri/src/main.rs).
+RT_ENV = env -i HOME="$$HOME" USER="$$USER" LOGNAME="$$LOGNAME" SHELL="$$SHELL" TMPDIR="$$TMPDIR" \
+  LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
+  PATH="$(APP_RT)/bin:$(APP_RT)/python/bin:$$HOME/.local/bin:$$HOME/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# The release gate every `make live` runs first (Boss 10-28): all Python test modules in ONE process,
+# in both orders, then the plugins' node tests; only exit codes count. 5.22.112/113 shipped tests that
+# failed whenever another module ran before them in the same process (one leaked env, four stubbed
+# time.sleep for the whole process): a per-module run hid them, and a `| tail` hid the exit code.
+# TERM: the tmux tests need it. A Mac without node skips the .test.mjs files, as tmux tests skip without tmux.
+test:
+	cd tests && mods="$$(ls test_*.py | sed 's/\.py$$//')" && \
+	  $(RT_ENV) TERM=xterm-256color PYTHONPATH="$(CURDIR)" python3 -m unittest -q $$mods && \
+	  $(RT_ENV) TERM=xterm-256color PYTHONPATH="$(CURDIR)" python3 -m unittest -q $$(printf '%s\n' $$mods | sort -r)
+	@command -v node >/dev/null || { echo "make test: no node, plugin .test.mjs files skipped"; exit 0; }; \
+	for t in mypeople/runtime/plugins/*/*.test.mjs; do node --test "$$t" || exit 1; done
 # boss-supervisor's login gate runs the `mypeople` on PATH, a separate `uv tool` install that no
 # release touched: it sat at 5.14.0 with an auth probe that started the 1Password MCP, one macOS
 # "access data from other apps" prompt per release (card 70a20b5dcf). Reinstall it from this
@@ -44,11 +59,8 @@ cli: released
 	  echo "[myplow] mypeople CLI $$v -> $(VERSION)"; \
 	fi
 
-live: released cli
-	env -i HOME="$$HOME" USER="$$USER" LOGNAME="$$LOGNAME" SHELL="$$SHELL" TMPDIR="$$TMPDIR" \
-	  LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 SSH_AUTH_SOCK="$$SSH_AUTH_SOCK" \
-	  PATH="$(APP_RT)/bin:$(APP_RT)/python/bin:$$HOME/.local/bin:$$HOME/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
-	  python3 -m mypeople.cli up --detach
+live: released test cli
+	$(RT_ENV) SSH_AUTH_SOCK="$$SSH_AUTH_SOCK" python3 -m mypeople.cli up --detach
 
 # MyPlow.app carrying this checkout, as a DMG. The app's version is the package it carries, not the
 # literal in tauri.conf.json, which had the app reading 5.14.0 over a 5.21 runtime. The target dir
