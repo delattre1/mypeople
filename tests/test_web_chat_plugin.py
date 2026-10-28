@@ -142,13 +142,12 @@ class WebChatPlugin(unittest.TestCase):
         self.assertEqual(self.plugin.call("GET", f"/agent/thread?visitor={va}")["visitor"], va, "back with the owner")
 
     def test_page_versions(self):
-        """/?v=a serves landing-a.html (the versions Daniel picks from); anything else is the page as it is."""
+        """/?v=c serves landing-c.html (the version Daniel picked); anything else is the page as it is."""
         default = self.http("GET", "/")[1]
-        for v in ("a", "b", "c"):
-            self.assertEqual(self.http("GET", f"/?v={v}")[1], (PLUGIN / f"landing-{v}.html").read_bytes())
-        for q in ("?v=d", "?v=../landing", "?v=", "?v=a&v=b"):
-            self.assertEqual(self.http("GET", "/" + q)[1], default if q != "?v=a&v=b" else (PLUGIN / "landing-a.html").read_bytes())
-        self.assertIn(b'placeholder="iMessage"', self.http("GET", "/chat?v=a")[1], "the chat page has no versions")
+        self.assertEqual(self.http("GET", "/?v=c")[1], (PLUGIN / "landing-c.html").read_bytes())
+        for q in ("?v=a", "?v=b", "?v=d", "?v=../landing", "?v=", "?v=a&v=c"):
+            self.assertEqual(self.http("GET", "/" + q)[1], default)
+        self.assertIn(b'placeholder="iMessage"', self.http("GET", "/chat?v=c")[1], "the chat page has no versions")
 
     def test_router_reads_who_signed_the_visitors_last_reply(self):
         # Daniel 10-28: signatures visible on the page too, and a bare "Yes" to Lin's offer goes straight to Lin.

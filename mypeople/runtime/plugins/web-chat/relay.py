@@ -45,7 +45,7 @@ from urllib.parse import parse_qs, urlsplit
 DATA = Path(os.environ.get("RELAY_DATA") or Path.home() / "web-chat")
 PAGE = Path(__file__).with_name("page.html")          # the chat, at /chat
 LANDING = Path(__file__).with_name("landing.html")    # the landing page around it, at / (the chat alone when absent)
-VERSIONS = ("a", "b", "c")                            # /?v=a is landing-a.html: other takes on the page, side by side
+VERSIONS = ("c",)                                     # /?v=c is landing-c.html, the take Daniel picked (10-28)
 PORT = int(os.environ.get("RELAY_PORT") or 8000)
 SLUG = re.compile(r"[a-z0-9-]{1,40}")
 TAPBACKS = ("❤️", "👍", "👎", "😂", "‼️", "❓")  # iMessage's six
