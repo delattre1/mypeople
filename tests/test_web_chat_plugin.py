@@ -147,6 +147,23 @@ class WebChatPlugin(unittest.TestCase):
             self.assertEqual(self.http("GET", "/" + q)[1], default if q != "?v=a&v=b" else (PLUGIN / "landing-a.html").read_bytes())
         self.assertIn(b'placeholder="iMessage"', self.http("GET", "/chat?v=a")[1], "the chat page has no versions")
 
+    def test_router_sends_a_text_to_the_agent_that_owns_it(self):
+        # PLOW_CHAT_ROUTER=jev (Daniel 10-28): plow-chat's pick_agent decides; handover, router off or failure: Boss.
+        import types
+        sent = lambda: [json.loads(l)[1] for l in (self.dir / "argv").read_text().splitlines()]
+        msg = {"seq": 1, "id": "m1", "visitor": "w1", "text": "send me a fun fact now"}
+        self.assertTrue(self.plugin.deliver(msg))  # router off: the Boss
+        os.environ["PLOW_CHAT_ROUTER"] = "jev"
+        try:
+            self.plugin._router = types.SimpleNamespace(pick_agent=lambda text, message: "mac/main:Sunny")
+            self.assertTrue(self.plugin.deliver(msg))
+            self.assertTrue(self.plugin.deliver({"seq": 2, "visitor": "w1", "kind": "handover"}))
+            self.plugin._router = types.SimpleNamespace(pick_agent=lambda text, message: 1 / 0)
+            self.assertTrue(self.plugin.deliver(msg))
+        finally:
+            os.environ.pop("PLOW_CHAT_ROUTER")
+        self.assertEqual(sent(), ["mac/main:Boss", "mac/main:Sunny", "mac/main:Boss", "mac/main:Boss"])
+
     def test_handover_line_is_never_visitor_text(self):
         # The relay's handover item has no text; it reads as the relay's own line, with how to read the thread.
         line = self.plugin.envelope({"seq": 9, "visitor": "w1", "kind": "handover"})

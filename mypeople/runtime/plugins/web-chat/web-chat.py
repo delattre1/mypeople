@@ -24,6 +24,7 @@ key's sha256. supervise.sh keeps `serve` running while that file exists.
     web-chat.py status
 """
 import fcntl
+import importlib.util
 import json
 import os
 import socket
@@ -103,13 +104,42 @@ def envelope(m):
             f"{RUN} react {v} {m['id']} 👀 (shows them it was read). {rules})")
 
 
+PLOW_CHAT = INSTALL / "plugins" / "plow-chat" / "plow-chat.py"
+_router = None
+
+
+def _plow_chat():
+    """plow-chat's own router (its pick_agent: one JEV decision over the live agents), loaded once."""
+    global _router
+    if _router is None:
+        spec = importlib.util.spec_from_file_location("plow_chat_router", PLOW_CHAT)
+        _router = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_router)
+    return _router
+
+
+def target_for(m):
+    """PLOW_CHAT_ROUTER=jev (Daniel 10-28): a visitor's text goes straight to the live agent that owns it, picked the
+    way plow-chat picks for iMessage, so the Boss does not route by thinking. A handover, the router off, or anything
+    failing goes to the Boss. ponytail: no "who answered last" context yet (plow-chat passes it); a bare follow-up the
+    router can't place goes to the Boss."""
+    if os.environ.get("PLOW_CHAT_ROUTER") != "jev" or m.get("kind") == "handover" or not m.get("text"):
+        return TARGET
+    try:
+        return _plow_chat().pick_agent(m["text"], {})
+    except Exception as e:  # noqa: BLE001 - a router that fails must never lose the text
+        log(f"router: {type(e).__name__}; to the Boss")
+        return TARGET
+
+
 def deliver(m):
-    """One visitor message to the Boss; True once mp took it."""
-    p = subprocess.run([MP_BIN, "send", TARGET, envelope(m)], capture_output=True, text=True, timeout=60)
+    """One visitor message to the agent that owns it (the Boss unless the router picks another); True once mp took it."""
+    to = target_for(m)
+    p = subprocess.run([MP_BIN, "send", to, envelope(m)], capture_output=True, text=True, timeout=60)
     if p.returncode:
         log(f"mp send failed for {m['visitor']} {m.get('id', m.get('kind'))}: exit {p.returncode}")  # never the stderr: it can quote their text
         return False
-    log(f"delivered {m['visitor']} {m.get('id', m.get('kind'))} to {TARGET}")
+    log(f"delivered {m['visitor']} {m.get('id', m.get('kind'))} to {to}")
     return True
 
 
