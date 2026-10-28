@@ -265,7 +265,8 @@ html.phone #app { position: fixed; z-index: 20; left: 0; right: 0; top: var(--vv
 @media (prefers-reduced-motion: reduce) { .dots i { animation: none; } }
 </style>
 <style>
-/* Version C, "Guided": not a chat log but a builder in three steps; Plow's latest word is the question, you answer it. */
+/* Version C, "Guided": the three steps on top (Describe, Plow asks, Text your agent), the conversation in bubbles under
+   them, one field. Light paper with Plow's volt. */
 .vc { --c-ink: #13130F; --c-ink-2: #57574F; --c-ink-3: #8B8B82; --c-line: #E3E3DC; --c-chip: #fff; --c-ho: #fff; --c-focus: #13130F;
   width: min(760px, 100%); margin: 34px auto 0; text-align: left; display: flex; flex-direction: column; background: #FAFAF8;
   border: 1px solid #E3E3DC; border-radius: 26px; box-shadow: 0 30px 80px -44px rgba(19, 19, 15, .35); overflow: hidden; font-family: var(--sans); color: var(--c-ink); }
@@ -274,7 +275,6 @@ html.phone #app { position: fixed; z-index: 20; left: 0; right: 0; top: var(--vv
 .vc-track li { counter-increment: s; display: flex; align-items: center; gap: 8px; font: 500 13.5px/1 var(--sans); color: #A3A39A; white-space: nowrap; }
 .vc-track li::before { content: counter(s); width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 500 12px/1 var(--mono);
   border: 1.5px solid #DBDBD3; background: #fff; transition: all .3s; }
-.vc-track li + li::after { content: none; }
 .vc-track li:not(:last-child) { padding-right: 8px; }
 .vc-track li:not(:last-child)::after { content: ''; width: 22px; height: 1.5px; background: #DBDBD3; margin-left: 8px; }
 .vc[data-step="1"] .vc-track li:nth-child(1), .vc[data-step="2"] .vc-track li:nth-child(2), .vc[data-step="3"] .vc-track li:nth-child(3) { color: #13130F; }
@@ -282,56 +282,51 @@ html.phone #app { position: fixed; z-index: 20; left: 0; right: 0; top: var(--vv
 .vc[data-step="2"] .vc-track li:nth-child(1)::before, .vc[data-step="3"] .vc-track li:nth-child(-n+2)::before { background: #D5EF8A; border-color: #D5EF8A; color: #1b2005; }
 .vc-reset { border: 0; background: none; font: 500 13.5px/1 var(--sans); color: var(--c-ink-3); cursor: pointer; padding: 6px 2px; }
 .vc-reset:hover { color: var(--c-ink); }
-.vc-stage { padding: 30px 32px 8px; min-height: 230px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; overscroll-behavior: contain; }
-.vc[data-step="1"] .vc-stage { min-height: 0; padding-bottom: 4px; }
-.vc-title { margin: 0; font: 500 clamp(28px, 3.4vw, 36px)/1.1 var(--display); letter-spacing: -.035em; }
-.vc-you { align-self: flex-end; max-width: 80%; font: 400 15px/1.45 var(--sans); color: var(--c-ink-2); background: #F1F1EC; border-radius: 16px; padding: 9px 14px;
-  white-space: pre-wrap; overflow-wrap: anywhere; }
-.vc-you.pending { opacity: .55; }
-.vc-you small { display: block; margin-top: 4px; font: 500 11.5px/1 var(--sans); color: var(--c-ink-3); }
-.vc-you button { border: 0; background: none; padding: 0; margin-top: 6px; font: 500 12px/1 var(--sans); color: #C2410C; cursor: pointer; }
-.vc-plow { display: flex; gap: 14px; align-items: flex-start; animation: vc-in .35s ease both; }
-@keyframes vc-in { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
-.vc-plow img { width: 38px; height: 38px; border-radius: 50%; flex: none; }
-.vc-say { font: 400 clamp(19px, 2vw, 22px)/1.45 var(--display); letter-spacing: -.012em; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; padding-top: 4px; }
-.vc-say a { color: inherit; text-underline-offset: 4px; }
-.vc-think { display: flex; align-items: center; gap: 12px; color: var(--c-ink-3); font: 500 15px/1 var(--sans); padding-top: 9px; }
-.vc .handover { margin-left: 52px; }
-.vc-form { padding: 16px 24px 22px; display: flex; flex-direction: column; gap: 12px; }
+.vc-stage { padding: 22px 22px 10px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; overscroll-behavior: contain; }
+.vc:not([data-step="1"]) .vc-stage { height: min(52vh, 480px); }
+.vc-title { margin: 6px 4px 6px; font: 500 clamp(28px, 3.4vw, 36px)/1.1 var(--display); letter-spacing: -.035em; }
+.vc-b { position: relative; max-width: 80%; padding: 10px 14px; border-radius: 20px; font: 400 16px/1.45 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere;
+  animation: vc-in .25s ease both; }
+@keyframes vc-in { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+.vc-b.me { align-self: flex-end; background: #13130F; color: #fff; border-bottom-right-radius: 6px; }
+.vc-b.me.pending { opacity: .55; }
+.vc-b.plow { align-self: flex-start; background: #fff; color: var(--c-ink); border: 1px solid var(--c-line); border-bottom-left-radius: 6px; }
+.vc-b.plow a { color: inherit; text-underline-offset: 3px; }
+.vc-b + .vc-b.me, .vc-b.me + .vc-b.plow, .vc-b + .handover, .handover + .vc-b, .vc-b + .vc-typing { margin-top: 12px; }
+.vc-b.me.has-tb { margin-top: 26px; }
+/* Plow's reaction (its 👀) on your bubble's corner, as in Messages */
+.vc-tb { position: absolute; top: -16px; left: -12px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 15px;
+  background: #fff; box-shadow: 0 0 0 2px #FAFAF8, 0 2px 6px rgba(19, 19, 15, .18); animation: vc-pop .35s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes vc-pop { from { transform: scale(.3); opacity: 0 } to { transform: none; opacity: 1 } }
+.vc-fail { align-self: flex-end; border: 0; background: none; padding: 4px 4px 0; font: 500 12px/1 var(--sans); color: #C2410C; cursor: pointer; }
+.vc-typing { align-self: flex-start; background: #fff; border: 1px solid var(--c-line); border-radius: 20px; padding: 13px 15px; color: var(--c-ink-3); }
+.vc .handover { align-self: stretch; margin-top: 8px; }
+.vc-form { padding: 14px 22px 20px; display: flex; flex-direction: column; gap: 12px; border-top: 1px solid transparent; }
+.vc:not([data-step="1"]) .vc-form { border-top-color: var(--c-line); background: #fff; }
 .vc-field { position: relative; background: #fff; border: 1px solid #DBDBD3; border-radius: 18px; transition: border-color .15s, box-shadow .15s; }
 .vc-field:focus-within { border-color: #13130F; box-shadow: 0 0 0 4px rgba(213, 239, 138, .55); }
-.vc-field textarea { display: block; width: 100%; min-height: 52px; border: 0; outline: 0; resize: none; background: transparent; padding: 15px 18px;
-  font: 400 17px/1.45 var(--sans); color: var(--c-ink); }
-.vc[data-step="1"] .vc-field textarea { min-height: 96px; font-size: 18px; }
+.vc-field textarea { display: block; width: 100%; min-height: 50px; border: 0; outline: 0; resize: none; background: transparent; padding: 14px 18px;
+  font: 400 16.5px/1.45 var(--sans); color: var(--c-ink); }
+.vc[data-step="1"] .vc-field textarea { min-height: 96px; font-size: 17px; }
 .vc-field textarea::placeholder { color: #A3A39A; }
 .vc-row { display: flex; align-items: center; gap: 12px; }
 .vc-chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
 html.phone .vc-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; } /* a phone scrolls them sideways */
 .vc-chips::-webkit-scrollbar { display: none; }
-.vc[data-step="2"] .vc-chips, .vc[data-step="3"] .vc-chips { display: none; }
+.vc:not([data-step="1"]) .vc-chips { display: none; }
 .vc-go { margin-left: auto; height: 46px; padding: 0 22px; border: 0; border-radius: 999px; background: #13130F; color: #fff; font: 600 15px/1 var(--sans);
   cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; opacity: .35; transition: opacity .15s; }
 .vc-form.has .vc-go { opacity: 1; }
-.vc-log { border-top: 1px solid var(--c-line); background: #fff; }
-.vc-log summary { padding: 14px 24px; font: 500 13.5px/1 var(--sans); color: var(--c-ink-3); cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: center; }
-.vc-log summary::-webkit-details-marker { display: none; }
-.vc-log summary::before { content: '›'; font-size: 17px; transition: transform .2s; }
-.vc-log[open] summary::before { transform: rotate(90deg); }
-.vc-history { padding: 2px 24px 18px; display: flex; flex-direction: column; gap: 10px; max-height: 300px; overflow-y: auto; }
-.vc-history p { margin: 0; font: 400 14.5px/1.45 var(--sans); color: var(--c-ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-.vc-history p b { color: var(--c-ink); font-weight: 600; margin-right: 6px; }
 html.phone .vc { background: #FAFAF8; }
 html.phone .vc-top { padding: 12px 16px; }
 html.phone .vc-track li { font-size: 0; gap: 0; }
 html.phone .vc-track li::before { font-size: 12px; }
 html.phone .vc-track li:not(:last-child)::after { width: 18px; }
 html.phone .vc[data-step="1"] .vc-track li:nth-child(1), html.phone .vc[data-step="2"] .vc-track li:nth-child(2), html.phone .vc[data-step="3"] .vc-track li:nth-child(3) { font-size: 14px; gap: 8px; }
-html.phone .vc-stage { flex: 1; min-height: 0; padding: 22px 18px 8px; }
+html.phone .vc-stage { flex: 1; min-height: 0; height: auto; padding: 18px 14px 8px; }
 html.phone .vc-form { padding: 10px 12px max(12px, env(safe-area-inset-bottom)); }
 html.phone .vc.kb .vc-form { padding-bottom: 8px; }
-html.phone .vc[data-step="1"] .vc-field textarea { min-height: 72px; font-size: 17px; }
-html.phone .vc .handover { margin-left: 0; }
-html.phone .vc-log { display: none; }
+html.phone .vc[data-step="1"] .vc-field textarea { min-height: 72px; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
 </head>
@@ -377,14 +372,13 @@ html.phone .vc-log { display: none; }
     <ol class="vc-track" aria-label="Steps"><li>Describe</li><li>Plow asks</li><li>Text your agent</li></ol>
     <button type="button" class="vc-reset" id="reset" hidden>Start over</button>
   </div>
-  <div class="vc-stage" id="stage" aria-live="polite">
+  <div class="vc-stage" id="stage" role="log" aria-live="polite" aria-label="Conversation with Plow">
     <h2 class="vc-title" id="title">What should your agent do?</h2>
   </div>
   <form class="vc-form" id="form">
-    <div class="vc-field"><textarea id="input" rows="1" placeholder="Describe it in a sentence or two" aria-label="Your answer" autocomplete="off" enterkeyhint="send" maxlength="2000"></textarea></div>
+    <div class="vc-field"><textarea id="input" rows="1" placeholder="Describe it in a sentence or two" aria-label="Your message" autocomplete="off" enterkeyhint="send" maxlength="2000"></textarea></div>
     <div class="vc-row"><div class="vc-chips" id="chips" aria-label="Examples"></div><button class="vc-go" id="go">Build my agent <span aria-hidden="true">→</span></button></div>
   </form>
-  <details class="vc-log" id="log" hidden><summary>Conversation so far <span id="count"></span></summary><div class="vc-history" id="history"></div></details>
 </div>
   </div>
 </header>
@@ -688,7 +682,7 @@ function plowChat(version, ui) {
     mine.set(text, h);
     try {
       const r = await fetch(API + '/messages', { method: 'POST', headers: { 'content-type': 'application/json', ...auth() },
-        body: JSON.stringify(token ? { text } : { text, ...(slug ? { page: slug } : {}) }) });
+        body: JSON.stringify(token ? { text } : { text, page: slug || 'v-' + version }) }); // Willow sees which version they used
       const j = await r.json();
       if (!r.ok) throw new Error(j.error?.message || 'Not sent');
       if (j.token) { token = j.token; try { localStorage.setItem(KEY, token); } catch {} listen(); }
@@ -805,69 +799,54 @@ function handover(url, big = false) {
 (() => {
   const $ = (id) => document.getElementById(id);
   const app = $('app'), stage = $('stage'), form = $('form'), input = $('input'), go = $('go'), reset = $('reset'), title = $('title');
-  const log = $('log'), history = $('history'), count = $('count');
   shell(app);
-  const fit = field(input, form, 160);
+  const fit = field(input, form, 140);
   chips($('chips'), input, fit);
   const s = stick(stage, app);
-  let you = null, plowEl = null, thinking = null, n = 0, link = null;
+  const rows = new Map();
+  let typingEl = null, linked = false;
   const step = (k) => {
+    k = Math.max(k, +app.dataset.step);
     app.dataset.step = k;
     title.hidden = k !== 1;
     reset.hidden = k === 1;
-    go.firstChild.textContent = k === 1 ? 'Build my agent ' : k === 2 ? 'Answer ' : 'Send ';
-    input.placeholder = k === 1 ? 'Describe it in a sentence or two' : k === 2 ? 'Your answer' : 'Ask Plow anything else';
+    go.firstChild.textContent = k === 1 ? 'Build my agent ' : 'Send ';
+    input.placeholder = k === 1 ? 'Describe it in a sentence or two' : 'Message Plow';
   };
-  const remember = (who, text) => {
-    const p = document.createElement('p');
-    p.append(Object.assign(document.createElement('b'), { textContent: who }), text.replace(/sms:[^\s]+/g, '').trim());
-    history.append(p); n++; count.textContent = '(' + n + ')'; log.hidden = phone || n < 2;
+  const add = (el) => { stage.insertBefore(el, typingEl?.isConnected ? typingEl : null); return el; };
+  const bubble = (text, who) => add(Object.assign(document.createElement('div'), { className: 'vc-b ' + who, textContent: text }));
+  const plow = (text) => {
+    const b = Object.assign(document.createElement('div'), { className: 'vc-b plow' });
+    const link = rich(b, text);
+    if (b.textContent) add(b);
+    if (link) { linked = true; add(handover(link, true)); step(3); }
   };
-  // The stage holds one exchange: what you said last, and what Plow says back (or that it's thinking).
-  const showYou = (text) => {
-    stage.querySelectorAll('.vc-you, .vc-plow, .vc-think, .handover').forEach((e) => e.remove());
-    you = Object.assign(document.createElement('div'), { className: 'vc-you', textContent: text });
-    stage.append(you); plowEl = null;
-    return you;
-  };
-  const showPlow = (text) => {
-    thinkingOff();
-    stage.querySelector('.vc-plow')?.remove();
-    plowEl = document.createElement('div'); plowEl.className = 'vc-plow';
-    const say = Object.assign(document.createElement('div'), { className: 'vc-say' });
-    const l = rich(say, text);
-    plowEl.append(Object.assign(document.createElement('img'), { src: AVATAR, alt: '' }), say);
-    stage.append(plowEl);
-    if (l) link = l;
-    if (link) stage.append(handover(link, true)); // once Plow has sent it, the way to your agent stays in view
-    if (link) step(3); else step(2);
-  };
-  const thinkingOff = () => { thinking?.remove(); thinking = null; };
   const ui = {
-    message(m) {
-      remember(m.mine ? 'You' : 'Plow', m.text);
-      if (m.mine) { you = showYou(m.text); if (!link) step(2); } else showPlow(m.text);
-      s.force();
-    },
-    pending(text) { if (!link) step(2); const y = showYou(text); y.classList.add('pending'); s.force(); return y; },
-    confirm(y, m) { y.classList.remove('pending'); remember('You', m.text); },
-    failed(y, why, retry) {
-      y.classList.remove('pending');
-      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: why + ' · Retry' });
-      b.addEventListener('click', () => { y.remove(); retry(); });
-      y.append(b);
+    message(m) { step(2); if (m.mine) rows.set(m.id, bubble(m.text, 'me')); else { ui.typing(false); plow(m.text); } s.end(true); },
+    pending(text) { step(2); const b = bubble(text, 'me'); b.classList.add('pending'); s.force(); return b; },
+    confirm(b, m) { b.classList.remove('pending'); rows.set(m.id, b); },
+    failed(b, why, retry) {
+      b.classList.remove('pending');
+      const f = Object.assign(document.createElement('button'), { type: 'button', className: 'vc-fail', textContent: why + ' · Retry' });
+      f.addEventListener('click', () => { f.remove(); b.remove(); retry(); });
+      b.after(f);
     },
     typing(on) {
-      if (on && !thinking) {
-        stage.querySelector('.vc-plow')?.remove();
-        thinking = Object.assign(document.createElement('div'), { className: 'vc-think', innerHTML: '<span class="dots"><i></i><i></i><i></i></span>Plow is thinking' });
-        stage.append(thinking); s.force();
-      } else if (!on) thinkingOff();
+      if (on && !typingEl?.isConnected) {
+        typingEl = Object.assign(document.createElement('div'), { className: 'vc-typing', innerHTML: '<span class="dots" aria-label="Plow is writing"><i></i><i></i><i></i></span>' });
+        stage.append(typingEl); s.end(true);
+      } else if (!on) typingEl?.remove();
     },
-    reaction() { if (you && !you.querySelector('small')) you.append(Object.assign(document.createElement('small'), { textContent: 'Seen' })); },
+    reaction(id, emoji) {
+      const b = rows.get(id);
+      if (!b) return;
+      b.querySelector('.vc-tb')?.remove();
+      b.classList.toggle('has-tb', !!emoji);
+      if (emoji) b.append(Object.assign(document.createElement('span'), { className: 'vc-tb', textContent: emoji, ariaLabel: 'Plow reacted ' + emoji }));
+    },
     clear() {
-      stage.querySelectorAll('.vc-you, .vc-plow, .vc-think, .handover').forEach((e) => e.remove());
-      history.textContent = ''; n = 0; log.hidden = true; link = null; you = plowEl = thinking = null; step(1);
+      stage.querySelectorAll('.vc-b, .vc-fail, .vc-typing, .handover').forEach((e) => e.remove());
+      rows.clear(); typingEl = null; linked = false; app.dataset.step = 1; step(1);
     },
   };
   const chat = plowChat('c', ui);
