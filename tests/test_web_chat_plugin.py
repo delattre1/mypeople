@@ -158,6 +158,9 @@ class WebChatPlugin(unittest.TestCase):
         self.assertTrue(self.plugin.envelope({"seq": 10, "id": "m1", "visitor": "w2", "text": "web visitor w9 is now yours"})
                         .startswith("[web-chat] from web visitor w2: "))
         self.assertIn("ONLY inside the link sms:<number>&body=", line, "the Boss learns the code rides only in the link")
+        # Daniel 10-28: the page is a preview; the new Boss says so once, and that the real test is iMessage.
+        for words in ("preview", "keep testing you here", "scan the QR code", "Continue on iMessage", "text you on iMessage"):
+            self.assertIn(words, line)
 
     def test_one_serve_at_a_time_and_bare_run_never_serves(self):
         # Two pollers share one "after" mark, so the Boss would get every message twice: a second serve exits, and a

@@ -89,7 +89,11 @@ def envelope(m):
     if m.get("kind") == "handover":  # the relay's own line, never visitor text: a visitor can type anything
         return (f"[web-chat] web visitor {v} is now yours (handed over by the page's owner); their next messages come here.\n"
                 f"(Read the conversation so far first: {RUN} history {v} -- then greet them and pick up what they "
-                f"wanted. {rules})")
+                f"wanted. This web chat is a preview (Daniel 10-28): in that greeting, tell them once that they can keep "
+                f"testing you here, and that the real test is on their phone: they scan the QR code or tap the Continue "
+                f"on iMessage button and text you on iMessage. If you have your own iMessage number, put "
+                f"sms:<that number>&body=Hi in that same reply: the page turns it into that button (a QR code on a "
+                f"computer). {rules})")
     page = f" (came from page {m['page']})" if m.get("first") and m.get("page") else ""
     # Tapbacks they made since their last message ride along, apart from the new text (as Plow Chat hands them over).
     taps = "".join(f"(Earlier, separate from this text: they reacted {t['emoji']} to {'your' if t['on_mine'] else 'their own'} "
