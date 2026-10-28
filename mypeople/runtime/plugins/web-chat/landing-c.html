@@ -305,7 +305,8 @@ html.phone #app { position: fixed; z-index: 20; left: 0; right: 0; top: var(--vv
 .vc[data-step="1"] .vc-field textarea { min-height: 96px; font-size: 18px; }
 .vc-field textarea::placeholder { color: #A3A39A; }
 .vc-row { display: flex; align-items: center; gap: 12px; }
-.vc-chips { display: flex; gap: 8px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.vc-chips { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+html.phone .vc-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; } /* a phone scrolls them sideways */
 .vc-chips::-webkit-scrollbar { display: none; }
 .vc[data-step="2"] .vc-chips, .vc[data-step="3"] .vc-chips { display: none; }
 .vc-go { margin-left: auto; height: 46px; padding: 0 22px; border: 0; border-radius: 999px; background: #13130F; color: #fff; font: 600 15px/1 var(--sans);
