@@ -32,6 +32,8 @@ case "$*" in
 esac""")
         # claude -p works only for a real-looking login
         self.stub(bin_ / "claude", '#!/bin/bash\n[[ "$CLAUDE_CODE_OAUTH_TOKEN" == sk-ant-oat01-* ]]')
+        # timeout: the script runs on Linux, where coreutils has it; macOS has none (#50)
+        self.stub(bin_ / "timeout", '#!/bin/bash\nshift; exec "$@"')
         self.env = dict(os.environ, PATH=f"{bin_}:{os.environ['PATH']}", MYPEOPLE_HOME=str(self.td / "data"),
                         PLOW_API_BASE="http://plow", MYPLOW_CLAUDE_BANK="http://bank",
                         ASKED=str(self.td / "asked"))
