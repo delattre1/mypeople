@@ -61,7 +61,7 @@ API = "https://discord.com/api/v10"
 AGENT_DIR = Path(__file__).resolve().parent / "agent"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 BOSS = os.environ.get("BOSS_AGENT") or "%s/main:Boss" % (os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0])
-POLL = 5
+POLL = 1   # was 5 until 10-29: a post waited up to 5 s for the pane; Daniel wants under 2 s
 # What the agent may say, fetched fresh at every build: public pages only.
 KNOWLEDGE = {
     "publish-page.txt": "https://aiworthusing.com/agent-index/publish",
