@@ -21,7 +21,7 @@ BIN = ROOT / "mypeople" / "runtime" / "bin"
 PINNED = {"HOST_ID": "test-node", "QUEUE_URL": "http://127.0.0.1:1", "QUEUE_SECRET": "secret",
           "DEFAULT_BACKEND": "claude"}
 DEFAULTS = {"TTYD_PORT": "7681", "HUD_PORT": "9901", "TODO_PORT": "9933",
-            "DEFAULT_ENG_MODEL": "claude-opus-4-8", "DEFAULT_CLAUDE_MODEL": "claude-opus-4-8",
+            "DEFAULT_ENG_MODEL": "claude-opus-5-5", "DEFAULT_CLAUDE_MODEL": "claude-opus-5-5",
             "DEFAULT_CODEX_MODEL": "", "DEFAULT_GROK_MODEL": ""}
 
 

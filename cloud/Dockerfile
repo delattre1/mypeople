@@ -59,9 +59,9 @@ USER root
 ARG MYPLOW_RELEASE
 COPY cloud/entrypoint.sh /opt/myplow/entrypoint.sh
 # The owner's model choice, for the very first boot; run.sh re-asserts it from the release on every
-# boot after that, since an update keeps the home where this file lives. The Boss is spawned without
-# --model, so on a Mac it follows the owner's own ~/.claude/settings.json; without one here Claude
-# Code fell back to its default (Sonnet).
+# boot after that, since an update keeps the home where this file lives. mp names --model and
+# --effort on every agent it launches (#49); this file covers any `claude` started outside mp, which
+# without one fell back to Claude Code's default (Sonnet).
 COPY --chown=mypeople:mypeople cloud/claude-settings.json /home/mypeople/.claude/settings.json
 RUN chmod 0755 /opt/myplow/entrypoint.sh && chown mypeople:mypeople /opt/myplow \
  && install -d -o mypeople -g mypeople /opt/myplow/releases /var/lib/mypeople/snapshots

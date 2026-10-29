@@ -456,11 +456,14 @@ def write_queue_env(install, backend):
             if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
                 value = value[1:-1]
             existing[key.strip()] = value
+        # claude-opus-4-8 was the shipped default until 5.22.122: a file still on it never chose it (#49).
+        current = lambda m: "claude-opus-5-5" if m in ("", "claude-opus-4-8") else m
         replacements = {
             "DEFAULT_BACKEND": backend,
-            "DEFAULT_CLAUDE_MODEL": os.environ.get(
+            "DEFAULT_ENG_MODEL": current(existing.get("DEFAULT_ENG_MODEL", "")),
+            "DEFAULT_CLAUDE_MODEL": current(os.environ.get(
                 "DEFAULT_CLAUDE_MODEL", existing.get(
-                    "DEFAULT_CLAUDE_MODEL", existing.get("DEFAULT_ENG_MODEL", "claude-opus-4-8"))),
+                    "DEFAULT_CLAUDE_MODEL", existing.get("DEFAULT_ENG_MODEL", "")))),
             "DEFAULT_CODEX_MODEL": os.environ.get(
                 "DEFAULT_CODEX_MODEL", existing.get("DEFAULT_CODEX_MODEL", "")),
         }
@@ -497,9 +500,9 @@ def write_queue_env(install, backend):
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "DEFAULT_BACKEND": backend,
-        "DEFAULT_ENG_MODEL": os.environ.get("DEFAULT_ENG_MODEL", "claude-opus-4-8"),
+        "DEFAULT_ENG_MODEL": os.environ.get("DEFAULT_ENG_MODEL", "claude-opus-5-5"),
         "DEFAULT_CLAUDE_MODEL": os.environ.get(
-            "DEFAULT_CLAUDE_MODEL", os.environ.get("DEFAULT_ENG_MODEL", "claude-opus-4-8")),
+            "DEFAULT_CLAUDE_MODEL", os.environ.get("DEFAULT_ENG_MODEL", "claude-opus-5-5")),
         "DEFAULT_CODEX_MODEL": os.environ.get("DEFAULT_CODEX_MODEL", ""),
         "DEFAULT_GROK_MODEL": os.environ.get("DEFAULT_GROK_MODEL", ""),
         "QUEUE_DEAD_AFTER": "45",

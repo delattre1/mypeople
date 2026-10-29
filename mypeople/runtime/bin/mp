@@ -531,7 +531,7 @@ def community_flags(role_flags):
 
 
 def build_launch(aid, cwd, boss_id, is_master, model, backend, resume_session=None,
-                 role_bundle=None, community=False):
+                 role_bundle=None, community=False, effort=""):
     exports = {
         "PATH": "%s/.local/bin:%s/bin:%s" % (os.path.expanduser("~"), INSTALL_DIR, os.environ.get("PATH", "/usr/bin")),
         "AGENT_ID": aid,
@@ -584,6 +584,8 @@ def build_launch(aid, cwd, boss_id, is_master, model, backend, resume_session=No
                 agent += " --settings %s" % shlex.quote(consent)
         if model:
             agent += " --model %s" % shlex.quote(model)
+        if effort:
+            agent += " --effort %s" % shlex.quote(effort)
         if resume_session:
             agent += " --resume %s" % shlex.quote(resume_session)
     elif backend == "codex":
@@ -693,14 +695,20 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
               % (community_root, cwd), file=sys.stderr)
         return 2
     boss_id = full_aid(boss) if (boss_given and boss.strip()) else ""
-    if not is_master and model is None:
-        # queue.env as it is NOW beats this process's env: the Boss spawns with the env it was
-        # launched with, so an edited default model reached new agents only after a Boss restart.
-        # (This fix once lived only on a live install, 09-23, and the next sync erased it.)
-        pinned = C.read_config_file()
-        model = {"claude": pinned.get("DEFAULT_CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
-                 "codex": pinned.get("DEFAULT_CODEX_MODEL") or DEFAULT_CODEX_MODEL,
-                 "grok": pinned.get("DEFAULT_GROK_MODEL") or DEFAULT_GROK_MODEL}.get(backend) or None
+    # queue.env as it is NOW beats this process's env: the Boss spawns with the env it was
+    # launched with, so an edited default model reached new agents only after a Boss restart.
+    # (This fix once lived only on a live install, 09-23, and the next sync erased it.) The Boss
+    # gets it too: launched without --model it ran Claude Code's own default, Sonnet, for two weeks (#49).
+    conf = C.read_config_file()
+    default_model = {"claude": conf.get("DEFAULT_CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
+                     "codex": conf.get("DEFAULT_CODEX_MODEL") or DEFAULT_CODEX_MODEL,
+                     "grok": conf.get("DEFAULT_GROK_MODEL") or DEFAULT_GROK_MODEL}.get(backend) or None
+    # Every Claude launch and revive names its effort, so none runs on whatever ~/.claude says.
+    effort = (conf.get("DEFAULT_CLAUDE_EFFORT") or CFG["DEFAULT_CLAUDE_EFFORT"]) if backend == "claude" else ""
+    # Only a model other than the default is a pin that revives replay. Recording the default as
+    # one left 2 live agents and 308 retired records on claude-opus-5 after the default moved (10-29).
+    model_pinned = bool(model) and model != default_model
+    model = model or default_model
     if not is_local(aid) and community:
         print("ERROR: --community spawns only on this node", file=sys.stderr)
         return 2
@@ -757,7 +765,8 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
                  role_bundle["bundle_path"]))
 
     launch = build_launch(aid, cwd, boss_id, is_master, model, backend,
-                          resume_session=resume_session, role_bundle=role_bundle, community=community)
+                          resume_session=resume_session, role_bundle=role_bundle, community=community,
+                          effort=effort)
     # audit spawn_cmd string (model pinned so /agents shows exact per-engineer model)
     parts = ["mp", "spawn", aid, "--backend", backend]
     if boss_id:
@@ -849,7 +858,8 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
     do_record = want_recorder(record_flag, prior)
     roster[aid] = {"agent_id": aid, "host": HOST_ID, "session": sess, "tab": tab,
                    "backend": backend, "boss_id": boss_id, "cwd": cwd, "spawn_cmd": spawn_cmd,
-                   "model": (model or ""), "is_master": is_master, "retired": False,
+                   "model": (model or ""), "model_pinned": model_pinned, "effort": effort,
+                   "is_master": is_master, "retired": False,
                    "lifecycle": lifecycle, "owner_task_id": owner_task_id,
                    "trust": "community" if community else "",
                    "session_id": session_id,
@@ -1101,8 +1111,9 @@ def do_revive(argv):
     if not argv:
         print(USAGE["revive"], file=sys.stderr); return 2
     aid = full_aid(argv[0])
-    # `--model <id>` brings the same session back on another model; the respawn records it, so later
-    # revives keep it. A resumed Claude session otherwise keeps the model it last ran.
+    # `--model <id>` brings the same session back on another model; the respawn records it as a pin,
+    # so later revives keep it. Without a pin the revive takes today's default: a resumed Claude
+    # session otherwise keeps the model it last ran.
     model = argv[argv.index("--model") + 1] if "--model" in argv[1:-1] else None
     if not is_local(aid):
         ok, result = remote_task("revive", aid, {}, timeout=150)
@@ -1136,7 +1147,7 @@ def do_revive(argv):
     role = _record_role(rr)
     if role:
         args += ["--role", role]
-    model = model or rr.get("model")
+    model = model or (rr.get("model") if rr.get("model_pinned") else None)
     if model:
         args += ["--model", model]
     # A revived owner must come back bound to the same card (see spawn_args_from_record).
@@ -1243,7 +1254,7 @@ def spawn_args_from_record(aid, rr):
         args += ["--temporary"]
     if rr.get("trust") == "community":
         args += ["--community"]
-    if rr.get("model"):
+    if rr.get("model_pinned") and rr.get("model"):
         args += ["--model", rr["model"]]
     return args
 
@@ -1443,10 +1454,18 @@ def do_status(argv):
               % (C.version(), len(drift), ", ".join(drift[:6]) + (" ..." if len(drift) > 6 else "")))
     print("== agents ==")
     print("%-45s %-8s %-22s %s" % ("agent", "state", "role", "status"))
+    # A Claude agent off the default model/effort is flagged (#49). What a launch left out, Claude
+    # Code took from ~/.claude/settings.json; a pin the owner chose is not flagged.
+    conf, user = C.read_config_file(), C.read_json(os.path.expanduser("~/.claude/settings.json"), {}) or {}
+    want = (conf.get("DEFAULT_CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
+            conf.get("DEFAULT_CLAUDE_EFFORT") or CFG["DEFAULT_CLAUDE_EFFORT"])
     for a in (agents or []):
-        print("%-45s [%-6s] %-22s %s boss=%s" % (
+        rr = roster.get(a["agent_id"], {})
+        runs = (rr.get("model") or user.get("model", "?"), rr.get("effort") or user.get("effortLevel", "?"))
+        off = rr.get("backend") == "claude" and not rr.get("model_pinned") and runs != want
+        print("%-45s [%-6s] %-22s %s boss=%s%s" % (
             a["agent_id"], a.get("state", "?"), role_tag(a.get("agent_id", ""), a, roster),
-            a.get("status", ""), a.get("boss_id", "")))
+            a.get("status", ""), a.get("boss_id", ""), "  !! runs %s/%s, not %s/%s" % (runs + want) if off else ""))
     print("== clients ==")
     for c in (clients or []):
         print("%-25s %s state=%s" % (c["hostname"], c.get("attach_base", ""), c.get("state", "")))

@@ -80,6 +80,21 @@ class HookConfigTests(unittest.TestCase):
             self.assertEqual("claude-custom", values["DEFAULT_CLAUDE_MODEL"])
             self.assertEqual("codex-custom", values["DEFAULT_CODEX_MODEL"])
 
+    def test_config_upgrade_moves_a_file_still_on_the_old_shipped_default(self):
+        # #49: engineers ran claude-opus-4-8 because that was the default nobody had picked.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "queue.env"
+            path.write_text('export DEFAULT_ENG_MODEL="claude-opus-4-8"\n'
+                            'export DEFAULT_CLAUDE_MODEL="claude-opus-4-8"\n', encoding="utf-8")
+            with mock.patch.object(firstrun, "CONFIG_PATH", str(path)), \
+                 mock.patch.object(firstrun, "CONFIG_DIR", td), \
+                 mock.patch.dict(os.environ, {}, clear=True):
+                firstrun.write_queue_env(str(Path(td) / "state"), "claude")
+            text = path.read_text()
+            self.assertNotIn("claude-opus-4-8", text)
+            self.assertIn('export DEFAULT_CLAUDE_MODEL="claude-opus-5-5"', text)
+            self.assertIn('export DEFAULT_ENG_MODEL="claude-opus-5-5"', text)
+
     def test_retired_hooks_are_removed_and_unrelated_hooks_survive(self):
         old = "/old/plugins/tmux-boss-hooks/emit-event.sh"
         hooks = {
@@ -156,6 +171,15 @@ class BackendCommandTests(unittest.TestCase):
             self.assertIn("codex --dangerously-bypass-approvals-and-sandbox", codex)
             self.assertIn("--dangerously-bypass-hook-trust", codex)
             self.assertIn("resume codex-session", codex)
+
+    def test_claude_launches_name_their_effort(self):
+        # #49: without it an agent ran at whatever effort ~/.claude/settings.json held.
+        with tempfile.TemporaryDirectory() as td:
+            mp = load_mp(td)
+            self.assertEqual("xhigh", mp.CFG["DEFAULT_CLAUDE_EFFORT"])
+            claude = mp.build_launch("n/main:e", td, "n/main:Boss", False, "m", "claude", effort="xhigh")
+            self.assertIn("--model m --effort xhigh", claude)
+            self.assertNotIn("--effort", mp.build_launch("n/main:e", td, "n/main:Boss", False, "m", "codex"))
 
     def test_finds_backend_specific_session_transcripts(self):
         with tempfile.TemporaryDirectory() as td:

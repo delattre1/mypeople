@@ -51,7 +51,7 @@ def load_env():
         "INSTALL_DIR", "HOST_ID", "HUD_PORT", "TODO_PORT", "TTYD_PORT",
         "TTYD_BROWSER_PORT", "TTYD_RO_PORT", "BIND_ADDR",
         "QUEUE_URL", "QUEUE_SECRET", "TTYD_PUBLIC_URL", "DEFAULT_ENG_MODEL",
-        "DEFAULT_BACKEND", "DEFAULT_AGENT_BACKEND", "DEFAULT_CLAUDE_MODEL", "DEFAULT_CODEX_MODEL", "DEFAULT_GROK_MODEL",
+        "DEFAULT_BACKEND", "DEFAULT_AGENT_BACKEND", "DEFAULT_CLAUDE_MODEL", "DEFAULT_CLAUDE_EFFORT", "DEFAULT_CODEX_MODEL", "DEFAULT_GROK_MODEL",
         "MYPEOPLE_RECORD",
         "QUEUE_DEAD_AFTER", "HEARTBEAT_INTERVAL", "UPSTREAM_QUEUE_URL",
         "UPSTREAM_QUEUE_SECRET", "NODE_PURPOSE", "NODE_TYPE", "NODE_RECORDING_URL",
@@ -71,9 +71,10 @@ def load_env():
     cfg.setdefault("TTYD_RO_PORT", str(int(cfg["TTYD_PORT"]) + 1))
     cfg.setdefault("BIND_ADDR", "0.0.0.0")
     cfg.setdefault("QUEUE_URL", "http://127.0.0.1:%s" % cfg["HUD_PORT"])
-    cfg.setdefault("DEFAULT_ENG_MODEL", "claude-opus-4-8")
+    cfg.setdefault("DEFAULT_ENG_MODEL", "claude-opus-5-5")
     cfg.setdefault("DEFAULT_BACKEND", "claude")
     cfg.setdefault("DEFAULT_CLAUDE_MODEL", cfg["DEFAULT_ENG_MODEL"])
+    cfg.setdefault("DEFAULT_CLAUDE_EFFORT", "xhigh")
     cfg.setdefault("DEFAULT_CODEX_MODEL", "")
     cfg.setdefault("QUEUE_DEAD_AFTER", "45")
     cfg.setdefault("HEARTBEAT_INTERVAL", "10")

@@ -215,7 +215,7 @@ def register(cmd):
     roster = C.read_json_tracked(path, {}) or {}
     roster[AID] = dict(roster.get(AID) or {}, **{
         "agent_id": AID, "host": HOST_ID, "session": "main", "tab": "discord", "backend": "claude",
-        "boss_id": "", "cwd": str(AGENT), "spawn_cmd": cmd, "model": cfg("DISCORD_AGENT_MODEL", "claude-opus-5-5"),
+        "boss_id": "", "cwd": str(AGENT), "spawn_cmd": cmd, "model": cfg("DISCORD_AGENT_MODEL", "claude-opus-5-5"), "model_pinned": True,
         "is_master": False, "retired": False, "lifecycle": "plugin:discord-agent",
         "summary": "Discord agent: answers builders' questions (plugin-owned, locked)"})
     C.write_json_merged(path, roster)

@@ -48,6 +48,15 @@ class AgentBackendDefaultTests(unittest.TestCase):
             [REMOTE % "Boss", "--master", "--role", "boss"],
             DEFAULT_AGENT_BACKEND="grok"))
 
+    def test_the_boss_gets_the_default_model_too(self):
+        # #49: a Boss launched without --model ran Claude Code's own default, Sonnet, for two weeks.
+        with tempfile.TemporaryDirectory() as td, env_with():
+            mp = load_mp(td)
+            with mock.patch.object(mp, "remote_task", return_value=(True, "ok")) as remote:
+                mp.do_spawn([REMOTE % "Boss", "--master", "--role", "boss"])
+            (_, _, payload), _ = remote.call_args
+        self.assertEqual(("claude", "claude-opus-5-5"), (payload["backend"], payload["model"]))
+
     def test_an_explicit_backend_always_wins(self):
         # This is also how revive keeps an existing agent on the backend its session lives in:
         # do_revive passes the recorded --backend, so no default can move a revived agent.

@@ -9,7 +9,7 @@ import sandbox
 
 
 def load_runtime(filename, home):
-    return sandbox.load(home, filename, TTYD_PORT="7681", DEFAULT_ENG_MODEL="claude-opus-4-8",
+    return sandbox.load(home, filename, TTYD_PORT="7681", DEFAULT_ENG_MODEL="claude-opus-5-5",
                         HEARTBEAT_INTERVAL="10")
 
 

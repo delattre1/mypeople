@@ -15,11 +15,12 @@ BOSS = "test-node/main:Boss"
 
 
 class ReviveFollowsRegistryTests(unittest.TestCase):
-    def revive(self, *flags, **env):
+    def revive(self, *flags, pinned=False, **env):
         with tempfile.TemporaryDirectory() as td:
             mp = load_mp(td)
             roster = {BOSS: {"retired": True, "retire_reason": "boss-window-missing",
                              "session_id": "sid-1", "backend": "claude", "is_master": True, "model": "claude-opus-4-8",
+                             "model_pinned": pinned,
                              "role": "boss", "role_ref": "boss@0.0.1", "role_digest": "old"}}
             with mock.patch.dict(os.environ, env), \
                  mock.patch.object(mp, "load_roster", return_value=roster), \
@@ -50,9 +51,14 @@ class ReviveFollowsRegistryTests(unittest.TestCase):
         self.assertNotIn("claude-opus-4-8", args)
         self.assertEqual("sid-1", call.kwargs["resume_session"])
 
-    def test_without_the_flag_the_recorded_model_stays(self):
-        args = self.revive().args[0]
+    def test_without_the_flag_a_pinned_model_stays(self):
+        args = self.revive(pinned=True).args[0]
         self.assertEqual("claude-opus-4-8", args[args.index("--model") + 1])
+
+    def test_an_unpinned_record_follows_todays_default(self):
+        # Spawn recorded the default of its day; replaying it left agents on claude-opus-5 (10-29).
+        # Records from before model_pinned existed read as unpinned.
+        self.assertNotIn("--model", self.revive().args[0])
 
 
 if __name__ == "__main__":
