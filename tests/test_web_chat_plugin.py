@@ -25,6 +25,19 @@ def load(name, path):
     return mod
 
 
+class PageAnalytics(unittest.TestCase):
+    def test_posthog_takes_named_events_only(self):
+        """PostHog gets named events only: autocapture, heatmaps and recordings would carry chat text, and no capture is
+        handed a message's text."""
+        for name in ("landing.html", "landing-c.html", "page.html"):
+            page = (PLUGIN / name).read_text()
+            self.assertEqual(page.count("posthog.init("), 1, name)
+            for off in ("autocapture: false", "rageclick: false", "capture_dead_clicks: false", "enable_heatmaps: false",
+                        "disable_session_recording: true"):
+                self.assertIn(off, page, name)
+            self.assertNotRegex(page, r"track\([^)]*\btext\b", name)
+
+
 class WebChatPlugin(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())

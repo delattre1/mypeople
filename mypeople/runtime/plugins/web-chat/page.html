@@ -118,7 +118,27 @@ button.back{cursor:pointer}button.back:focus-visible{outline:2px solid var(--me)
 .picker button{width:42px;height:42px;border:0;border-radius:50%;background:transparent;font-size:23px;line-height:1;display:grid;place-items:center;cursor:pointer;padding:0}
 .picker button[aria-pressed=true]{background:var(--me)}
 .picker button:focus-visible{outline:2px solid var(--me);outline-offset:1px}
-</style></head>
+</style>
+<script>
+// PostHog, project [Prod] Plow (Plow Collective): named bya_* events only. Autocapture, heatmaps and recordings stay
+// off, so no chat text or phone number reaches it. An agent's own page (?agent=) isn't tracked. ?test=1, or a first
+// message that starts with TEST, marks the visitor a test (the dashboard leaves tests out).
+if (!/[?&]agent=/.test(location.search)) {
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split('.');2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement('script')).type='text/javascript',p.async=!0,p.src=s.api_host+'/static/array.js',(r=t.getElementsByTagName('script')[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a='posthog',u.people=u.people||[],u.toString=function(t){var e='posthog';return'posthog'!==a&&(e+='.'+a),t||(e+=' (stub)'),e},u.people.toString=function(){return u.toString(1)+'.people (stub)'},o='init capture register register_once unregister opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing identify alias people.set people.set_once set_config reset get_config get_property getFeatureFlag getFeatureFlagPayload isFeatureEnabled onFeatureFlags reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getBootstrapData'.split(' '),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  posthog.init('phc_qFo7YgHhtfN2emBq7qxTGxi2xpsTg8xATkUDJNPaTkQY', { api_host: 'https://us.i.posthog.com', capture_pageview: !/[?&]frame=1\b/.test(location.search), autocapture: false, rageclick: false,
+    capture_dead_clicks: false, enable_heatmaps: false, disable_session_recording: true });
+  posthog.register({ site: 'build_an_agent', page_version: 'default', ...(/[?&]test=1\b/.test(location.search) && { test: true }) });
+}
+// The chat engine calls these: asked = when the first message went (until Plow's first reply), heard() on each live reply.
+let asked = 0;
+const track = (event, props) => window.posthog?.capture(event, props);
+const heard = (text) => {
+  if (asked) { track('bya_agent_replied', { seconds_to_reply: Math.round((Date.now() - asked) / 1000) }); asked = 0; }
+  if (/sms:/.test(text)) track('bya_handover_shown');
+};
+document.addEventListener('click', (e) => { if (e.target.closest?.('a[href^="sms:"]')) track('bya_handover_clicked'); });
+</script>
+</head>
 <body>
 <div class="screen" id="screen">
 <div class="status" aria-hidden="true"><span id="clock">9:41</span><span class="icons">
@@ -293,7 +313,7 @@ function render(m, live = false) {
     }
     seen.set(m.id, b);
     if (m.mine) status(b, 'Delivered');
-    else { waiting(false); if (live) sfx('received'); }
+    else { waiting(false); if (live) { sfx('received'); heard(m.text); } }
   }
   badge(b, m.mine ? m.reactions[0] : m.tapback);
   scroll();
@@ -405,13 +425,15 @@ input.addEventListener('focus', () => { if (!mine) { stopIdeas(); clear(); } });
 input.addEventListener('input', fit);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); } });
 
-async function send(text, b) {
+async function send(text, b, from = 'typed') {
+  if (/^TEST/.test(text)) window.posthog?.register({ test: true });
   sending = true;
   try {
     const r = await fetch(API + '/messages', { method: 'POST', headers: { 'content-type': 'application/json', ...auth() },
       body: JSON.stringify(token ? { text } : { text, ...(slug ? { page: slug } : {}) }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error?.message || 'Not Delivered');
+    if (j.token) { asked = Date.now(); track('bya_chat_started', { ask: from }); } else track('bya_message_sent');
     if (j.token) { token = j.token; try { localStorage.setItem(KEY, token); } catch {} listen(); }
     b.classList.remove('pending');
     pending.delete(text);
@@ -426,6 +448,7 @@ async function send(text, b) {
 }
 form.addEventListener('submit', (e) => {
   e.preventDefault();
+  const from = !mine && shown ? 'example' : 'typed';
   const text = (!mine && shown ? shown : input.value).trim();
   if (!text || sending) return;
   stopIdeas();
@@ -436,7 +459,7 @@ form.addEventListener('submit', (e) => {
   status(b, 'Sending…');
   sfx('sent');
   scroll();
-  send(text, b);
+  send(text, b, from);
   if (matchMedia('(pointer: fine)').matches) input.focus();
 });
 

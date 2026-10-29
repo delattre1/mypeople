@@ -250,6 +250,25 @@ html.phone .vc-form { padding: 8px 10px max(10px, env(safe-area-inset-bottom)); 
 html.phone .vc.kb .vc-form { padding-bottom: 8px; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
+<script>
+// PostHog, project [Prod] Plow (Plow Collective): named bya_* events only. Autocapture, heatmaps and recordings stay
+// off, so no chat text or phone number reaches it. An agent's own page (?agent=) isn't tracked. ?test=1, or a first
+// message that starts with TEST, marks the visitor a test (the dashboard leaves tests out).
+if (!/[?&]agent=/.test(location.search)) {
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split('.');2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement('script')).type='text/javascript',p.async=!0,p.src=s.api_host+'/static/array.js',(r=t.getElementsByTagName('script')[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a='posthog',u.people=u.people||[],u.toString=function(t){var e='posthog';return'posthog'!==a&&(e+='.'+a),t||(e+=' (stub)'),e},u.people.toString=function(){return u.toString(1)+'.people (stub)'},o='init capture register register_once unregister opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing identify alias people.set people.set_once set_config reset get_config get_property getFeatureFlag getFeatureFlagPayload isFeatureEnabled onFeatureFlags reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getBootstrapData'.split(' '),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  posthog.init('phc_qFo7YgHhtfN2emBq7qxTGxi2xpsTg8xATkUDJNPaTkQY', { api_host: 'https://us.i.posthog.com', capture_pageview: true, autocapture: false, rageclick: false,
+    capture_dead_clicks: false, enable_heatmaps: false, disable_session_recording: true });
+  posthog.register({ site: 'build_an_agent', page_version: 'c', ...(/[?&]test=1\b/.test(location.search) && { test: true }) });
+}
+// The chat engine calls these: asked = when the first message went (until Plow's first reply), heard() on each live reply.
+let asked = 0;
+const track = (event, props) => window.posthog?.capture(event, props);
+const heard = (text) => {
+  if (asked) { track('bya_agent_replied', { seconds_to_reply: Math.round((Date.now() - asked) / 1000) }); asked = 0; }
+  if (/sms:/.test(text)) track('bya_handover_shown');
+};
+document.addEventListener('click', (e) => { if (e.target.closest?.('.handover a, #pin[href^="sms:"]')) track('bya_handover_clicked'); });
+</script>
 </head>
 <body>
 
@@ -490,6 +509,7 @@ function plowChat(version, ui) {
   const take = (m, live) => {
     if (seen.has(m.id)) { if (m.mine && m.reactions?.[0]) ui.reaction(m.id, m.reactions[0], live); return; }
     seen.add(m.id);
+    if (live && !m.mine) heard(m.text);
     if (m.mine && mine.has(m.text)) { ui.confirm(mine.get(m.text), m); mine.delete(m.text); return; }
     ui.message(m, live);
     if (m.mine && m.reactions?.[0]) ui.reaction(m.id, m.reactions[0], live);
@@ -511,10 +531,11 @@ function plowChat(version, ui) {
     events.onopen = refill; // after a drop, catch up on what came meanwhile
   }
   function forget() {
-    events?.close(); events = null; token = null; seen.clear(); mine.clear();
+    events?.close(); events = null; token = null; asked = 0; seen.clear(); mine.clear();
     try { localStorage.removeItem(KEY); } catch {}
   }
-  async function send(text) {
+  async function send(text, from = 'typed') {
+    if (/^TEST/.test(text)) window.posthog?.register({ test: true });
     const h = ui.pending(text);
     mine.set(text, h);
     try {
@@ -522,6 +543,7 @@ function plowChat(version, ui) {
         body: JSON.stringify(token ? { text } : { text, page: slug || 'v-' + version }) }); // Willow sees which version they used
       const j = await r.json();
       if (!r.ok) throw new Error(j.error?.message || 'Not sent');
+      if (j.token) { asked = Date.now(); track('bya_chat_started', { ask: from }); } else track('bya_message_sent');
       if (j.token) { token = j.token; try { localStorage.setItem(KEY, token); } catch {} listen(); }
       if (!seen.has(j.message.id)) { seen.add(j.message.id); mine.delete(text); ui.confirm(h, j.message); }
       ui.typing(true);
@@ -531,7 +553,7 @@ function plowChat(version, ui) {
     }
   }
   if (token) refill().then(() => token && listen());
-  return { send, restart() { forget(); ui.clear(); }, get started() { return !!token; } };
+  return { send, restart() { track('bya_start_over'); forget(); ui.clear(); }, get started() { return !!token; } };
 }
 // --- What every version shares around the engine.
 const AVATAR = 'data:image/webp;base64,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';
@@ -713,7 +735,7 @@ const sfx = (() => {
     t.append(Object.assign(document.createElement('b'), { textContent: title }), Object.assign(document.createElement('small'), { textContent: 'Your agent texts you' }),
       Object.assign(document.createElement('span'), { className: 'vc-sample', textContent: sample }));
     t.setAttribute('aria-label', title + ': ' + ask);
-    t.addEventListener('click', () => chat.send(ask));
+    t.addEventListener('click', () => chat.send(ask, 'example'));
     tiles.append(t);
   }
   const rows = new Map(), pin = $('pin');

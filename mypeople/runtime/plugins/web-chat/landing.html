@@ -6,6 +6,14 @@
 <script>
 if (matchMedia('(max-width: 520px), (pointer: coarse) and (max-width: 900px)').matches && !/[?&]page=/.test(location.search))
   location.replace(location.pathname.replace(/\/?$/, '/') + 'chat' + location.search);
+// PostHog, project [Prod] Plow: this page's visit only; its chat (/chat, page.html) sends the bya_* events. Not on
+// an agent's own page (?agent=); ?test=1 marks a test visit. Autocapture, heatmaps and recordings stay off.
+else if (!/[?&]agent=/.test(location.search)) {
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split('.');2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement('script')).type='text/javascript',p.async=!0,p.src=s.api_host+'/static/array.js',(r=t.getElementsByTagName('script')[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a='posthog',u.people=u.people||[],u.toString=function(t){var e='posthog';return'posthog'!==a&&(e+='.'+a),t||(e+=' (stub)'),e},u.people.toString=function(){return u.toString(1)+'.people (stub)'},o='init capture register register_once unregister opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing identify alias people.set people.set_once set_config reset get_config get_property getFeatureFlag getFeatureFlagPayload isFeatureEnabled onFeatureFlags reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getBootstrapData'.split(' '),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  posthog.init('phc_qFo7YgHhtfN2emBq7qxTGxi2xpsTg8xATkUDJNPaTkQY', { api_host: 'https://us.i.posthog.com', capture_pageview: true, autocapture: false, rageclick: false,
+    capture_dead_clicks: false, enable_heatmaps: false, disable_session_recording: true });
+  posthog.register({ site: 'build_an_agent', page_version: 'default', ...(/[?&]test=1\b/.test(location.search) && { test: true }) });
+}
 </script>
 <title>Plow · Get any agent onto Plow</title>
 <meta name="description" content="Bring your own agent or start from a Plow-ready runtime. Plow handles hosting, chat, and connectors.">
