@@ -486,7 +486,7 @@ def title_of(task):
     return task.get("text", "") or ""
 
 
-def emit_task_event(board, task, reason, by=None):
+def emit_task_event(task, reason):
     """Ping Boss for a non-test add / work-state change. Exempt {test} tasks."""
     if task.get("test"):
         return
@@ -940,7 +940,7 @@ class Handler(BaseHTTPRequestHandler):
                 board["tasks"][tid] = task
                 board["order"].insert(0, tid)
                 save_board(board)
-                emit_task_event(board, task, "new task added")
+                emit_task_event(task, "new task added")
                 save_board(board)
                 # Every new card, regardless of who created it. Boss relays most of the CEO's
                 # cards via the API (by=.../Boss), so an actor=="CEO" guard here would leave those
@@ -999,7 +999,7 @@ class Handler(BaseHTTPRequestHandler):
                     apply_owner_state_transition(t, prev_state, t.get("state"), actor)
                 save_board(board)
                 if t.get("state") != prev_state:
-                    emit_task_event(board, t, "state -> %s" % t.get("state"))
+                    emit_task_event(t, "state -> %s" % t.get("state"))
                     save_board(board)
                 return self._send(200, {"ok": True})
             if op == "pin":
@@ -1193,7 +1193,7 @@ class Handler(BaseHTTPRequestHandler):
                 apply_owner_state_transition(t, prev, st, actor)
             save_board(board)
             if st and st != prev:
-                emit_task_event(board, t, "state -> %s" % st)
+                emit_task_event(t, "state -> %s" % st)
                 save_board(board)
             return self._send(200, {"ok": True})
 

@@ -41,7 +41,7 @@ class NotificationVerbatimTests(unittest.TestCase):
 
     def test_a_task_event_ping_carries_the_whole_title(self):
         with mock.patch.object(self.ts, "ping_boss") as ping:
-            self.ts.emit_task_event({}, self.task, "new task added")
+            self.ts.emit_task_event(self.task, "new task added")
         self.assertIn(LONG_TEXT, ping.call_args[0][0])
 
     def test_a_watchdog_unanswered_incident_quotes_the_whole_comment(self):

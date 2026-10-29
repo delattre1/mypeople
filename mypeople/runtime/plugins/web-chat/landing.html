@@ -39,12 +39,6 @@ if (matchMedia('(max-width: 520px), (pointer: coarse) and (max-width: 900px)').m
 /* ---------- HERO (centered, huge whitespace) ---------- */
 .hero{text-align:center;padding:clamp(84px,12vw,148px) 0 clamp(72px,10vw,116px);}
 h1.hero-title{font-weight:500;font-size:clamp(37px,5vw,58px);letter-spacing:-.04em;line-height:1.05;color:var(--ink);max-width:17ch;margin:0 auto;}
-.hero-sub{margin:24px auto 0;font-size:clamp(14px,1.25vw,16px);color:var(--ink-2);max-width:52ch;line-height:1.55;}
-
-/* hero CTA: primary Deploy pill + Onboard-your-agent copy pill (matches head chef refs) */
-.hero-cta{margin:26px auto 0;display:flex;gap:14px;justify-content:center;align-items:center;flex-wrap:wrap;}
-.hero-cta .btn{height:50px;padding:0 26px;font-size:15px;border-radius:999px;}
-@media(max-width:520px){.hero-cta{flex-direction:column;}.hero-cta .btn,.hero-cta .onboard{width:100%;justify-content:center;}}
 
 /* ---------- SECTION scaffolding (left-aligned headings, Vercel style) ---------- */
 .sec{padding:var(--pad) 0;}
@@ -89,15 +83,6 @@ h2.sec-title{font-weight:500;font-size:clamp(27px,3.5vw,40px);letter-spacing:-.0
 .dperm-row .st.allow{background:var(--volt-dim);color:var(--volt-deep);border:1px solid rgba(160,196,74,.35);}
 .dperm-row .st.ask{background:var(--paper-2);color:var(--ink-3);border:1px solid var(--line-2);}
 
-/* ---------- (4) FEATURE LIST (heading left, items right) ---------- */
-.feat{display:grid;grid-template-columns:minmax(0,.82fr) minmax(0,1.15fr);gap:56px 96px;align-items:start;}
-.feat-list{display:flex;flex-direction:column;gap:64px;padding-top:4px;}
-.feat-item{max-width:50ch;}
-.feat-item p{font-size:16px;line-height:1.55;color:var(--ink-2);}
-.feat-item p b{font-family:var(--display);color:var(--ink);font-weight:600;letter-spacing:-.01em;}
-.feat-item .clink{margin-top:14px;}
-.feat-item code{font-family:var(--mono);font-size:.88em;background:var(--paper-3);border:1px solid var(--line);border-radius:5px;padding:1px 5px;color:var(--ink);}
-
 /* ---------- (5) LATCH capability grid ---------- */
 .cap-top{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap;}
 .cap-grid{margin-top:88px;display:grid;grid-template-columns:repeat(4,1fr);gap:68px 48px;}
@@ -127,36 +112,6 @@ h2.sec-title{font-weight:500;font-size:clamp(27px,3.5vw,40px);letter-spacing:-.0
 .dark-r p{font-size:clamp(15px,1.5vw,17px);color:rgba(244,243,236,.82);line-height:1.6;max-width:52ch;}
 .dark-cta{margin-top:24px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;}
 
-/* ---------- (9) TEMPLATES gallery ---------- */
-.tpl-grid{margin-top:88px;display:grid;grid-template-columns:repeat(3,1fr);gap:28px;}
-/* 3-col templates: col 1 is intro text, cols 2-3 are repo cards */
-.tpl-grid.tpl-3{margin-top:0;align-items:flex-start;}
-.tpl-intro{display:flex;flex-direction:column;justify-content:flex-start;padding-right:8px;}
-.tpl-intro .sec-title{margin:0;}
-.tpl-intro .sec-sub{margin-top:18px;max-width:36ch;}
-/* big clean template cards (Vercel "Get started" pattern): mockup on top, name + value prop below, all inside one hairline card. No dog-ear. */
-.tpl{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:4px;background:transparent;overflow:hidden;
-  transition:border-color .2s,box-shadow .2s,transform .2s;}
-.tpl:hover{border-color:var(--line-2);transform:translateY(-3px);box-shadow:0 34px 60px -42px rgba(19,19,15,.28);}
-.tpl-mock{min-height:210px;background:transparent;padding:30px 28px;display:flex;flex-direction:column;justify-content:center;gap:12px;overflow:hidden;}
-.tpl-mock .bub{max-width:86%;padding:12px 16px;font-size:13px;}
-/* Direction A card artwork: runtime code snippet (filename tab + mono code, subtle chrome, no box) */
-.ed{width:100%;}
-.ed-tab{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--ink-2);
-  padding-bottom:11px;margin-bottom:13px;border-bottom:1px solid var(--line);width:100%;}
-.ed-tab .dot{width:8px;height:8px;border-radius:2px;background:var(--volt-deep);opacity:.75;}
-.ed pre{font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--ink);white-space:pre;overflow-x:auto;scrollbar-width:none;}
-.ed pre::-webkit-scrollbar{display:none;}
-.ed .k{color:var(--volt-deep);}
-.ed .s{color:var(--grove);}
-.ed .c{color:var(--ink-3);}
-.tpl-bd{padding:26px 28px 30px;display:flex;flex-direction:column;}
-.tpl-bd h3{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.015em;}
-.tpl-bd p{margin-top:11px;color:var(--ink-2);font-size:14.5px;line-height:1.55;max-width:34ch;}
-.tpl-bd .ghlink{margin-top:18px;display:inline-flex;align-items:center;gap:8px;align-self:flex-start;font-family:var(--sans);font-weight:500;font-size:14px;color:var(--ink);transition:color .18s;}
-.tpl-bd .ghlink svg{width:15px;height:15px;flex:none;}
-.tpl-bd a.ghlink:hover{color:#000;}
-
 /* ---------- (10) FINAL CTA (light) ---------- */
 .final{padding:var(--pad-xl) 0;}
 .final-in{display:flex;align-items:center;justify-content:space-between;gap:32px;flex-wrap:wrap;}
@@ -169,73 +124,16 @@ h2.sec-title{font-weight:500;font-size:clamp(27px,3.5vw,40px);letter-spacing:-.0
 
 /* responsive */
 @media(max-width:960px){
-  .prim-grid,.tpl-grid{grid-template-columns:1fr 1fr;}
+  .prim-grid{grid-template-columns:1fr 1fr;}
   .cap-grid{grid-template-columns:1fr 1fr;}
-  .feat{grid-template-columns:1fr;gap:28px;}
   .dark-in{grid-template-columns:1fr;gap:24px;}
 }
 @media(max-width:640px){
   .wrap{padding-left:20px;padding-right:20px;}
-  .prim-grid,.tpl-grid,.cap-grid{grid-template-columns:1fr;}
+  .prim-grid,.cap-grid{grid-template-columns:1fr;}
   .final-in{flex-direction:column;align-items:flex-start;}
 }
 /* generic reduced-motion handling is shared (build-system.css) */
-/* ---------- ①·B TRY-IT-OUT SECTION — Vercel-style layered agent-card cluster:
-   a section directly below the (unchanged) hero. Prominent center Life-assistant
-   card carrying a mini iMessage thread that shows the agent working, two faded
-   flanking cards for depth, and a "Try it out" CTA. ---------- */
-.tryit{padding:clamp(52px,7vw,92px) 0;}
-/* two-column: text + CTA on the left, layered card cluster on the right, tops aligned */
-.tryit-in{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:44px 64px;align-items:start;}
-.tryit-left{max-width:520px;}
-.tryit-head{max-width:none;}
-.tryit-sub{max-width:337px;transition:opacity .28s ease;}
-/* "Built by" line under the subtext; names and photos come from aiworthusing.com/agent-index */
-.tryit-by{display:flex;align-items:center;gap:7px;margin-top:12px;font-size:14px;color:var(--ink-3);}
-.tryit-av{width:20px;height:20px;border-radius:50%;object-fit:cover;flex:none;background:var(--paper-3);border:1px solid var(--line);}
-/* right column: a HORIZONTAL LAYERED DECK — one prominent center card with the
-   other two faded/greyed, peeking behind its LEFT and RIGHT edges. Clicking a side
-   card slides it to center and reshuffles the others to the sides. */
-.tryit-deckwrap{width:100%;max-width:none;margin:0 auto;}
-.tryit-deck{position:relative;width:100%;/* height set by JS to the tallest card */}
-.acard{position:absolute;top:0;left:50%;width:min(372px,86%);background:var(--paper);border:1px solid var(--line-2);
-  border-radius:14px;padding:18px 20px;cursor:pointer;transform-origin:center center;will-change:transform,opacity;
-  box-shadow:0 26px 60px -34px rgba(19,19,15,.30),0 6px 18px -14px rgba(19,19,15,.12);
-  transition:transform .52s cubic-bezier(.16,1,.3,1),opacity .42s ease,box-shadow .35s ease;}
-/* horizontal positions */
-.tryit-deck .acard[data-pos="center"]{transform:translateX(-50%) scale(1);opacity:1;z-index:3;
-  box-shadow:0 34px 70px -34px rgba(19,19,15,.36),0 10px 24px -14px rgba(19,19,15,.16);}
-.tryit-deck .acard[data-pos="left"]{transform:translateX(calc(-50% - 128px)) translateY(12px) scale(.9);opacity:.5;z-index:1;}
-.tryit-deck .acard[data-pos="right"]{transform:translateX(calc(-50% + 128px)) translateY(12px) scale(.9);opacity:.5;z-index:1;}
-.tryit-deck .acard:focus-visible{outline:2px solid var(--ink);outline-offset:3px;}
-.acard-head{display:flex;align-items:center;gap:10px;}
-.acard-ic{width:26px;height:26px;border-radius:7px;background:var(--paper-2);border:1px solid var(--line);
-  display:grid;place-items:center;color:var(--ink);font-size:15px;flex:none;}
-.acard-name{font-family:var(--display);font-weight:600;font-size:14px;letter-spacing:-.01em;color:var(--ink);}
-/* mini iMessage thread inside the featured card (single info blue on out-bubbles) */
-.acard-thread{margin-top:14px;display:flex;flex-direction:column;gap:8px;}
-.acard-thread .bub{max-width:86%;padding:9px 13px;border-radius:15px;font-size:12.5px;line-height:1.4;
-  box-shadow:0 10px 22px -18px rgba(19,19,15,.26);}
-.acard-thread .bub.in{align-self:flex-start;background:var(--paper-2);border:1px solid var(--line-2);color:var(--ink);border-bottom-left-radius:5px;}
-.acard-thread .bub.out{align-self:flex-end;background:var(--info);color:#fff;border-bottom-right-radius:5px;}
-.acard-connects{margin-top:16px;padding-top:13px;border-top:1px solid var(--line);
-  display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
-.acard-connects .cx-lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:var(--ink-3);}
-.acard-connects .cx{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2);}
-.acard-connects .cx i{font-size:14px;color:var(--ink-3);}
-/* left-column CTA (was centered) */
-.tryit-dots{display:flex;justify-content:center;gap:10px;margin-top:18px;}
-.tryit-dot{width:8px;height:8px;padding:0;border:none;border-radius:50%;background:var(--line-2);cursor:pointer;transition:background .3s ease,transform .3s ease;}
-.tryit-dot:hover{background:var(--ink-3);}
-.tryit-dot.active{background:var(--ink);transform:scale(1.3);}
-.tryit-cta{margin-top:clamp(26px,3vw,34px);display:flex;flex-direction:column;align-items:flex-start;gap:12px;}
-.tryit-btn{height:50px;padding:0 30px;font-size:15px;border-radius:999px;}
-@media(max-width:880px){
-  .tryit-in{grid-template-columns:1fr;gap:36px;}
-  .tryit-left{max-width:none;}
-  .tryit-deckwrap{margin:0 auto;}
-}
-@media(prefers-reduced-motion:reduce){.tryit-deck .acard{transition:none!important;}}
 </style>
 <style>
 /* The chat is the point of the page: the hero's top padding shrinks so its input is on the first screen. */
@@ -462,91 +360,6 @@ addEventListener('scroll',()=>{nav.classList.toggle('scrolled',scrollY>8);},{pas
 // reveal on scroll
 const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:.12});
 document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
-(function(){
-  var deck=document.getElementById('agentDeck');
-  if(!deck) return;
-  var cards=Array.prototype.slice.call(deck.querySelectorAll('.acard'));
-  if(cards.length<3) return;
-  var slots=[cards[2], cards[0], cards[1]]; // Life assistant (cards[0]) starts CENTER; advancing follows the dot order
-
-  // subtext + "Built by" line live in each card's <template class="acard-sub">; swaps to match the centered agent
-  var sub=document.getElementById('tryitSub');
-  var reduce=window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var subT;
-  function setSub(text){
-    if(sub.innerHTML===text) return;
-    if(reduce){ sub.innerHTML=text; return; }
-    sub.style.opacity='0';
-    clearTimeout(subT);
-    subT=setTimeout(function(){ sub.innerHTML=text; sub.style.opacity='1'; }, 160);
-  }
-
-  function sizeDeck(){
-    var h=0;
-    cards.forEach(function(c){ if(c.offsetHeight>h){ h=c.offsetHeight; } });
-    if(h){ deck.style.height=(h+24)+'px'; } // tallest card + a little vertical room for the side offset
-  }
-  function render(){
-    var names=['left','center','right'];
-    slots.forEach(function(c,i){
-      c.setAttribute('data-pos', names[i]);
-      var isCenter=(i===1);
-      c.setAttribute('aria-hidden', isCenter ? 'false' : 'true');
-      c.setAttribute('tabindex', isCenter ? '0' : '-1');
-    });
-    var agent=slots[1].getAttribute('data-agent'); // slots[1] is the centered card
-    setSub(slots[1].querySelector('.acard-sub').innerHTML);
-    dots.forEach(function(d,i){ d.classList.toggle('active', String(i)===agent); });
-    schedule(); // any rotation, manual or automatic, restarts the auto-advance clock
-  }
-  // advance (dir>0): right->center, center->left, left->right; back: the reverse
-  function rotate(dir){
-    slots = dir>0 ? [slots[1], slots[2], slots[0]] : [slots[2], slots[0], slots[1]];
-    render();
-  }
-  // clicking the LEFT card goes back; RIGHT or CENTER advances
-  function activate(card){ rotate(slots.indexOf(card)===0 ? -1 : 1); }
-
-  // auto-advance, paused while a mouse hovers the deck
-  var DELAY=4500, timer, hover=false;
-  function schedule(){
-    clearTimeout(timer);
-    if(!reduce && !hover){ timer=setTimeout(function(){ rotate(1); }, DELAY); }
-  }
-  var wrap=deck.parentNode;
-  wrap.addEventListener('pointerenter', function(e){ if(e.pointerType==='mouse'){ hover=true; clearTimeout(timer); } });
-  wrap.addEventListener('pointerleave', function(e){ if(e.pointerType==='mouse'){ hover=false; schedule(); } });
-
-  var dots=Array.prototype.slice.call(document.querySelectorAll('#agentDots .tryit-dot'));
-  dots.forEach(function(d,i){ d.addEventListener('click', function(){ if(cards[i]!==slots[1]){ activate(cards[i]); } }); });
-
-  cards.forEach(function(c){
-    c.addEventListener('click', function(){ if(deck._swiped){ deck._swiped=false; return; } activate(c); });
-    c.addEventListener('keydown', function(e){
-      if(e.key==='ArrowLeft'){ e.preventDefault(); rotate(-1); return; }
-      if(e.key==='ArrowRight'){ e.preventDefault(); rotate(1); return; }
-      if(e.key==='Enter'||e.key===' '){ e.preventDefault(); activate(c); }
-    });
-  });
-
-  // touch/pointer swipe: left = advance, right = go back. Auto-advance holds while
-  // the pointer is down so a swipe can't straddle it and skip a card.
-  var sx=null;
-  deck.addEventListener('pointerdown', function(e){ sx=e.clientX; deck._swiped=false; clearTimeout(timer); });
-  deck.addEventListener('pointercancel', function(){ sx=null; schedule(); }); // browser took the gesture (e.g. page scroll)
-  deck.addEventListener('pointerup', function(e){
-    if(sx===null) return; var dx=e.clientX-sx; sx=null;
-    if(Math.abs(dx)>44){
-      deck._swiped=true;
-      rotate(dx<0 ? 1 : -1);
-    } else { schedule(); }
-  });
-
-  window.addEventListener('resize', sizeDeck, {passive:true});
-  window.addEventListener('load', sizeDeck);
-  sizeDeck(); render();
-  setTimeout(sizeDeck, 500); // recompute after webfont/icons settle
-})();
 </script>
 <script>
 (() => {

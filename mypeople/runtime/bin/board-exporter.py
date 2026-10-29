@@ -29,7 +29,7 @@ def read_live_board():
     return C.read_json(BOARD_PATH, None)
 
 
-def git(*args, check=False):
+def git(*args):
     return subprocess.run(["git", "-C", REPO] + list(args), capture_output=True, text=True)
 
 
