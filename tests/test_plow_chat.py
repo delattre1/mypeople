@@ -602,6 +602,21 @@ class CloudTest(unittest.TestCase):
             self.assertEqual([c for c in calls if c[0] == "POST"], [], "no generic hello for a routed MyPlow")
 
 
+    def test_inbound_is_read_as_the_literal_text(self):
+        """Plow's default body is markdown, which puts backslashes before _ - ~: agents must get what
+        the owner typed (10-29)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pc = load("plow_chat_literal", "plow-chat/plow-chat.py", {"PLOW_CHAT_STATE_DIR": tmp, "HOST_ID": "h"})
+            reads = []
+
+            def api(method, path, body=None, token=None):
+                if method == "GET":
+                    reads.append(path)
+                return 200, {"data": []}
+            pc.api = api
+            pc.poll_chat({"token": "t", "chat_uid": "cht_l"}, "cht_l")
+            self.assertEqual(["/v1/chats/cht_l/messages?format=text_decorations"], reads)
+
     def test_cloud_agent_works_once_plow_drops_the_legacy_me_path(self):
         """Plow keeps GET /v1/agents/cloud/me only until images move off it; the bridge reads /v1/agents/me."""
         with tempfile.TemporaryDirectory() as tmp:

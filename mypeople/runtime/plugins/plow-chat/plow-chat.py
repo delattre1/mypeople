@@ -685,7 +685,9 @@ def poll_chat(creds: dict, chat_uid: str, seed: bool = True) -> int:
     the bridge starts are seeded; one that appears while it runs was started by
     a text, and swallowing that text would leave the sender unanswered.
     """
-    status, data = api("GET", f"/v1/chats/{chat_uid}/messages", token=creds["token"])
+    # The literal text: Plow's default body is markdown, so an owner's "jane_doe" reached agents as
+    # "jane\_doe" (10-29). Sends are already verbatim.
+    status, data = api("GET", f"/v1/chats/{chat_uid}/messages?format=text_decorations", token=creds["token"])
     if status >= 400:
         log(f"read failed {chat_uid} {status}: {json.dumps(data)[:160]}")
         return -1
