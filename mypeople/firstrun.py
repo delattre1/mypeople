@@ -178,12 +178,20 @@ def materialize(install):
     # adds, so a retired page would survive every upgrade forever as a file the product no longer
     # serves. Removing it here is what makes "removed" true on an upgraded install, not just a
     # fresh one.
-    for gone in ("bin/wall.html", "boss-CLAUDE.md", "plans/boss-claude.md",
-                 "plugins/latch-reconnect/latch-reconnect.py"):   # the old Latch app's watcher (10-29)
+    for gone in ("bin/wall.html", "boss-CLAUDE.md", "plans/boss-claude.md"):
         try:
             os.remove(os.path.join(install, *gone.split("/")))
         except OSError:
             pass
+    # Same for plugins, generally: a plugin folder this release does not ship goes whole. Removing
+    # only its files left latch-reconnect's folder behind (10-29). A source folder holding nothing
+    # but bytecode, what `git rm` leaves in a checkout, ships nothing.
+    src = os.path.join(rt, "plugins")
+    shipped = {name for name in os.listdir(src)
+               if any(files for root, _, files in os.walk(os.path.join(src, name)) if "__pycache__" not in root)}
+    for name in os.listdir(os.path.join(install, "plugins")):
+        if name not in shipped and os.path.isdir(os.path.join(install, "plugins", name)):
+            shutil.rmtree(os.path.join(install, "plugins", name), ignore_errors=True)
     # Boss doctrine file
     bc = os.path.join(rt, "mp-boss-doctrine.md")
     if os.path.exists(bc):

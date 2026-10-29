@@ -70,6 +70,23 @@ class MaterializeOverExistingInstallTests(unittest.TestCase):
         left = [str(p) for sub in ("bin", "plugins") for p in Path(self.install, sub).rglob("__pycache__")]
         self.assertEqual(left, [], "a .pyc in the install can outrank the .py next to it")
 
+    def test_upgrade_removes_plugin_folders_the_release_no_longer_ships(self):
+        """Mac 2 kept latch-reconnect's files after 5.22.126 dropped it, and Mac 1 an empty folder
+        copied from a checkout where `git rm` had left only its __pycache__ (10-29)."""
+        import shutil
+        rt = os.path.join(self.tmp.name, "runtime")
+        shutil.copytree(firstrun.runtime_dir(), rt, ignore=shutil.ignore_patterns("__pycache__", "node_modules"))
+        os.makedirs(os.path.join(rt, "plugins", "left-in-checkout", "__pycache__"))
+        Path(rt, "plugins", "left-in-checkout", "__pycache__", "x.cpython-313.pyc").write_bytes(b"bytecode")
+        with mock.patch.object(firstrun, "runtime_dir", return_value=rt):
+            firstrun.materialize(self.install)
+            retired = Path(self.install, "plugins", "retired")
+            (retired / "__pycache__").mkdir(parents=True)
+            (retired / "retired.py").write_text("# an older release\n")
+            firstrun.materialize(self.install)
+        self.assertEqual([], [n for n in ("retired", "left-in-checkout") if Path(self.install, "plugins", n).exists()])
+        self.assertTrue(Path(self.install, "plugins", "plow-chat", "plow-chat.py").is_file(), "a shipped plugin stays")
+
     def test_upgrade_never_clobbers_live_state(self):
         firstrun.materialize(self.install)
         board = os.path.join(self.install, "todos", "board.v2.sqlite3")

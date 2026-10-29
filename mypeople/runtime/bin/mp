@@ -775,7 +775,7 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
         parts += ["--cwd", cwd]
     if is_master:
         parts += ["--master"]
-    if (not is_master and model) or (is_master and model):
+    if model:
         parts += ["--model", model]
     if role:
         parts += ["--role", role]
