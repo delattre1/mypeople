@@ -173,34 +173,6 @@ class PlowChatTest(unittest.TestCase):
                     self.assertRaises(SystemExit):
                 self.pc.main()
 
-    def test_a_mac_on_a_plow_line_gets_the_owners_latch_for_every_agent(self):
-        """Willow on Mac 2 could not look up a contact on the owner's Mac (10-15): only cloud
-        MyPlow registered Plow Latch. The line's credential reaches the relay URL Plow names for it."""
-        home = tempfile.mkdtemp()
-        cj = Path(home) / ".claude.json"
-        cj.write_text(json.dumps({"projects": {"/x": {}}}))
-        creds = {"token": "tok", "cloud": True}
-        url = "https://api.plow.co/v1/relay/devices/u1/mcp"
-        self.pc.api = lambda method, path, body=None, token=None: (200, {"mcp_url": url})
-        with mock.patch.dict(os.environ, {"HOME": home}):
-            self.assertEqual(self.pc.connect_latch(creds), "connected")
-            cfg = json.loads(cj.read_text())
-            self.assertEqual(cfg["mcpServers"]["plow-latch"], {
-                "type": "http", "url": url, "headers": {"Authorization": "Bearer tok"}})
-            self.assertEqual(cfg["projects"], {"/x": {}})                 # the rest is kept
-            self.assertEqual(oct(cj.stat().st_mode & 0o777), "0o600")     # it holds a credential
-            self.assertEqual(self.pc.connect_latch(creds), "already connected")
-            # The Mac that runs Latch already reaches it through its own connector: no second one.
-            cj.write_text(json.dumps({"mcpServers": {"mine": {"type": "http", "url": url}}}))
-            self.assertTrue(self.pc.connect_latch(creds).startswith("skip"))
-            self.assertNotIn("plow-latch", json.loads(cj.read_text())["mcpServers"])
-            # No Latch for this line, or not a line credential: nothing is written.
-            self.pc.api = lambda *a, **k: (200, {"mcp_url": None})
-            cj.write_text("{}")
-            self.assertTrue(self.pc.connect_latch(creds).startswith("skip"))
-            self.assertTrue(self.pc.connect_latch({"token": "acct", "chat_uid": "cht_a"}).startswith("skip"))
-            self.assertEqual(json.loads(cj.read_text()), {})
-
     def test_react_sends_a_tapback_and_refuses_a_misspelt_one(self):
         calls = []
         self.pc.api = lambda method, path, body=None, token=None: calls.append((path, body)) or (200, {})
@@ -642,8 +614,8 @@ class CloudTest(unittest.TestCase):
             pc.api = api
             creds = {"token": "t", "chat_uid": "", "cloud": True}
             self.assertEqual(pc.list_chats(creds), ["cht_m"])
-            with mock.patch.dict(os.environ, {"HOME": tmp}):
-                self.assertEqual(pc.connect_latch(creds), "connected")
+            # The old Latch app's relay is retired (Daniel 10-29): the bridge no longer adds it to Claude.
+            self.assertFalse(hasattr(pc, "connect_latch"))
             self.assertNotIn("/v1/agents/cloud/me", Path(PLUGINS, "plow-chat", "plow-chat.py").read_text())
 
 
