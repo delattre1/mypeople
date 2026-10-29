@@ -303,6 +303,16 @@ class HudHonestyTests(unittest.TestCase):
         self.assertEqual(row["status"], "working")
         self.assertEqual(row["summary"], "shipping")
 
+    def test_a_never_prompted_agent_reads_starting_not_working(self):
+        with tempfile.TemporaryDirectory() as td:
+            qs = self._queue_server(td)
+            rec = {"agent_id": "test-node/main:eng-2", "host": "test-node", "session": "main",
+                   "tab": "eng-2", "backend": "claude", "state": "alive"}
+            # spawned, never given a turn: 7 such agents read "working" for 6 h (10-29)
+            with mock.patch.object(qs, "status_for", return_value={"status": "starting"}):
+                row = qs.agent_row("test-node/main:eng-2", rec)
+        self.assertEqual(row["status"], "starting")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -47,17 +47,11 @@ def status_for(agent_id):
 
 
 def display_status(raw):
-    # canonical map: idle->idle, blocked->blocked, working|starting->working, missing->ready
-    if not raw:
-        return "ready"
-    s = raw.get("status", "")
-    if s == "idle":
-        return "idle"
-    if s == "blocked":
-        return "blocked"
-    if s in ("working", "starting"):
-        return "working"
-    return "ready"
+    # idle, blocked, working and starting as written; missing->ready. "starting" = spawned and never
+    # prompted: it sits at its prompt, so showing it as "working" made 7 fresh agents look busy for
+    # 6 h and the Latch rollout skipped their homes (10-29).
+    s = (raw or {}).get("status", "")
+    return s if s in ("idle", "blocked", "working", "starting") else "ready"
 
 
 def agent_row(aid, rec):
