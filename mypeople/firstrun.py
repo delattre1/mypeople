@@ -178,7 +178,8 @@ def materialize(install):
     # adds, so a retired page would survive every upgrade forever as a file the product no longer
     # serves. Removing it here is what makes "removed" true on an upgraded install, not just a
     # fresh one.
-    for gone in ("bin/wall.html", "boss-CLAUDE.md", "plans/boss-claude.md"):
+    for gone in ("bin/wall.html", "boss-CLAUDE.md", "plans/boss-claude.md",
+                 "plugins/latch-reconnect/latch-reconnect.py"):   # the old Latch app's watcher (10-29)
         try:
             os.remove(os.path.join(install, *gone.split("/")))
         except OSError:

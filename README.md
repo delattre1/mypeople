@@ -157,15 +157,6 @@ The first time it starts, run `python3 "$INSTALL_DIR/plugins/plow-chat/plow-chat
 `Plow Activate: …` line it prints to the number it prints. After that your iMessages reach the Boss and it
 replies in the same thread, including group threads you add the number to.
 
-## Keep agents connected to Plow Latch
-
-Claude Code gives up on a dropped MCP server after ~31 seconds, and a Latch update leaves Latch closed
-until something reopens it, so running agents silently lose their Latch tools. Add
-`export LATCH_RECONNECT=1` to `~/.config/mypeople/queue.env`: whenever Latch comes back (relay answers
-again, or a new Latch process), each Claude agent gets `/mcp reconnect all` typed into its window, only
-once it is idle (hook status idle, no turn on screen, empty composer, not scrolling).
-`python3 "$INSTALL_DIR/plugins/latch-reconnect/latch-reconnect.py" status` shows who is still waiting.
-
 ## Let people ask your agent in Discord
 
 Set `DISCORD_AGENT=1`, `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_IDS` in `queue.env`. Questions asked in
