@@ -44,6 +44,8 @@ Config (env, or queue.env):
     discord-chat.py reply <thread> <msg> "text"                      answer inside a thread
     discord-chat.py reply <thread> <msg> --file a.png "text"         attach a file (--file again: up to 4)
     discord-chat.py react <chan> <msg> EMOJI    react to it (the Boss's 👀 = it read the message)
+    discord-chat.py unattach <chan> <msg>       strip the files off one of the bot's own messages
+    discord-chat.py delete <chan> <msg>         delete one of the bot's own messages
     discord-chat.py assign <user> <agent>       make <agent> that person's owner engineer
     discord-chat.py cooking                     the issues being worked on, their threads and PRs (posts nothing)
     discord-chat.py cooking --backfill <owner/repo#n>...   open the thread of one that was cooking already
@@ -871,8 +873,24 @@ def react(ch, msg, emoji):
     return "reacted"
 
 
+def take_back(cmd, ch, msg):
+    """The bot's own message, never anyone else's: `unattach` strips its files, `delete` removes it. On 10-30
+    a preview video in a public thread showed an internal doc, and Mac 2 had to hand-make the PATCH."""
+    path = "/channels/%s/messages/%s" % (ch, msg)
+    if not (ch.isdigit() and msg.isdigit()):
+        raise SystemExit("usage: %s unattach|delete <chan or thread> <msg>" % RUN)
+    if api("GET", path)["author"]["id"] != api("GET", "/users/@me")["id"]:
+        raise SystemExit("refused: %s is not this bot's message. Nothing was changed." % msg)
+    if cmd == "unattach":
+        api("PATCH", path, {"attachments": []})
+        return "files removed"
+    api("DELETE", path)
+    return "deleted"
+
+
 def main(argv):
-    cmd, args = (argv[1] if len(argv) > 1 else "serve"), argv[2:]
+    # No default: a bare run started a second, unsupervised serve beside supervise.sh's (Mac 2, 10-30).
+    cmd, args = (argv[1] if len(argv) > 1 else ""), argv[2:]
     if cmd == "serve":
         serve()
     elif cmd == "reply" and len(args) >= 2 and args[0].isdigit():
@@ -891,6 +909,8 @@ def main(argv):
         print(reply(args[0], msg, " ".join(args[1:]), topic, files))
     elif cmd == "react" and len(args) == 3:
         print(react(*args))
+    elif cmd in ("unattach", "delete") and len(args) == 2:
+        print(take_back(cmd, *args))
     elif cmd == "assign" and len(args) == 2:
         print(assign(*args))
     elif cmd == "cooking" and (not args or args[0] == "--backfill" and args[1:]):

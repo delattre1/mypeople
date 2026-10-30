@@ -314,7 +314,10 @@ class Hook(BaseHTTPRequestHandler):
 
 
 def main(argv):
-    cmd = argv[1] if len(argv) > 1 else "serve"
+    # No default: a bare run started a second, unsupervised serve beside supervise.sh's (discord-chat, Mac 2, 10-30).
+    cmd = argv[1] if len(argv) > 1 else ""
+    if cmd not in ("serve", "status"):
+        raise SystemExit(__doc__)
     missing = [k for k in ("INSTAGRAM_APP_SECRET", "INSTAGRAM_VERIFY_TOKEN", "INSTAGRAM_USER_ID",
                            "INSTAGRAM_TOKEN", "INSTAGRAM_AGENT_PERSONA") if not cfg(k)]
     if missing:

@@ -203,6 +203,13 @@ class GuardTest(unittest.TestCase):
         self.assertEqual(self.st["cursor"]["c1"], "99")
 
 
+    def test_only_an_explicit_serve_starts_the_loop(self):
+        """A bare discord-chat.py ran a second serve beside supervise.sh's (Mac 2, 10-30); no plugin defaults to serve."""
+        self.d.serve = mock.Mock()
+        with self.assertRaises(SystemExit):
+            self.d.main(["discord-agent.py"])
+        self.d.serve.assert_not_called()
+
 @unittest.skipUnless(shutil.which("tmux"), "needs tmux")
 class RealTmuxSlotTest(unittest.TestCase):
     """The slot check against a real tmux server, with a grouped viewer session like the fleet's

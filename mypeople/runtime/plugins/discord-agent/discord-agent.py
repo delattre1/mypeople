@@ -510,7 +510,8 @@ def serve():
 
 
 def main(argv):
-    cmd = argv[1] if len(argv) > 1 else "serve"
+    # No default: a bare run started a second, unsupervised serve beside supervise.sh's (discord-chat, Mac 2, 10-30).
+    cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "serve":
         serve()
     elif cmd == "status":

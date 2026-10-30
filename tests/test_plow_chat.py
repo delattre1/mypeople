@@ -47,6 +47,14 @@ class PlowChatTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_only_an_explicit_serve_starts_the_bridge(self):
+        """A bare discord-chat.py ran a second serve beside supervise.sh's (Mac 2, 10-30); no plugin defaults to serve."""
+        self.pc.load_creds = lambda: self.creds
+        self.pc.bridge_loop = mock.Mock()
+        with mock.patch.object(sys, "argv", ["plow-chat.py"]), self.assertRaises(SystemExit):
+            self.pc.main()
+        self.pc.bridge_loop.assert_not_called()
+
     def test_seeds_then_routes_once(self):
         self.assertEqual(self.pc.BOSS_AGENT, "h/main:Boss")
         self.pc.poll_chat(self.creds, "cht_a")

@@ -68,6 +68,18 @@ class FreshEventsTests(unittest.TestCase):
         self.assertEqual(["comment:8"], [e["key"] for e in new])
 
 
+class CliTests(unittest.TestCase):
+    def test_only_an_explicit_serve_starts_the_watcher(self):
+        """It watched on any word but its other verbs; a bare discord-chat.py ran a second serve beside
+        supervise.sh's (Mac 2, 10-30). No plugin defaults to serve."""
+        with tempfile.TemporaryDirectory() as d:
+            m = load(d)
+            m.login = mock.Mock(side_effect=AssertionError("it went on to watch"))
+            for argv in ([], ["sevre"]):
+                with self.assertRaises(SystemExit):
+                    m.main(["github-prs.py"] + argv)
+
+
 class OwnerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

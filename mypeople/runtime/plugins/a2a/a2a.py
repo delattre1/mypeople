@@ -465,7 +465,8 @@ def pair(argv):
 
 
 def main(argv):
-    cmd, args = (argv[1] if len(argv) > 1 else "serve"), argv[2:]
+    # No default: a bare run started a second, unsupervised serve beside supervise.sh's (discord-chat, Mac 2, 10-30).
+    cmd, args = (argv[1] if len(argv) > 1 else ""), argv[2:]
     socket.getaddrinfo = resolve        # this process only: the bridge and mp pair reach the relay by name
     if cmd == "serve":
         Bridge().serve()

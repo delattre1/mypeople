@@ -37,6 +37,14 @@ class InstagramCommentsTests(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
+    def test_only_an_explicit_serve_starts_the_server(self):
+        """It served on any word but status; a bare discord-chat.py ran a second serve beside supervise.sh's
+        (Mac 2, 10-30). No plugin defaults to serve."""
+        self.m.ThreadingHTTPServer = mock.Mock(side_effect=AssertionError("it served"))
+        for argv in ([], ["sevre"]):
+            with self.assertRaises(SystemExit):
+                self.m.main(["instagram-comments.py"] + argv)
+
     def test_only_meta_signed_bodies_pass(self):
         body = b'{"object":"instagram"}'
         good = "sha256=" + hmac.new(b"appsecret", body, hashlib.sha256).hexdigest()

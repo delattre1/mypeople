@@ -195,6 +195,34 @@ class DiscordChatTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.d.react(*args)
 
+    def test_the_bot_takes_back_its_own_messages_and_no_one_elses(self):
+        """unattach strips a message's files and delete removes it (10-30: a preview video showed an internal
+        doc in a public thread); someone else's message is refused."""
+        def api(method, path, body=None, files=()):
+            if method != "GET":
+                return self.posted.append((method, path, body))
+            return {"id": "999"} if path == "/users/@me" else {"author": {"id": "999" if path.endswith("/5") else "300"}}
+        self.d.api = api
+        with mock.patch("builtins.print"):
+            self.d.main(["discord-chat.py", "unattach", "77", "5"])
+            self.d.main(["discord-chat.py", "delete", "77", "5"])
+        for cmd in ("unattach", "delete"):
+            with self.assertRaises(SystemExit):
+                self.d.main(["discord-chat.py", cmd, "77", "6"])
+        self.assertEqual(self.posted, [("PATCH", "/channels/77/messages/5", {"attachments": []}),
+                                       ("DELETE", "/channels/77/messages/5", None)])
+
+    def test_only_an_explicit_serve_starts_the_loop(self):
+        """A bare run started a second serve beside supervise.sh's on Mac 2 (10-30)."""
+        self.d.serve = mock.Mock()
+        for argv in ([], ["sevre"]):
+            with self.assertRaises(SystemExit) as e:
+                self.d.main(["discord-chat.py"] + argv)
+            self.assertIn("discord-chat.py serve", e.exception.code)
+        self.d.serve.assert_not_called()
+        self.d.main(["discord-chat.py", "serve"])
+        self.d.serve.assert_called_once_with()
+
     def test_one_topic_one_thread_with_no_pings_and_no_secrets(self):
         with self.assertRaises(SystemExit):              # never a bare answer in the channel itself
             self.d.reply("c1", "7", "done")

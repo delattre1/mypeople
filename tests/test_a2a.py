@@ -180,6 +180,13 @@ class A2ATest(unittest.TestCase):
         self.assertEqual(len(self.qa.sends()), n)
         self.assertNotIn("conv", self.alpha.read("state.json", {}))
 
+    def test_only_an_explicit_serve_starts_the_bridge(self):
+        """A bare discord-chat.py ran a second serve beside supervise.sh's (Mac 2, 10-30); no plugin defaults to serve."""
+        self.a2a.Bridge = mock.Mock()
+        with mock.patch.object(socket, "getaddrinfo", socket.getaddrinfo), self.assertRaises(SystemExit):
+            self.a2a.main(["a2a.py"])       # main swaps getaddrinfo process-wide: the patch puts it back
+        self.a2a.Bridge.assert_not_called()
+
     def test_a_ts_net_name_the_system_refuses_resolves_publicly(self):
         """Tailscale's MagicDNS refuses another tailnet's ts.net names: the relay's must still resolve."""
         def system(host, *a, **k):     # refuses every name; answers an address

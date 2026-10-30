@@ -825,7 +825,8 @@ HELP = ("-h", "--help")
 
 
 def main():
-    cmd = sys.argv[1] if len(sys.argv) > 1 else "serve"
+    # No default: a bare run started a second, unsupervised serve beside supervise.sh's (discord-chat, Mac 2, 10-30).
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     args = sys.argv[2:]
     # An option is never message text: two engineers' `reply --help` reached the owner's chat as
     # the literal text "--help" (10-05). -h/--help on any subcommand prints this and does nothing
