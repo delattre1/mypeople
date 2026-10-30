@@ -31,7 +31,6 @@ ACCIDENTAL_REASONS = frozenset({"died-no-window", "tmux-server-crash", "window-m
                                 "boss-window-missing", "zombie-no-session"})
 ROSTER_PATH = os.path.join(INSTALL_DIR, "run", "roster.json")
 STATUS_DIR = os.path.join(INSTALL_DIR, "status")
-HOOK = os.path.join(INSTALL_DIR, "plugins", "tmux-boss-hooks", "emit-event.sh")
 BOSS_DOC = os.path.join(INSTALL_DIR, "mp-boss-doctrine.md")
 ROLE_DIR = os.path.join(INSTALL_DIR, "roles")            # canonical read-only role store
 ROLE_BUNDLE_DIR = os.path.join(INSTALL_DIR, "run", "role-bundles")  # derived per-agent views

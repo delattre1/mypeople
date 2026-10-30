@@ -31,7 +31,6 @@ import hashlib
 import sqlite3
 
 SCHEMA_VERSION = 1
-CHILD_KEYS = ("comments", "proofs", "ownerHistory")  # informational; children stay nested in data
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS meta (
