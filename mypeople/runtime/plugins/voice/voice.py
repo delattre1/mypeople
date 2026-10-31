@@ -4,7 +4,8 @@
 Turn it on by writing state/voice/config.json; `mypeople up` then keeps it running:
   {"sse": "HOST:PORT",                  a live-caption server whose GET /events streams {"text": ...}
    "say": ["/path/to/speak", "--flag"], the command that speaks one line (the text is added last)
-   "from": "Ana (studio mic)"}          who is talking, as the Boss is told
+   "from": "Ana (studio mic)",          who is talking, as the Boss is told
+   "cue": "\"hey Boss\""}               optional: how the owner addresses the Boss; lines without it are left alone
 
 Usage:
   voice.py serve        follow the captions; each finished thought is one mp send to the Boss
@@ -19,8 +20,8 @@ answers only what is meant for it.
 A thought ships after SILENCE_MS without new words, or HARD_MS after it began. The caption text
 grows, but the model can rewrite or trim it; text already sent is re-found in the new buffer so it
 is never sent twice. The one filter: the speaker sits near the mic, so the Boss's own spoken reply
-comes back in the captions. A thought whose word pairs are mostly pairs `say` spoke in the last
-minute is dropped.
+comes back in the captions. What arrives while `say` plays (and TAIL_S after) is skipped, and a
+later thought whose word pairs are mostly pairs `say` spoke in the last minute is dropped.
 """
 import http.client
 import json
@@ -37,6 +38,7 @@ INSTALL = Path(os.environ.get("INSTALL_DIR") or os.environ.get("MYPEOPLE_HOME") 
 STATE_DIR = Path(os.environ.get("VOICE_STATE_DIR") or INSTALL / "state" / "voice")
 CONFIG = STATE_DIR / "config.json"
 SAID = STATE_DIR / "said.txt"   # the last lines `say` spoke, for the echo filter
+SPEAKING = STATE_DIR / "speaking"   # "<start> <end>" of the last `say`; no end yet while it plays
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
@@ -44,6 +46,7 @@ RUN = f"{sys.executable} {Path(__file__).resolve()}"   # the Boss answers with t
 SILENCE_MS = 1500   # end of a thought: a pause shorter than this is mid-sentence
 HARD_MS = 20000     # a thought that never pauses still ships
 ECHO_S = 60         # how long a spoken reply can come back through the mic
+TAIL_S = 2.5        # the captions lag the speaker: its echo keeps arriving this long after it stops
 MAX_CHARS = 2000
 
 
@@ -68,12 +71,15 @@ def send_to_agent(message: str, agent: str = BOSS_AGENT) -> bool:
     return True
 
 
-def envelope(who: str, text: str) -> str:
+def envelope(who: str, text: str, cue: str = "") -> str:
+    when = (f"They address you by saying {cue} (or close to it: the transcript garbles names); a line "
+            f"without that is them talking to someone else, so do nothing." if cue else
+            "Answer only when they are talking to you, and otherwise do nothing.")
     return (f"[voice] from {who}: {text}\n"
             f"(This is the owner's live mic, transcribed as they speak. Most of it is them talking to their "
-            f"stream, the room or other agents, not to you: answer only when they are talking to you, and "
-            f"otherwise do nothing. To answer out loud, run: {RUN} say \"your reply\" — it plays on the "
-            f"speaker next to them. Short spoken sentences in the language they used, no markdown.)")
+            f"stream, the room or other agents, not to you. {when} To answer out loud, run: {RUN} say "
+            f"\"your reply\" — it plays on the speaker next to them. Short spoken sentences in the language "
+            f"they used, no markdown.)")
 
 
 def _pairs(s: str) -> list:
@@ -91,7 +97,18 @@ def is_echo(line: str) -> bool:
     except OSError:
         return False
     p = _pairs(line)
-    return len(p) >= 2 and sum(x in said for x in p) >= 0.5 * len(p)
+    return len(p) >= 2 and sum(x in said for x in p) >= 0.4 * len(p)   # garbled echoes kept ~48%; his own lines ~6%
+
+
+def speaking(now: float) -> bool:
+    """While `say` plays and TAIL_S after, what reaches the captions is mostly the speaker. 10-31: an echo
+    mixed into the owner's words, or garbled past the pair filter, reached the Boss as the owner's speech."""
+    try:
+        start, _, end = SPEAKING.read_text().partition(" ")
+        start, end = float(start), (float(end) if end.strip() else now)
+    except (OSError, ValueError):
+        return False
+    return start <= now <= end + TAIL_S and now - start < 90   # a `say` that died never mutes for long
 
 
 def refind(sent: str, t: str) -> int:
@@ -139,13 +156,18 @@ class Thoughts:
         self.text = None    # buffer as last seen; None until the first event, whose backlog is skipped
         self.cut = 0        # text[:cut] is sent (or was backlog)
         self.sent = ""      # that sent prefix, to re-find after a rewrite
+        self.held = ""      # the owner's words from before the speaker began, still to send
         self.changed = self.began = None
 
-    def update(self, t: str, now: float):
+    def update(self, t: str, now: float, muted: bool = False):
         if self.text is None:
             self.text, self.cut, self.sent = t, len(t), t
             return
         if t == self.text:
+            return
+        if muted:   # the speaker is talking: keep the owner's words from before it, skip what arrives now
+            self.held = (self.held + " " + self.text[self.cut:]).strip()
+            self.text, self.cut, self.sent = t, len(t), t
             return
         if not t.startswith(self.text[:self.cut]):
             self.cut = min(refind(self.sent, t), len(t))
@@ -157,18 +179,18 @@ class Thoughts:
     def due(self, now: float):
         if self.changed is None:
             return None
-        pending = self.text[self.cut:].strip()
+        pending = (self.held + " " + self.text[self.cut:]).strip()
         if not pending:
             self.changed = self.began = None
             return None
         if (now - self.changed) * 1000 < SILENCE_MS and (now - self.began) * 1000 < HARD_MS:
             return None
-        self.cut, self.sent = len(self.text), self.text
+        self.cut, self.sent, self.held = len(self.text), self.text, ""
         self.changed = self.began = None
         return pending
 
 
-def deliver(line: str, who: str, last: list):
+def deliver(line: str, who: str, last: list, cue: str = ""):
     line = trim_repeat(" ".join(line.split()), last[0])[-MAX_CHARS:].strip()
     if not line:
         return
@@ -176,7 +198,7 @@ def deliver(line: str, who: str, last: list):
         log(f"echo dropped: {line[:80]!r}")
         return
     last[0] = line
-    if send_to_agent(envelope(who, line)):
+    if send_to_agent(envelope(who, line, cue)):
         log(f"-> {BOSS_AGENT}: {line[:80]!r}")
 
 
@@ -196,7 +218,7 @@ def events(host: str):
 
 def serve():
     cfg = config()
-    who = cfg.get("from") or "the owner (live mic)"
+    who, cue = cfg.get("from") or "the owner (live mic)", cfg.get("cue") or ""
     thoughts, lock, last = Thoughts(), threading.Lock(), [""]
 
     def shipper():
@@ -206,7 +228,7 @@ def serve():
                 with lock:
                     line = thoughts.due(time.time())
                 if line:
-                    deliver(line, who, last)
+                    deliver(line, who, last, cue)
             except Exception as e:  # noqa: BLE001
                 log(f"ERROR ship: {type(e).__name__}: {e}")
 
@@ -215,8 +237,9 @@ def serve():
     while True:
         try:
             for t in events(cfg["sse"]):
+                now = time.time()
                 with lock:
-                    thoughts.update(t, time.time())
+                    thoughts.update(t, now, muted=speaking(now))
         except Exception as e:  # noqa: BLE001 - the caption server restarts; so do we
             log(f"captions dropped ({type(e).__name__}: {e}); retry in 3 s")
         with lock:
@@ -229,7 +252,12 @@ def say(text: str) -> int:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     kept = SAID.read_text().splitlines()[-2:] if SAID.exists() else []
     SAID.write_text("\n".join(kept + [text]) + "\n")   # before speaking: its echo arrives mid-playback
-    return subprocess.run(config()["say"] + [text]).returncode
+    start = time.time()
+    SPEAKING.write_text(f"{start} ")
+    try:
+        return subprocess.run(config()["say"] + [text]).returncode   # returns once playback ends
+    finally:
+        SPEAKING.write_text(f"{start} {time.time()}")
 
 
 def main(argv):

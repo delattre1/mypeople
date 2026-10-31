@@ -54,13 +54,44 @@ class Voice(unittest.TestCase):
         os.utime(Path(self.state, "said.txt"), (old, old))
         self.assertFalse(self.v.is_echo("pelo seu WhatsApp configurar e você aprova um texto antes de eu enviar."))
 
+    def test_garbled_echo_dropped(self):
+        """10-31: this echo matched 10 of 21 word pairs and reached the Boss as his speech."""
+        Path(self.state, "said.txt").write_text("Beleza, a gente liga o WebSocket do OBS pra você agora. E no AbacatePay: "
+                                                "posso eu mesmo ativar o 2FA e guardar o segredo no cofre dos agentes?\n")
+        self.assertTrue(self.v.is_echo("pra você agora e numa batate pari possui o mesmo ativar o dois FA e guardar "
+                                       "o segredo no órgão dos agentes"))
+
+    def test_what_arrives_while_speaking_is_skipped_his_earlier_words_kept(self):
+        th = self.v.Thoughts()
+        th.update("", 0.0)
+        th.update("ei Boss liga o OBS", 1.0)                                           # his, not yet sent
+        th.update("ei Boss liga o OBS beleza a gente liga o WebSocket", 2.0, muted=True)  # the speaker's echo
+        th.update("ei Boss liga o OBS beleza a gente liga o WebSocket do OBS agora", 3.0, muted=True)
+        self.assertEqual(th.due(4.0), "ei Boss liga o OBS")
+        th.update("ei Boss liga o OBS beleza a gente liga o WebSocket do OBS agora valeu", 8.0)
+        self.assertEqual(th.due(10.0), "valeu")
+
+    def test_speaking_window(self):
+        Path(self.state, "speaking").write_text("100.0 ")                    # still playing
+        self.assertTrue(self.v.speaking(150.0))
+        self.assertFalse(self.v.speaking(200.0))                             # a `say` that died stops muting
+        Path(self.state, "speaking").write_text("100.0 110.0")
+        self.assertTrue(self.v.speaking(112.0))
+        self.assertFalse(self.v.speaking(113.0))
+        self.assertFalse(self.v.speaking(99.0))
+
     def test_envelope_carries_the_answer_command(self):
         sent = []
         with mock.patch.object(self.v, "send_to_agent", lambda m, agent=None: sent.append(m) or True):
             self.v.deliver("MP, conta uma piada", "Ana (studio mic)", [""])
         self.assertTrue(sent[0].startswith("[voice] from Ana (studio mic): MP, conta uma piada\n"))
         self.assertIn(f"{self.v.RUN} say \"your reply\"", sent[0])
-        self.assertIn("answer only when they are talking to you", sent[0])
+        self.assertIn("Answer only when they are talking to you", sent[0])
+
+    def test_cue_tells_the_boss_how_it_is_addressed(self):
+        note = self.v.envelope("Ana (studio mic)", "oi", cue='"hey Boss"')
+        self.assertIn('They address you by saying "hey Boss"', note)
+        self.assertIn("a line without that is them talking to someone else, so do nothing", note)
 
     def test_hung_send_returns_instead_of_raising(self):
         """10-31: one mp send that hung 30 s raised and silenced the old bridge for good."""
@@ -73,6 +104,8 @@ class Voice(unittest.TestCase):
             for n in range(4):
                 self.assertEqual(self.v.say(f"linha {n}"), 0)
         run.assert_called_with(["speak", "--voice", "x", "linha 3"])
+        start, end = map(float, Path(self.state, "speaking").read_text().split())
+        self.assertLessEqual(start, end)
         self.assertEqual(Path(self.state, "said.txt").read_text().splitlines(), ["linha 1", "linha 2", "linha 3"])
 
     def test_bare_run_is_usage_not_a_second_serve(self):

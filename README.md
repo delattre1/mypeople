@@ -159,10 +159,10 @@ replies in the same thread, including group threads you add the number to.
 
 ## Talk to your Boss at your mic
 
-Write `$INSTALL_DIR/state/voice/config.json`: `{"sse": "HOST:PORT", "say": ["/path/to/speak"], "from": "Ana (studio mic)"}`.
+Write `$INSTALL_DIR/state/voice/config.json`: `{"sse": "HOST:PORT", "say": ["/path/to/speak"], "from": "Ana (studio mic)", "cue": "\"hey Boss\""}`.
 `sse` is a live-caption server whose `GET /events` streams `{"text": ...}`; `say` is any command that speaks the
 text added after it. Each finished thought you say reaches the Boss with the command to answer, and the Boss
-answers out loud only when you are talking to it. Its own voice coming back through the mic is dropped.
+answers out loud only when you are talking to it (with `cue`, only lines that address it that way). Its own voice coming back through the mic is dropped.
 
 ## Let people ask your agent in Discord
 
