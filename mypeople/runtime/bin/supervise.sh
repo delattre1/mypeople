@@ -120,6 +120,9 @@ while true; do
   # A2A: mp send to an agent on a paired MyPlow crosses the relay. On once a pairing or an invite exists
   # (mp pair; see the plugin's header).
   [ -f "$ID/state/a2a/keys.json" ] && ensure "$ID/plugins/a2a/a2a.py serve$" "exec python3 '$ID/plugins/a2a/a2a.py' serve"
+  # Voice: what the owner says at their live mic reaches the Boss, which answers out loud. On once
+  # state/voice/config.json exists (see the plugin's header).
+  [ -f "$ID/state/voice/config.json" ] && ensure "$ID/plugins/voice/voice.py serve$" "exec python3 '$ID/plugins/voice/voice.py' serve"
   recycle_leaked_ttyd "ttyd -W -a -p $TTYD_PORT"
   recycle_leaked_ttyd "ttyd -a -p $TTYD_RO_PORT"
   sleep 10
