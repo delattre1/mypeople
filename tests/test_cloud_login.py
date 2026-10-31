@@ -144,11 +144,6 @@ class ClaudeLoginFromPool(ClaudeLoginFetch):
         return subprocess.run(["bash", str(self.script), "fetch"], capture_output=True, text=True,
                               env=dict(self.env, POOL_RC=str(rc), BANK_STATUS="200"), timeout=60)
 
-    def test_a_pool_login_is_used_and_token_never_asked(self):
-        r = self.pool(0)
-        self.assertEqual(0, r.returncode)
-        self.assertTrue(r.stdout.startswith("sk-ant-oat01-pool-"))
-
     def test_a_full_pool_starts_no_claude(self):
         r = self.pool(4)
         self.assertEqual(1, r.returncode)

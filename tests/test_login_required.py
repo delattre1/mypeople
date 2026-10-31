@@ -133,7 +133,7 @@ class EnsureWithoutLoginTests(unittest.TestCase):
             rc = cli.cmd_auth_check(["--quiet"])
         self.assertEqual(rc, 0, "a completed login must unblock the node in place")
         self.assertTrue(self._state()["authenticated"])
-        self.assertEqual(firstrun._read_env_val("DEFAULT_BACKEND"), "claude")
+        self.assertEqual(firstrun.load_cfg().get("DEFAULT_BACKEND"), "claude")
 
     def test_auth_check_honours_a_login_on_a_different_backend(self):
         """The user is not forced into `claude` just because it is the default config value."""
@@ -142,7 +142,7 @@ class EnsureWithoutLoginTests(unittest.TestCase):
             firstrun.ensure()
         with with_auth("grok"):
             self.assertEqual(cli.cmd_auth_check(["--quiet"]), 0)
-        self.assertEqual(firstrun._read_env_val("DEFAULT_BACKEND"), "grok")
+        self.assertEqual(firstrun.load_cfg().get("DEFAULT_BACKEND"), "grok")
 
     def test_auth_check_reports_still_blocked(self):
         from mypeople import cli

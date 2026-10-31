@@ -24,6 +24,26 @@ CONFIG_PATH = _config_path()
 CONFIG_DIR = os.path.dirname(CONFIG_PATH)
 
 
+def load_cfg():
+    """queue.env as {key: value}: `export ` and one pair of matching quotes stripped."""
+    cfg = {}
+    if os.path.exists(CONFIG_PATH):
+        for line in open(CONFIG_PATH):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            v = v.strip()
+            if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
+                v = v[1:-1]
+            cfg[k.strip()] = v
+    return cfg
+
+
 def runtime_dir():
     """Absolute path to the packaged runtime tree (bin/, plugins/, verify/, ...)."""
     try:
@@ -454,17 +474,7 @@ def write_queue_env(install, backend):
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH) as f:
             lines = f.read().splitlines()
-        existing = {}
-        for line in lines:
-            body = line.strip()
-            body = body[7:] if body.startswith("export ") else body
-            if "=" not in body:
-                continue
-            key, value = body.split("=", 1)
-            value = value.strip()
-            if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
-                value = value[1:-1]
-            existing[key.strip()] = value
+        existing = load_cfg()
         # claude-opus-4-8 was the shipped default until 5.22.122: a file still on it never chose it (#49).
         current = lambda m: "claude-opus-5-5" if m in ("", "claude-opus-4-8") else m
         replacements = {
@@ -715,7 +725,7 @@ def ensure(preferred_backend=None, allow_unauthenticated=None):
     """
     install = install_dir()
     materialize(install)
-    configured = _read_env_val("DEFAULT_BACKEND")
+    configured = load_cfg().get("DEFAULT_BACKEND")
     requested = (preferred_backend or os.environ.get("MYPEOPLE_BACKEND") or
                  os.environ.get("DEFAULT_BACKEND") or configured)
     if allow_unauthenticated is None:
@@ -752,21 +762,7 @@ def ensure(preferred_backend=None, allow_unauthenticated=None):
     fresh = write_queue_env(install, backend or requested or "claude")
     install_tmux_conf(install)
     write_auth_state(install, ok, backend, msg, requested or "")
-    host = os.environ.get("HOST_ID") or _read_env_val("HOST_ID") or socket.gethostname().split(".")[0]
+    host = os.environ.get("HOST_ID") or load_cfg().get("HOST_ID") or socket.gethostname().split(".")[0]
     _echo("[myplow] install dir: %s  (config: %s%s)" %
           (install, CONFIG_PATH, ", fresh" if fresh else ", reused"))
     return install, host, backend
-
-
-def _read_env_val(key):
-    try:
-        for line in open(CONFIG_PATH):
-            line = line.strip()
-            if line.startswith("export "):
-                line = line[7:]
-            if line.startswith(key + "="):
-                v = line.split("=", 1)[1].strip()
-                return v[1:-1] if v[:1] in "\"'" else v
-    except Exception:
-        return None
-    return None

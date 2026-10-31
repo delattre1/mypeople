@@ -13,25 +13,7 @@ import os, sys, time, json, signal, subprocess, urllib.request
 from . import firstrun, __version__
 
 CONFIG_PATH = firstrun.CONFIG_PATH
-
-
-def load_cfg():
-    cfg = {}
-    if os.path.exists(CONFIG_PATH):
-        for line in open(CONFIG_PATH):
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[7:]
-            if "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            v = v.strip()
-            if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
-                v = v[1:-1]
-            cfg[k.strip()] = v
-    return cfg
+load_cfg = firstrun.load_cfg  # desktop/src-tauri/src/main.rs calls cli.load_cfg()
 
 
 # A daemon is nobody's agent. `up` runs from whatever launched it, and an agent's shell would lend
@@ -327,7 +309,7 @@ def cmd_auth_check(args):
                               requested or "")
     if ok:
         # Persist the backend the login actually landed on, so every later spawn agrees with it.
-        if (firstrun._read_env_val("DEFAULT_BACKEND") or "") != backend:
+        if (load_cfg().get("DEFAULT_BACKEND") or "") != backend:
             firstrun.write_queue_env(install, backend)
         # This is the last thing that runs before boss-supervisor spawns the Boss, and on a node
         # that came up degraded it may be the first pass that ever completes. Re-seed the backend

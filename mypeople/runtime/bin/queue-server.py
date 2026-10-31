@@ -2,8 +2,8 @@
 """MyPlow queue-server: HTTP queue + registry + reaper + /dashboard + /roster.
 Binds BIND_ADDR:HUD_PORT (9900). Reverse-proxies TODO routes to TODO_PORT so both
 front doors serve both pages (symmetric cross-nav, §ITEM-2). Python stdlib only."""
-import os, sys, json, time, threading, uuid
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os, sys, time, threading, uuid
+from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpcommon as C
@@ -151,57 +151,16 @@ def upsert_agents(host, agents):
         AGENTS[aid] = rec
 
 
-class Handler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
-
-    def log_message(self, *a):
-        pass
-
-    # ---- helpers ----
-    def _send(self, code, obj=None, ctype="application/json", raw=None, extra_headers=None):
-        if raw is None:
-            raw = json.dumps(obj).encode("utf-8") if obj is not None else b""
-        elif isinstance(raw, str):
-            raw = raw.encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(raw)))
-        if extra_headers:
-            for k, v in extra_headers.items():
-                self.send_header(k, v)
-        self.end_headers()
-        try:
-            self.wfile.write(raw)
-        except Exception:
-            pass
-
-    def _body(self):
-        n = int(self.headers.get("Content-Length", 0) or 0)
-        if not n:
-            return {}
-        raw = self.rfile.read(n)
-        try:
-            return json.loads(raw)
-        except Exception:
-            return {}
-
+class Handler(C.JSONHandler):
     def _auth(self):
         ok, ident = C.caller_identity(self.headers)
         return ok
-
-    def _page_headers(self):
-        return {
-            "Set-Cookie": "mp_session=%s; HttpOnly; Path=/; SameSite=Lax" % C.mint_session(),
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        }
 
     def do_HEAD(self):
         p = self.path.split("?", 1)[0]
         if p == "/dashboard" or p.startswith("/dashboard/"):
             self.send_response(200)
-            for k, v in self._page_headers().items():
+            for k, v in self._page_extra().items():
                 self.send_header(k, v)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", "0")
@@ -227,7 +186,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 html = C.render_page("<h1>MyPlow - HUD</h1>")
             return self._send(200, raw=html, ctype="text/html; charset=utf-8",
-                              extra_headers=self._page_headers())
+                              extra=self._page_extra())
         # TODO routes -> proxy to todo-server (symmetric front doors); /fonts/ is what every page links
         if p in ("/", "/todos", "/terminal-graph") or p.startswith("/todo/") or p.startswith("/fonts/"):
             return C.proxy_request(self, "127.0.0.1", TODO_PORT)

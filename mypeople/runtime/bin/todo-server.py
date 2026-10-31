@@ -5,7 +5,7 @@ cross-nav works from either front door. Python 3 stdlib only.
 MODULE-LEVEL imports of every stdlib a handler uses (§5.3b UnboundLocalError guard)."""
 import os, sys, json, time, uuid, threading, shutil, subprocess, glob, re
 import urllib.parse, urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpcommon as C
@@ -637,48 +637,9 @@ def parse_multipart(handler, ctype):
 
 
 # ---------------- HTTP ----------------
-class Handler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
-
-    def log_message(self, *a):
-        pass
-
-    def _send(self, code, obj=None, ctype="application/json", raw=None, extra=None):
-        if raw is None:
-            raw = json.dumps(obj).encode("utf-8") if obj is not None else b""
-        elif isinstance(raw, str):
-            raw = raw.encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(raw)))
-        if extra:
-            for k, v in extra.items():
-                self.send_header(k, v)
-        self.end_headers()
-        try:
-            self.wfile.write(raw)
-        except Exception:
-            pass
-
-    def _json_body(self):
-        n = int(self.headers.get("Content-Length", 0) or 0)
-        if not n:
-            return {}
-        raw = self.rfile.read(n)
-        try:
-            return json.loads(raw)
-        except Exception:
-            return {}
-
+class Handler(C.JSONHandler):
     def _identity(self):
         return C.caller_identity(self.headers)
-
-    def _page_extra(self):
-        return {
-            "Set-Cookie": "mp_session=%s; HttpOnly; Path=/; SameSite=Lax" % C.mint_session(),
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache", "Expires": "0",
-        }
 
     def _serve_page(self, path):
         try:
@@ -800,7 +761,7 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "")
         if p == "/todo/proof" and ctype.startswith("multipart/form-data"):
             return self._proof_multipart()
-        body = self._json_body()
+        body = self._body()
 
         if p == "/todo/update":
             return self._update(body, ident)
