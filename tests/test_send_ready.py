@@ -6,8 +6,6 @@ on 2026-10-03 a Boss `/exit` stopped at "You have 4 unsent feedback drafts: Ente
 review & send", where the Enter after any paste would have sent them. These tests hold
 the readiness rule to real screens, and the send path to it, with tmux faked.
 """
-import importlib.machinery
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -15,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+import sandbox
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "mypeople" / "runtime" / "bin"
@@ -42,11 +41,7 @@ def load_common(install):
         sys.modules.pop("mpcommon", None)
         sys.path.insert(0, str(BIN))
         try:
-            loader = importlib.machinery.SourceFileLoader("mpcommon_ready_%d" % id(install), str(BIN / "mpcommon.py"))
-            spec = importlib.util.spec_from_loader(loader.name, loader)
-            mod = importlib.util.module_from_spec(spec)
-            loader.exec_module(mod)
-            return mod
+            return sandbox.load_file(BIN / "mpcommon.py", "mpcommon_ready_%d" % id(install))
         finally:
             sys.path.remove(str(BIN))
 
@@ -144,10 +139,7 @@ class MpSendExitCodeTest(unittest.TestCase):
                 sys.modules.pop("mpcommon", None)
                 sys.path.insert(0, str(BIN))
                 try:
-                    loader = importlib.machinery.SourceFileLoader("mp_ready", str(BIN / "mp"))
-                    spec = importlib.util.spec_from_loader("mp_ready", loader)
-                    mp = importlib.util.module_from_spec(spec)
-                    loader.exec_module(mp)
+                    mp = sandbox.load_file(BIN / "mp", "mp_ready")
                 finally:
                     sys.path.remove(str(BIN))
                 with mock.patch.object(mp.C, "send_when_ready", return_value="not_ready"), \

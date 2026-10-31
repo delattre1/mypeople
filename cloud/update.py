@@ -152,7 +152,7 @@ def stage(release, layer, reg):
     """Put releases/<release> on disk from the image's last layer, all or nothing."""
     dest = ROOT / "releases" / release
     if (dest / "run.sh").exists():
-        return dest
+        return
     if "zstd" in layer.get("mediaType", ""):
         raise ValueError("zstd layers are not supported; publish gzip")
     prefix = f"opt/myplow/releases/{release}/"
@@ -172,7 +172,6 @@ def stage(release, layer, reg):
             t.extractall(tmp, members=members, **safe)
         os.replace(Path(tmp) / prefix, dest)
     log(f"staged {release} from {layer['digest'][:19]}", beacon=True)
-    return dest
 
 
 # --- the fleet: never cut a turn ---

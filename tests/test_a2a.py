@@ -1,6 +1,4 @@
 """A2A: plain mp send to an agent on another, paired MyPlow, through the relay, and its answer back."""
-import importlib.machinery
-import importlib.util
 import os
 import socket
 import tempfile
@@ -10,6 +8,7 @@ import unittest
 import urllib.request
 from pathlib import Path
 from unittest import mock
+import sandbox
 
 PLUGIN = Path(__file__).resolve().parents[1] / "mypeople/runtime/plugins/a2a/a2a.py"
 
@@ -54,9 +53,7 @@ class A2ATest(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"INSTALL_DIR": self.tmp.name})
         env.start()
         self.addCleanup(env.stop)
-        loader = importlib.machinery.SourceFileLoader("a2a", str(PLUGIN))
-        self.a2a = importlib.util.module_from_spec(importlib.util.spec_from_loader("a2a", loader))
-        loader.exec_module(self.a2a)
+        self.a2a = sandbox.load_file(PLUGIN, "a2a")
         self.a2a.log = lambda msg: None
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))

@@ -246,7 +246,6 @@ def _follow(install, cfg):
         except Exception:
             pass
         print("\n[myplow] detached. `mypeople status` / `mypeople down`.")
-    return 0
 
 
 # ---------------------------------------------------------------- down

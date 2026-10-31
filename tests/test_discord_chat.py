@@ -1,6 +1,4 @@
 """Discord chat plugin: who reaches the Boss, with what trust, and what a community engineer can touch."""
-import importlib.machinery
-import importlib.util
 import json
 import os
 import re
@@ -17,6 +15,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_roles import load_mp  # noqa: E402  (the packaged mp, on a throwaway install)
+import sandbox  # noqa: E402
 
 PLUGIN = Path(__file__).resolve().parents[1] / "mypeople/runtime/plugins/discord-chat/discord-chat.py"
 
@@ -29,9 +28,7 @@ class DiscordChatTest(unittest.TestCase):
                                            "DISCORD_CHAT_USERS": "100:full,200"})
         env.start()
         self.addCleanup(env.stop)
-        loader = importlib.machinery.SourceFileLoader("discord_chat", str(PLUGIN))
-        self.d = importlib.util.module_from_spec(importlib.util.spec_from_loader("discord_chat", loader))
-        loader.exec_module(self.d)
+        self.d = sandbox.load_file(PLUGIN, "discord_chat")
         self.boss, self.posted, self.page, self.attached = [], [], [], []
         self.d.send_to_boss = lambda text: self.boss.append(text) or True   # never the real mp
         self.thread_exists = False
@@ -316,9 +313,7 @@ class AnyMentionTest(unittest.TestCase):
                                            "MYPEOPLE_CONFIG_PATH": os.path.join(self.tmp.name, "queue.env")})
         env.start()
         self.addCleanup(env.stop)
-        loader = importlib.machinery.SourceFileLoader("discord_chat", str(PLUGIN))
-        self.d = importlib.util.module_from_spec(importlib.util.spec_from_loader("discord_chat", loader))
-        loader.exec_module(self.d)
+        self.d = sandbox.load_file(PLUGIN, "discord_chat")
         self.boss, self.posted, self.logs = [], [], []
         self.d.send_to_boss = lambda text: self.boss.append(text) or True
         self.d.api = self.api
@@ -477,9 +472,7 @@ class CookingTest(unittest.TestCase):
                                            "MYPEOPLE_CONFIG_PATH": os.path.join(self.tmp.name, "queue.env")})
         env.start()
         self.addCleanup(env.stop)
-        loader = importlib.machinery.SourceFileLoader("discord_chat", str(PLUGIN))
-        self.d = importlib.util.module_from_spec(importlib.util.spec_from_loader("discord_chat", loader))
-        loader.exec_module(self.d)
+        self.d = sandbox.load_file(PLUGIN, "discord_chat")
         self.issues, self.gone, self.prs, self.threads, self.posts, self.made, self.asked = {}, {}, {}, [], [], [], []
         self.board = {"tasks": {}}
         self.d.graphql, self.d.api, self.d.fetch_board = self.graphql, self.api, lambda: self.board

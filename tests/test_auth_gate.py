@@ -10,8 +10,6 @@ the HUD painted ALIVE/WORKING and the board delivered pings -- while the agent s
 Two things are pinned here: the gate refuses a dead credential, and a node whose credential was
 refused never renders an agent as ALIVE or WORKING.
 """
-import importlib.machinery
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -267,12 +265,7 @@ class HudHonestyTests(unittest.TestCase):
             sys.modules.pop("mpcommon", None)
             sys.path.insert(0, str(BIN))
             try:
-                loader = importlib.machinery.SourceFileLoader(
-                    "queue_server_auth_test", str(BIN / "queue-server.py"))
-                spec = importlib.util.spec_from_loader("queue_server_auth_test", loader)
-                module = importlib.util.module_from_spec(spec)
-                loader.exec_module(module)
-                return module
+                return sandbox.load_file(BIN / "queue-server.py", "queue_server_auth_test")
             finally:
                 sys.path.remove(str(BIN))
 

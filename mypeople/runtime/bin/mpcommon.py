@@ -479,21 +479,20 @@ def cancel_notification_route(target_agent, token):
 def open_notification_routes(target_agent, text):
     """Mark the routes whose message reached this turn (it is in TEXT). Drops expired ones."""
     if not target_agent:
-        return 0
+        return
     seen = " ".join((text or "").split())
 
     def mark(routes):
-        now, kept, opened = time.time(), [], 0
+        now, kept = time.time(), []
         for r in routes:
             if not isinstance(r, dict) or now - r.get("ts", 0) > ROUTE_TTL:
                 continue
-            if r.get("head") and r["head"] in seen and not r.get("opened"):
+            if r.get("head") and r["head"] in seen:
                 r["opened"] = True
-                opened += 1
             kept.append(r)
-        return opened, kept
+        return None, kept
 
-    return _locked_notification_routes(target_agent, mark)
+    _locked_notification_routes(target_agent, mark)
 
 
 def claim_notification_routes(target_agent):
@@ -603,11 +602,8 @@ def current_recorder(sess, tab, host=None):
 
 def _wait_for_exit(pids, timeout=2.0):
     deadline = time.time() + timeout
-    while time.time() < deadline:
-        if not any(_process_alive(pid) for pid in pids):
-            return True
+    while time.time() < deadline and any(_process_alive(pid) for pid in pids):
         time.sleep(0.05)
-    return not any(_process_alive(pid) for pid in pids)
 
 
 def stop_recorder(sess, tab, metadata=None, host=None, include_current=True):

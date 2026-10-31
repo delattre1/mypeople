@@ -1,17 +1,15 @@
 """cloud/pool-lease.py reads its own Claude logs right: usage once per message, limits detected, and
 the Boss restarted first (its resume is the proof a new login works)."""
-import importlib.util
 import json
 import os
 import tempfile
 import time
 import unittest
 from pathlib import Path
+import sandbox
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("pool_lease", ROOT / "cloud" / "pool-lease.py")
-pl = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(pl)
+pl = sandbox.load_file(ROOT / "cloud" / "pool-lease.py", "pool_lease")
 
 
 def turn(ts, mid, usage=None, error=None):

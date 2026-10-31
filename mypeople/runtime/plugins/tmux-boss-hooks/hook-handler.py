@@ -242,7 +242,6 @@ def normalize(d):
     for cam, snake in (("sessionId", "session_id"), ("transcriptPath", "transcript_path")):
         if cam in d and snake not in d:
             d[snake] = d[cam]
-    return d
 
 
 AGENT_CLIS = ("claude", "grok", "codex")

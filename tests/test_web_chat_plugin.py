@@ -1,7 +1,6 @@
 """The web-chat plugin end to end, offline: the relay (relay.py) in-process, the plugin polling it, a stub mp."""
 import fcntl
 import hashlib
-import importlib.util
 import json
 import os
 import stat
@@ -14,15 +13,9 @@ from unittest import mock
 import urllib.error
 import urllib.request
 from pathlib import Path
+import sandbox
 
 PLUGIN = Path(__file__).resolve().parent.parent / "mypeople/runtime/plugins/web-chat"
-
-
-def load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
 
 
 class PageAnalytics(unittest.TestCase):
@@ -41,7 +34,7 @@ class PageAnalytics(unittest.TestCase):
 class WebChatPlugin(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
-        relay = load("relay", PLUGIN / "relay.py")
+        relay = sandbox.load_file(PLUGIN / "relay.py", "relay")
         self.server = relay.serve(relay.Relay(self.dir / "relay", hashlib.sha256(b"agent-key").hexdigest()), port=0, host="127.0.0.1")
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -55,7 +48,7 @@ class WebChatPlugin(unittest.TestCase):
         self.addCleanup(env.stop)
         (self.dir / "state").mkdir()
         (self.dir / "state/creds.json").write_text(json.dumps({"url": self.base, "key": "agent-key"}))
-        self.plugin = load("web_chat", PLUGIN / "web-chat.py")
+        self.plugin = sandbox.load_file(PLUGIN / "web-chat.py", "web_chat")
 
     def tearDown(self):
         self.server.shutdown()
@@ -167,7 +160,7 @@ class WebChatPlugin(unittest.TestCase):
         self.http("POST", "/messages", {"text": "teach me hello in Chinese"})
         v = self.plugin.call("GET", "/agent/inbox?after=0&wait=0")["messages"][-1]["visitor"]
         self.plugin.call("POST", "/agent/reply", {"visitor": v, "text": "Hello is 你好. Want thank you too?\n~Lin"})
-        pc = load("plow_chat_for_web", PLUGIN.parent / "plow-chat" / "plow-chat.py")
+        pc = sandbox.load_file(PLUGIN.parent / "plow-chat" / "plow-chat.py", "plow_chat_for_web")
         calls = []
         pc.pick_agent = lambda *a: calls.append(a) or "mac/main:Lin"
         self.plugin._router = pc

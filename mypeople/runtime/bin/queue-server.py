@@ -159,13 +159,7 @@ class Handler(C.JSONHandler):
     def do_HEAD(self):
         p = self.path.split("?", 1)[0]
         if p == "/dashboard" or p.startswith("/dashboard/"):
-            self.send_response(200)
-            for k, v in self._page_extra().items():
-                self.send_header(k, v)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
+            return self._send(200, raw=b"", ctype="text/html; charset=utf-8", extra=self._page_extra())
         if p in ("/", "/todos", "/terminal-graph") or p.startswith("/todo/"):
             return C.proxy_request(self, "127.0.0.1", TODO_PORT)
         self.send_response(200)

@@ -259,7 +259,7 @@ def context(message: dict) -> list:
     return lines
 
 
-def note_tapbacks(msgs: list, chat_uid: str, seed: bool = True) -> int:
+def note_tapbacks(msgs: list, chat_uid: str, seed: bool = True):
     """Hold new tapbacks from people for the Boss's next message; never wake it for one.
 
     A thumbs-up is not someone writing to the Boss: waking it would make every
@@ -290,7 +290,7 @@ def note_tapbacks(msgs: list, chat_uid: str, seed: bool = True) -> int:
         known = by_chat.get(chat_uid)
         new = [k for k in live if k not in (known or [])]
         if not new and known is not None and len(known) == len(live):
-            return 0
+            return
         # First sight of a chat with seeding on: its tapbacks are history, not news. A chat seen
         # before this per-chat record existed is seeded too, once.
         first = known is None and (seed or chat_uid in st.get("tapback_chats", []))
@@ -298,7 +298,6 @@ def note_tapbacks(msgs: list, chat_uid: str, seed: bool = True) -> int:
         st["pending_tapbacks"] = (st.get("pending_tapbacks", []) + news)[-20:]
         by_chat[chat_uid] = sorted(live)
         write_json(STATE, st)
-    return len(news)
 
 
 def role_about(role: str) -> str:

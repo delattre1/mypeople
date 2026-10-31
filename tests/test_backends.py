@@ -9,7 +9,7 @@ import unittest
 from unittest import mock
 
 from mypeople import firstrun
-from sandbox import load as load_mp
+from sandbox import load as load_mp, load_file
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -321,18 +321,13 @@ class HookHandlerTests(unittest.TestCase):
 
     def _notices(self, td, payload, transcript=None, claimed=None, opened=None):
         """What one Stop would send: the handler loaded in-process with the queue mocked."""
-        import importlib.machinery, importlib.util
         if transcript is not None:
             tp = Path(td) / "t.jsonl"
             tp.write_text("".join(json.dumps(e) + "\n" for e in transcript))
             payload = dict(payload, transcript_path=str(tp))
-        with mock.patch.dict(os.environ, {"INSTALL_DIR": td, "AGENT_ID": "node/main:eng",
-                                          "BOSS_ID": "node/main:Boss", "MYPEOPLE_BACKEND": "claude",
-                                          "QUEUE_URL": "http://queue", "QUEUE_SECRET": "s"}):
-            loader = importlib.machinery.SourceFileLoader("hh_%d" % id(payload), str(HANDLER))
-            spec = importlib.util.spec_from_loader(loader.name, loader)
-            hh = importlib.util.module_from_spec(spec)
-            loader.exec_module(hh)
+        hh = load_file(HANDLER, "hh_%d" % id(payload),
+                       {"INSTALL_DIR": td, "AGENT_ID": "node/main:eng", "BOSS_ID": "node/main:Boss",
+                        "MYPEOPLE_BACKEND": "claude", "QUEUE_URL": "http://queue", "QUEUE_SECRET": "s"})
         sent = []
         opened = [] if opened is None else opened
         hh.C = mock.Mock(claim_notification_routes=lambda aid: claimed or [],
@@ -450,14 +445,9 @@ class NestedCliHookTests(unittest.TestCase):
               23: (22, "sh"), 24: (23, "bash"), 25: (24, "python3")}
 
     def _hh(self, td, procs):
-        import importlib.machinery, importlib.util
-        with mock.patch.dict(os.environ, {"INSTALL_DIR": td, "AGENT_ID": "node/main:eng",
-                                          "BOSS_ID": "node/main:Boss", "MYPEOPLE_BACKEND": "claude",
-                                          "QUEUE_URL": "http://queue", "QUEUE_SECRET": "s"}):
-            loader = importlib.machinery.SourceFileLoader("hh_nested_%d" % id(procs), str(HANDLER))
-            spec = importlib.util.spec_from_loader(loader.name, loader)
-            hh = importlib.util.module_from_spec(spec)
-            loader.exec_module(hh)
+        hh = load_file(HANDLER, "hh_nested_%d" % id(procs),
+                       {"INSTALL_DIR": td, "AGENT_ID": "node/main:eng", "BOSS_ID": "node/main:Boss",
+                        "MYPEOPLE_BACKEND": "claude", "QUEUE_URL": "http://queue", "QUEUE_SECRET": "s"})
         hh.process_table = lambda: procs
         sleep = mock.patch.object(hh.time, "sleep")
         sleep.start()
@@ -480,11 +470,7 @@ class NestedCliHookTests(unittest.TestCase):
         return sent
 
     def test_ancestry_rule(self):
-        import importlib.machinery, importlib.util
-        loader = importlib.machinery.SourceFileLoader("hh_rule", str(HANDLER))
-        spec = importlib.util.spec_from_loader(loader.name, loader)
-        hh = importlib.util.module_from_spec(spec)
-        loader.exec_module(hh)
+        hh = load_file(HANDLER, "hh_rule")
         nested = hh.fired_by_nested_cli
         self.assertFalse(nested(self.OWN, 13))
         self.assertTrue(nested(self.NESTED, 25))

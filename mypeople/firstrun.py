@@ -429,7 +429,6 @@ def write_auth_state(install, authenticated, backend=None, message="", requested
         })
     except Exception:
         pass  # a status file must never be the reason the stack fails to come up
-    return path
 
 
 def _prompt_backend(available):

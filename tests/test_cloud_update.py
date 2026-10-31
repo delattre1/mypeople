@@ -5,7 +5,6 @@ serves an index -> amd64 manifest -> config with the myplow.release label -> gzi
 """
 import gzip
 import hashlib
-import importlib.util
 import io
 import json
 import os
@@ -16,6 +15,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest import mock
+import sandbox
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -67,10 +67,8 @@ class CloudUpdatePull(unittest.TestCase):
         self.td = tempfile.TemporaryDirectory()
         root = Path(self.td.name)
         (root / "releases").mkdir()
-        with mock.patch.dict(os.environ, {"MYPLOW_ROOT": str(root), "MYPLOW_REGISTRY_SCHEME": "http"}):
-            spec = importlib.util.spec_from_file_location("update", ROOT / "cloud" / "update.py")
-            self.u = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(self.u)
+        self.u = sandbox.load_file(ROOT / "cloud" / "update.py", "update",
+                                   {"MYPLOW_ROOT": str(root), "MYPLOW_REGISTRY_SCHEME": "http"})
         self.root = root
         self.layer = layer_with({"opt/myplow/current": b"", "opt/myplow/releases/9.9.9/run.sh": b"#!/bin/sh\n",
                                  "opt/myplow/releases/9.9.9/RELEASE": b"9.9.9\n", "etc/passwd": b"no"})
@@ -113,9 +111,7 @@ class CloudUpdateIdleGate(unittest.TestCase):
     def busy(self, statuses):
         with tempfile.TemporaryDirectory() as td, \
                 mock.patch.dict(os.environ, {"MYPEOPLE_HOME": td, "MYPLOW_ROOT": td}):
-            spec = importlib.util.spec_from_file_location("update", ROOT / "cloud" / "update.py")
-            u = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(u)
+            u = sandbox.load_file(ROOT / "cloud" / "update.py", "update")
             for win, (status, age) in statuses.items():
                 d = Path(td) / "status" / "mc-main"
                 d.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,4 @@
 """Cloud MyPlow leases the shared Auth Bank before it asks an owner to log in."""
-import importlib.util
 import os
 import shutil
 import stat
@@ -8,6 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+import sandbox
 
 ROOT = Path(__file__).resolve().parents[1]
 GOOD = "sk-ant-oat01-" + "g" * 40
@@ -96,9 +96,7 @@ esac""")
 
 class OwnLoginParsing(unittest.TestCase):
     def setUp(self):
-        spec = importlib.util.spec_from_file_location("own_login", ROOT / "cloud" / "own-login.py")
-        self.m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.m)
+        self.m = sandbox.load_file(ROOT / "cloud" / "own-login.py", "own_login")
 
     def test_link_comes_whole_from_the_terminal_hyperlink(self):
         url = "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=abc"
