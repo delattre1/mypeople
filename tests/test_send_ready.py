@@ -7,16 +7,12 @@ review & send", where the Enter after any paste would have sent them. These test
 the readiness rule to real screens, and the send path to it, with tmux faked.
 """
 import json
-import os
 from pathlib import Path
-import sys
 import tempfile
 import unittest
 from unittest import mock
 import sandbox
 
-ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / "mypeople" / "runtime" / "bin"
 RULE = "─" * 60
 FOOT = "  ⏵⏵ bypass permissions on (shift+tab to cycle)"
 READY = "● done.\n✻ Worked for 2s\n%s\n❯ \n%s\n%s\n" % (RULE, RULE, FOOT)
@@ -33,19 +29,6 @@ QUESTION = ("%s\n\u2502 Where should the PR go?\n\u276f 1. New repo (Recommended
 QUESTION_LAST = "%s\n  1. New repo\n%s\n\u276f 5. Chat about this\nEnter to select \u00b7 Esc to cancel\n" % (RULE, RULE)
 
 
-def load_common(install):
-    cfg = Path(install) / "queue.env"
-    cfg.write_text('export INSTALL_DIR="%s"\nexport HOST_ID="node"\n' % install)
-    with mock.patch.dict(os.environ, {"MYPEOPLE_CONFIG_PATH": str(cfg), "INSTALL_DIR": install,
-                                      "HOST_ID": "node"}):
-        sys.modules.pop("mpcommon", None)
-        sys.path.insert(0, str(BIN))
-        try:
-            return sandbox.load_file(BIN / "mpcommon.py", "mpcommon_ready_%d" % id(install))
-        finally:
-            sys.path.remove(str(BIN))
-
-
 class FakeTmux:
     def __init__(self, screen, pane=True):
         self.screen, self.pane, self.calls = screen, pane, []
@@ -60,7 +43,7 @@ class FakeTmux:
 class ComposerReadyTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.C = load_common(self.tmp.name)
+        self.C = sandbox.load(self.tmp.name, "mpcommon.py", HOST_ID="node")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -75,7 +58,7 @@ class ComposerReadyTest(unittest.TestCase):
             self.assertFalse(ready(screen), name)
 
     def agent(self, backend):
-        d = Path(self.tmp.name) / "status" / "mc-main"
+        d = Path(self.C.CFG["INSTALL_DIR"]) / "status" / "mc-main"
         d.mkdir(parents=True, exist_ok=True)
         (d / "eng-1.json").write_text(json.dumps({"backend": backend, "status": "starting"}))
         return "mc-main:eng-1"
@@ -118,7 +101,7 @@ class ComposerReadyTest(unittest.TestCase):
         """On 2026-10-23 an A2A GO to an agent killed 4 h earlier came back as a bare "no_pane"; the
         sender read it as a hiccup and waited 1.5 h (card 65c54015d5). Local and A2A sends both end here."""
         target = self.agent("claude")
-        run = Path(self.tmp.name) / "run"
+        run = Path(self.C.CFG["INSTALL_DIR"]) / "run"
         run.mkdir()
         (run / "roster.json").write_text(json.dumps({"node/main:eng-1": {
             "retired": True, "retire_reason": "killed", "retired_ts": self.C.time.time() - 4 * 3600}}))
@@ -132,22 +115,13 @@ class ComposerReadyTest(unittest.TestCase):
 class MpSendExitCodeTest(unittest.TestCase):
     def test_mp_send_exits_3_on_not_ready_so_a_retrying_sender_retries(self):
         with tempfile.TemporaryDirectory() as td:
-            load_common(td)  # leaves mpcommon configured for this throwaway install
-            cfg = Path(td) / "queue.env"
-            with mock.patch.dict(os.environ, {"MYPEOPLE_CONFIG_PATH": str(cfg), "INSTALL_DIR": td,
-                                              "HOST_ID": "node", "QUEUE_URL": "http://127.0.0.1:1"}):
-                sys.modules.pop("mpcommon", None)
-                sys.path.insert(0, str(BIN))
-                try:
-                    mp = sandbox.load_file(BIN / "mp", "mp_ready")
-                finally:
-                    sys.path.remove(str(BIN))
-                with mock.patch.object(mp.C, "send_when_ready", return_value="not_ready"), \
-                     mock.patch.object(mp.C, "enqueue_notification_route", return_value=None):
-                    self.assertEqual(mp.do_send(["node/main:eng-1", "hi"]), 3)
-                with mock.patch.object(mp.C, "send_when_ready", return_value="sent"), \
-                     mock.patch.object(mp.C, "enqueue_notification_route", return_value=None):
-                    self.assertEqual(mp.do_send(["node/main:eng-1", "hi"]), 0)
+            mp = sandbox.load(td, "mp", HOST_ID="node")
+            with mock.patch.object(mp.C, "send_when_ready", return_value="not_ready"), \
+                 mock.patch.object(mp.C, "enqueue_notification_route", return_value=None):
+                self.assertEqual(mp.do_send(["node/main:eng-1", "hi"]), 3)
+            with mock.patch.object(mp.C, "send_when_ready", return_value="sent"), \
+                 mock.patch.object(mp.C, "enqueue_notification_route", return_value=None):
+                self.assertEqual(mp.do_send(["node/main:eng-1", "hi"]), 0)
 
 
 if __name__ == "__main__":

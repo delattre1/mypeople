@@ -14,7 +14,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -248,30 +247,9 @@ class NodeHealthCacheTests(unittest.TestCase):
 class HudHonestyTests(unittest.TestCase):
     """An agent that cannot answer must never render ALIVE or WORKING."""
 
-    def _queue_server(self, home):
-        config = Path(home) / "queue.env"
-        state = Path(home) / "state"
-        config.write_text(
-            'export INSTALL_DIR="%s"\n'
-            'export HOST_ID="test-node"\n'
-            'export QUEUE_URL="http://127.0.0.1:1"\n'
-            'export QUEUE_SECRET="secret"\n'
-            'export TTYD_PORT="7681"\n' % state, encoding="utf-8")
-        env = {"HOME": str(home), "MYPEOPLE_CONFIG_PATH": str(config),
-               "MYPEOPLE_HOME": str(state), "INSTALL_DIR": str(state),
-               "HOST_ID": "test-node", "QUEUE_URL": "http://127.0.0.1:1",
-               "QUEUE_SECRET": "secret", "TTYD_PORT": "7681"}
-        with mock.patch.dict(os.environ, env, clear=False):
-            sys.modules.pop("mpcommon", None)
-            sys.path.insert(0, str(BIN))
-            try:
-                return sandbox.load_file(BIN / "queue-server.py", "queue_server_auth_test")
-            finally:
-                sys.path.remove(str(BIN))
-
     def test_unauthenticated_agent_is_blocked_not_working(self):
         with tempfile.TemporaryDirectory() as td:
-            qs = self._queue_server(td)
+            qs = sandbox.load(td, "queue-server.py")
             rec = {"agent_id": "test-node/main:Boss", "host": "test-node", "session": "main",
                    "tab": "Boss", "backend": "claude", "state": "unauthenticated",
                    "auth_detail": "OAuth session expired and cannot be refreshed"}
@@ -286,7 +264,7 @@ class HudHonestyTests(unittest.TestCase):
 
     def test_authenticated_agent_is_untouched(self):
         with tempfile.TemporaryDirectory() as td:
-            qs = self._queue_server(td)
+            qs = sandbox.load(td, "queue-server.py")
             rec = {"agent_id": "test-node/main:eng-1", "host": "test-node", "session": "main",
                    "tab": "eng-1", "backend": "claude", "state": "alive"}
             with mock.patch.object(qs, "status_for",
@@ -298,7 +276,7 @@ class HudHonestyTests(unittest.TestCase):
 
     def test_a_never_prompted_agent_reads_starting_not_working(self):
         with tempfile.TemporaryDirectory() as td:
-            qs = self._queue_server(td)
+            qs = sandbox.load(td, "queue-server.py")
             rec = {"agent_id": "test-node/main:eng-2", "host": "test-node", "session": "main",
                    "tab": "eng-2", "backend": "claude", "state": "alive"}
             # spawned, never given a turn: 7 such agents read "working" for 6 h (10-29)
