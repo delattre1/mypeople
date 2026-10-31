@@ -54,17 +54,24 @@ RUN set -eux; \
 
 # Agent CLIs are installed in the image, but credentials are never baked into an image layer.
 ARG CLAUDE_VERSION=2.1.288
-ARG CODEX_VERSION=0.144.1
+# CODEX_VERSION must be one releases.openai.com hosts: for any other, Codex's installer falls back to
+# the GitHub API, which rate-limits the shared runners (5.22.135's amd64 build failed twice on 0.144.1).
+# So that fallback fails the build here instead of passing on some runners.
+ARG CODEX_VERSION=0.166.0
 USER mypeople
 RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_VERSION}" \
-    && curl -fsSL https://chatgpt.com/codex/install.sh | \
-       CODEX_RELEASE="${CODEX_VERSION}" CODEX_NON_INTERACTIVE=1 sh
+    && curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/codex-install.sh \
+    && CODEX_RELEASE="${CODEX_VERSION}" CODEX_NON_INTERACTIVE=1 sh /tmp/codex-install.sh 2>/tmp/codex-install.err; \
+    s=$?; cat /tmp/codex-install.err >&2; \
+    test "$s" = 0 && ! grep -q 'falling back to GitHub' /tmp/codex-install.err \
+    && rm /tmp/codex-install.sh /tmp/codex-install.err
 USER root
 RUN cp -L /home/mypeople/.local/bin/claude /usr/local/bin/claude \
     && cp -L /home/mypeople/.local/bin/codex /usr/local/bin/codex \
     && if [ -e /home/mypeople/.local/bin/codex-code-mode-host ]; then \
          cp -L /home/mypeople/.local/bin/codex-code-mode-host /usr/local/bin/codex-code-mode-host; \
-       fi
+       fi \
+    && v="$(codex --version)" && echo "$v" && test "$v" = "codex-cli ${CODEX_VERSION}"
 
 COPY --from=package-builder /dist/mypeople-*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/mypeople-*.whl \
