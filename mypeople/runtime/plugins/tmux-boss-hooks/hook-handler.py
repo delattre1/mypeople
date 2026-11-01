@@ -61,10 +61,8 @@ def set_status(aid, status, summary=None):
     cur["status"] = status
     cur["timestamp"] = time.time()
     cur["backend"] = BACKEND
-    cur["state"] = "alive"
     if "session_id" in DATA:
         cur["session_id"] = DATA.get("session_id")
-    cur["boss_id"] = BOSS_ID
     if summary is not None:
         # a locked (doctrine) summary is NEVER clobbered by the Stop hook — it is keyword-bearing
         # by construction (§8, J2c/J39). Only unlocked summaries get updated from the transcript.

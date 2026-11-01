@@ -217,7 +217,7 @@ def write_status(aid, status, backend, summary=None, locked=False, drop_session=
     if drop_session:
         cur.pop("session_id", None)
     cur.update({"status": status, "timestamp": time.time(),
-                "backend": backend, "state": "alive"})
+                "backend": backend})
     if summary is not None:
         cur["summary"] = summary
     if locked:

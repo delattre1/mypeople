@@ -19,7 +19,7 @@ AID = "test-node/main:eng-9"
 def write_status_file(mp, aid, status, ts, session_id=""):
     p = Path(mp.status_path(aid))
     p.parent.mkdir(parents=True, exist_ok=True)
-    doc = {"status": status, "timestamp": ts, "backend": "claude", "state": "alive"}
+    doc = {"status": status, "timestamp": ts, "backend": "claude"}
     if session_id:
         doc["session_id"] = session_id
     p.write_text(json.dumps(doc), encoding="utf-8")

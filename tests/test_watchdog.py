@@ -107,7 +107,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual("c2", jobs[0]["comment_id"])
 
     def test_the_two_kinds_coexist_on_one_card(self):
-        self.ts.wd_schedule_taskcreate("c", "working")
+        self.ts.wd_schedule_taskcreate("c")
         self.ts.wd_schedule_unanswered("c", "c1", "CEO")
         self.assertEqual({"taskcreate", "unanswered"},
                          {j["kind"] for j in self.ts.wd_load_store()["jobs"]})

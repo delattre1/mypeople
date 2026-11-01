@@ -88,8 +88,6 @@ def wd_load_store():
                 good.append(j)
         st["jobs"] = good
         return st
-    except FileNotFoundError:
-        return wd_new_store()
     except Exception:
         return wd_new_store()
 
@@ -110,18 +108,18 @@ def wd_schedule_unanswered(tid, comment_id, by):
     store = wd_load_store()
     store["jobs"] = [j for j in store["jobs"] if not (j["card"] == tid and j["kind"] == "unanswered")]
     job = {"id": uuid.uuid4().hex[:8], "card": tid, "comment_id": comment_id, "by": by,
-           "fire_at": now() + WATCHDOG_NUDGE_DELAY_MIN * 60, "kind": "unanswered", "init_state": None}
+           "fire_at": now() + WATCHDOG_NUDGE_DELAY_MIN * 60, "kind": "unanswered"}
     store["jobs"].append(job)
     wd_save_store(store)
     wd_log("scheduled", job, "by=%s" % by)
 
 
-def wd_schedule_taskcreate(tid, init_state):
+def wd_schedule_taskcreate(tid):
     """Caller holds LOCK. Any new task => schedule an owner-hasn't-spoken gate."""
     store = wd_load_store()
     store["jobs"] = [j for j in store["jobs"] if not (j["card"] == tid and j["kind"] == "taskcreate")]
     job = {"id": uuid.uuid4().hex[:8], "card": tid, "comment_id": None, "by": "CEO",
-           "fire_at": now() + WATCHDOG_TASKCREATE_DELAY_MIN * 60, "kind": "taskcreate", "init_state": init_state}
+           "fire_at": now() + WATCHDOG_TASKCREATE_DELAY_MIN * 60, "kind": "taskcreate"}
     store["jobs"].append(job)
     wd_save_store(store)
     wd_log("scheduled", job, "taskcreate")
@@ -520,10 +518,10 @@ def ensure_boss_chat(board):
     tid = uuid.uuid4().hex[:10]
     board["tasks"][tid] = {"id": tid, "text": "Boss", "state": "working", "bossChat": True,
                            "assignee": "", "ownerHistory": [], "ownerNeedsReplacement": False,
-                           "pinned": False, "pinRank": None, "doneCondition": "", "workToDone": "",
+                           "pinned": False, "pinRank": None, "doneCondition": "",
                            "done": False, "verified": False, "unread": 0, "pingsToBoss": 0,
                            "comments": [], "proofs": [], "test": False,
-                           "created": now(), "updated": now(), "lastAction": now()}
+                           "created": now(), "updated": now()}
     board["order"].insert(0, tid)
     board["bossChat"] = tid
     return True
@@ -887,10 +885,9 @@ class Handler(C.JSONHandler):
                 task = {"id": tid, "text": body.get("text", ""), "state": "working",
                         "assignee": "", "ownerHistory": [], "ownerNeedsReplacement": False,
                         "pinned": False, "pinRank": None,
-                        "doneCondition": "", "workToDone": "", "done": False, "verified": False,
+                        "doneCondition": "", "done": False, "verified": False,
                         "unread": 0, "pingsToBoss": 0, "comments": [], "proofs": [],
-                        "test": bool(body.get("test")), "created": now(), "updated": now(),
-                        "lastAction": now()}
+                        "test": bool(body.get("test")), "created": now(), "updated": now()}
                 board["tasks"][tid] = task
                 board["order"].insert(0, tid)
                 save_board(board)
@@ -899,7 +896,7 @@ class Handler(C.JSONHandler):
                 # Every new card, regardless of who created it. Boss relays most of the CEO's
                 # cards via the API (by=.../Boss), so an actor=="CEO" guard here would leave those
                 # silently uncovered.
-                wd_schedule_taskcreate(tid, task["state"])
+                wd_schedule_taskcreate(tid)
                 return self._send(200, {"ok": True, "id": tid})
             if op == "del":
                 tid = body.get("id")
@@ -936,10 +933,10 @@ class Handler(C.JSONHandler):
                     t["state"] = st
                     if st == "done":
                         t["done"] = True
-                for f in ("text", "doneCondition", "workToDone"):
+                for f in ("text", "doneCondition"):
                     if f in body:
                         t[f] = body[f]
-                if body.get("done") is True or body.get("workToDone") is True:
+                if body.get("done") is True:
                     # the same close, by another name -- gate it identically
                     if actor != "CEO":
                         return self._send(403, {"ok": False, "error": "ceo_only_terminal"})
@@ -948,7 +945,6 @@ class Handler(C.JSONHandler):
                 if "verified" in body:
                     t["verified"] = bool(body["verified"])
                 t["updated"] = now()
-                t["lastAction"] = now()
                 if t.get("state") != prev_state:
                     apply_owner_state_transition(t, prev_state, t.get("state"), actor)
                 save_board(board)
@@ -1024,7 +1020,7 @@ class Handler(C.JSONHandler):
             previous = current
             task["assignee"] = agent_id; task["ownerNeedsReplacement"] = False
             record_owner_event(task, action, agent_id, previous=previous)
-            task["updated"] = now(); task["lastAction"] = now(); save_board(board)
+            task["updated"] = now(); save_board(board)
             if action == "replace" and previous:
                 request_owner_lifecycle(task, "replace", previous)
             return self._send(200, {"ok": True, "assignee": agent_id,
@@ -1045,8 +1041,6 @@ class Handler(C.JSONHandler):
             if by != "CEO":
                 t["unread"] = t.get("unread", 0) + 1
             t["updated"] = now()
-            t["lastAction"] = now()
-            t["idleFired"] = False
             save_board(board)
             emit_comment_event(board, t, by, c["body"])
             save_board(board)
@@ -1141,8 +1135,6 @@ class Handler(C.JSONHandler):
             if "verified" in body:
                 t["verified"] = bool(body["verified"])
             t["updated"] = now()
-            t["lastAction"] = now()
-            t["idleFired"] = False
             if st and st != prev:
                 apply_owner_state_transition(t, prev, st, actor)
             save_board(board)
