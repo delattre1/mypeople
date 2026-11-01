@@ -17,7 +17,8 @@ answers in the same medium (spoken at the mic -> spoken back on the speaker). Th
 most of it is the owner talking to their stream or the room; the package says so, and the Boss
 answers only what is meant for it.
 
-A thought ships after SILENCE_MS without new words, or HARD_MS after it began. The caption text
+A thought ships once his sentence ends ('.?!' and SILENCE_MS without new words), after LONG_PAUSE_MS of silence
+mid-sentence, or HARD_MS after it began; it never starts mid-word. The caption text
 grows, but the model can rewrite or trim it; text already sent is re-found in the new buffer so it
 is never sent twice. The one filter: the speaker sits near the mic, so the Boss's own spoken reply
 comes back in the captions. What arrives while `say` plays (and TAIL_S after) is skipped, and a
@@ -43,8 +44,11 @@ HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 RUN = f"{sys.executable} {Path(__file__).resolve()}"   # the Boss answers with the python that runs the bridge
-SILENCE_MS = 1500   # end of a thought: a pause shorter than this is mid-sentence
-HARD_MS = 20000     # a thought that never pauses still ships
+SILENCE_MS = 1500   # a finished sentence ('.', '?', '!') ships after this pause
+LONG_PAUSE_MS = 3500   # an unfinished one waits for a longer pause: 11-01 a 1.5 s pause mid-sentence (even mid-word:
+                       # "me" ... "lhor") shipped half a thought, and Daniel got cut-up lines all day
+HARD_MS = 30000     # a thought that never pauses still ships
+SENTENCE_END = re.compile(r"[.?!…][\"')\]]*\s*$")
 ECHO_S = 60         # how long a spoken reply can come back through the mic
 TAIL_S = 2.5        # the captions lag the speaker: its echo keeps arriving this long after it stops
 MAX_CHARS = 2000
@@ -157,6 +161,8 @@ class Thoughts:
         self.cut = 0        # text[:cut] is sent (or was backlog)
         self.sent = ""      # that sent prefix, to re-find after a rewrite
         self.held = ""      # the owner's words from before the speaker began, still to send
+        self.ready = ""     # a finished thought to send at once (the speaker began talking)
+        self.before_speaker = False
         self.changed = self.began = None
 
     def update(self, t: str, now: float, muted: bool = False):
@@ -165,8 +171,13 @@ class Thoughts:
             return
         if t == self.text:
             return
-        if muted:   # the speaker is talking: keep the owner's words from before it, skip what arrives now
-            self.held = (self.held + " " + self.text[self.cut:]).strip()
+        if muted:   # the speaker is talking: what the owner said before it is a finished thought; skip what arrives now
+            # 11-01: held words used to wait and ship glued to what came after the speaker, often its own echo, and
+            # the echo filter then dropped the whole line, his words with it. Now they go out on their own, at once.
+            pend = (self.held + " " + self.text[self.cut:]).strip()
+            if re.search(r"\w", pend):
+                self.ready = (self.ready + " " + pend).strip()
+            self.held = ""
             self.text, self.cut, self.sent = t, len(t), t
             return
         if not t.startswith(self.text[:self.cut]):
@@ -177,24 +188,36 @@ class Thoughts:
             self.began = now
 
     def due(self, now: float):
+        self.before_speaker = bool(self.ready)   # said before the speaker began: it cannot be the speaker's echo
+        if self.ready:
+            r, self.ready = self.ready.lstrip(",.;:?!… "), ""
+            return r or None
         if self.changed is None:
             return None
-        pending = (self.held + " " + self.text[self.cut:]).strip()
-        if not pending:
-            self.changed = self.began = None
+        start = self.cut
+        while 0 < start < len(self.text) and self.text[start - 1].isalnum() and self.text[start].isalnum():
+            start -= 1   # the model finished a word we already sent half of ("me" -> "melhor"): send the whole word
+        pending = (self.held + " " + self.text[start:]).strip()
+        pending = pending.lstrip(",.;:?!… ")   # punctuation the model added to sent text is not a new thought
+        if not re.search(r"\w", pending):
+            self.cut, self.sent = len(self.text), self.text   # only punctuation changed: nothing to send
+            if not self.held:
+                self.changed = self.began = None
             return None
-        if (now - self.changed) * 1000 < SILENCE_MS and (now - self.began) * 1000 < HARD_MS:
+        quiet = (now - self.changed) * 1000
+        wait = SILENCE_MS if SENTENCE_END.search(pending) else LONG_PAUSE_MS
+        if quiet < wait and (now - self.began) * 1000 < HARD_MS:
             return None
         self.cut, self.sent, self.held = len(self.text), self.text, ""
         self.changed = self.began = None
         return pending
 
 
-def deliver(line: str, who: str, last: list, cue: str = ""):
+def deliver(line: str, who: str, last: list, cue: str = "", before_speaker: bool = False):
     line = trim_repeat(" ".join(line.split()), last[0])[-MAX_CHARS:].strip()
     if not line:
         return
-    if is_echo(line):
+    if not before_speaker and is_echo(line):   # 11-01: his words often repeat the reply that follows them
         log(f"echo dropped: {line[:80]!r}")
         return
     last[0] = line
@@ -227,8 +250,9 @@ def serve():
             try:   # nothing that goes wrong with one thought may stop the next ones
                 with lock:
                     line = thoughts.due(time.time())
+                    before = thoughts.before_speaker
                 if line:
-                    deliver(line, who, last, cue)
+                    deliver(line, who, last, cue, before)
             except Exception as e:  # noqa: BLE001
                 log(f"ERROR ship: {type(e).__name__}: {e}")
 

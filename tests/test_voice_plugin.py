@@ -23,24 +23,24 @@ class Voice(unittest.TestCase):
         th.update("old talk before the plugin started", 0.0)
         th.update("old talk before the plugin started conta uma", 1.0)
         th.update("old talk before the plugin started conta uma piada de pirata", 1.8)   # a mid-thought pause
-        self.assertIsNone(th.due(2.5))
-        self.assertEqual(th.due(3.4), "conta uma piada de pirata")
-        self.assertIsNone(th.due(9.0))   # sent once
+        self.assertIsNone(th.due(3.4))   # no sentence end yet: 1.6 s is a pause, not the end (11-01)
+        self.assertEqual(th.due(5.4), "conta uma piada de pirata")
+        self.assertIsNone(th.due(12.0))   # sent once
 
     def test_trimmed_buffer_never_resends(self):
         th = self.v.Thoughts()
         th.update("", 0.0)
-        th.update("primeira frase que eu falei aqui na live", 1.0)
-        self.assertEqual(th.due(3.0), "primeira frase que eu falei aqui na live")
-        th.update("eu falei aqui na live e agora a segunda", 4.0)   # the caption server trimmed its front
-        self.assertEqual(th.due(6.0), "e agora a segunda")
+        th.update("primeira frase que eu falei aqui na live.", 1.0)
+        self.assertEqual(th.due(3.0), "primeira frase que eu falei aqui na live.")
+        th.update("eu falei aqui na live. e agora a segunda", 4.0)   # the caption server trimmed its front
+        self.assertEqual(th.due(8.0), "e agora a segunda")
 
     def test_hard_cap_ships_a_thought_that_never_pauses(self):
         th = self.v.Thoughts()
         th.update("", 0.0)
-        for i in range(1, 22):
+        for i in range(1, 32):
             th.update("palavra " * i, float(i))
-        self.assertTrue(th.due(21.0))
+        self.assertTrue(th.due(31.0))
 
     def test_own_voice_dropped_his_words_kept(self):
         """Real 10-31 lines: the echo of a spoken reply drops; two of his lines that shared only filler words pass."""
@@ -69,7 +69,40 @@ class Voice(unittest.TestCase):
         th.update("ei Boss liga o OBS beleza a gente liga o WebSocket do OBS agora", 3.0, muted=True)
         self.assertEqual(th.due(4.0), "ei Boss liga o OBS")
         th.update("ei Boss liga o OBS beleza a gente liga o WebSocket do OBS agora valeu", 8.0)
-        self.assertEqual(th.due(10.0), "valeu")
+        self.assertEqual(th.due(12.0), "valeu")
+
+    def test_long_utterance_with_a_pause_ships_whole_never_mid_word(self):
+        """11-01 real lines: a 1.5 s pause shipped 'me', then 'lhor entendi ...' (= 'melhor'), and a comma the
+        model added later shipped as its own line. Daniel: send the whole utterance."""
+        th = self.v.Thoughts()
+        th.update("", 0.0)
+        th.update("eu ligo faço a ligação se eu ficar me", 1.0)          # he pauses mid-word
+        self.assertIsNone(th.due(3.0))
+        th.update("eu ligo faço a ligação se eu ficar melhor entendi o que você quiser comprar.", 3.2)
+        self.assertEqual(th.due(5.0), "eu ligo faço a ligação se eu ficar melhor entendi o que você quiser comprar.")
+        th.update("eu ligo faço a ligação, se eu ficar melhor, entendi o que você quiser comprar.", 6.0)  # commas only
+        self.assertIsNone(th.due(12.0))
+        th = self.v.Thoughts()
+        th.update("", 0.0)
+        th.update("se eu ficar me", 1.0)
+        self.assertEqual(th.due(5.0), "se eu ficar me")                   # a long pause does ship it
+        th.update("se eu ficar melhor entendi", 6.0)
+        self.assertEqual(th.due(10.0), "melhor entendi")                  # the next line starts with the whole word
+
+    def test_words_before_the_speaker_ship_at_once_and_skip_the_echo_filter(self):
+        """11-01: held words used to ship glued to the speaker's echo and were dropped with it; and his line was
+        dropped as 'echo' because the Boss's reply repeated his words."""
+        th = self.v.Thoughts()
+        th.update("", 0.0)
+        th.update("a gente precisa de um agente de criativos", 1.0)
+        th.update("a gente precisa de um agente de criativos combinado vou montar o agente de criativos", 2.0, muted=True)
+        self.assertEqual(th.due(2.1), "a gente precisa de um agente de criativos")
+        self.assertTrue(th.before_speaker)
+        Path(self.state, "said.txt").write_text("Combinado, vou montar o agente de criativos que a gente precisa.\n")
+        sent = []
+        with mock.patch.object(self.v, "send_to_agent", lambda m, agent=None: sent.append(m) or True):
+            self.v.deliver("a gente precisa de um agente de criativos", "Daniel", [""], before_speaker=True)
+        self.assertEqual(len(sent), 1)
 
     def test_speaking_window(self):
         Path(self.state, "speaking").write_text("100.0 ")                    # still playing
