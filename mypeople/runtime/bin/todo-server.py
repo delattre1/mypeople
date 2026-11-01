@@ -26,7 +26,6 @@ HTML_DIR = os.path.dirname(os.path.abspath(__file__))
 TODOS_HTML = os.path.join(HTML_DIR, "todos.html")
 TERMINAL_GRAPH_HTML = os.path.join(HTML_DIR, "terminal-graph.html")
 FONT_TYPES = {".woff2": "font/woff2", ".css": "text/css; charset=utf-8"}
-STATUS_DIR = os.path.join(INSTALL_DIR, "status")
 
 VALID_STATES = {"working", "review", "done", "blocked", "cancelled", "recurring"}
 # A card in a terminal state has no work left, so it must have no living owner.

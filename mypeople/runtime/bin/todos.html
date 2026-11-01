@@ -549,7 +549,6 @@ function relTime(ts){
 // carries its timestamp; this refreshes them in place, without redrawing anything.
 function refreshRelTimes(){ for(const e of document.querySelectorAll(".ev-ago[data-ts]")){ const t=relTime(e.dataset.ts); if(e.textContent!==t) e.textContent=t; } }
 const tsMs=v=>{ let n=Number(v)||0; return n<1e12 ? n*1000 : n; };
-function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
 const STATE_NAMES={working:"Working",review:"Needs your review",blocked:"Blocked",done:"Done",cancelled:"Cancelled",recurring:"Recurring"};
 function latestAgentComment(task){

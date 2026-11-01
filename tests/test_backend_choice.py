@@ -11,16 +11,7 @@ import unittest
 from unittest import mock
 
 from mypeople import firstrun
-
-
-def with_auth(*live):
-    """Patch the per-backend login checks so only `live` backends are authenticated."""
-    return mock.patch.multiple(
-        firstrun,
-        _claude_authenticated=mock.Mock(return_value="claude" in live),
-        _codex_authenticated=mock.Mock(return_value="codex" in live),
-        _grok_authenticated=mock.Mock(return_value="grok" in live),
-    )
+from test_login_required import with_auth
 
 
 class ResolveAuthTest(unittest.TestCase):

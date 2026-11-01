@@ -12,7 +12,6 @@ INSTALL_DIR = CFG["INSTALL_DIR"]
 HOST_ID = CFG["HOST_ID"]
 QUEUE_URL = CFG["QUEUE_URL"]
 SECRET = CFG.get("QUEUE_SECRET", "")
-TTYD_PORT = CFG["TTYD_PORT"]
 DEFAULT_BACKEND = CFG.get("DEFAULT_BACKEND", "claude")
 # Backend for NEW agents spawned without --backend (what the Boss does when it hires). Split from
 # DEFAULT_BACKEND on purpose: ensure-boss counts the Boss alive only if its window runs

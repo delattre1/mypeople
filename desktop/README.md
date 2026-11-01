@@ -42,8 +42,9 @@ Requires the Rust toolchain, `cargo install tauri-cli --version "^2"`, `uv pytho
 ## Release (signed + notarized DMG)
 
 Run the `Desktop release (signed DMG)` workflow (`.github/workflows/desktop-release.yml`). It uses
-the Plow Developer ID and notary credentials Latch ships with, from the same 1Password item, and
-needs the `OP_SERVICE_ACCOUNT_TOKEN` repo secret. With `APPLE_SIGNING_IDENTITY` set,
+the Plow Developer ID and notary credentials Latch ships with, stored as the repo secrets
+`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID` and `APPLE_PASSWORD` (see the
+workflow's header). With `APPLE_SIGNING_IDENTITY` set,
 `bundle-runtime.sh` signs every nested Mach-O with hardened runtime before Tauri signs and
 notarizes the app.
 

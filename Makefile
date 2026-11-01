@@ -2,19 +2,10 @@
 # images from 0.3.2 source).
 VERSION := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' mypeople/__init__.py)
 
-.PHONY: wheel image verify clean live app released cloud cli test
-
-wheel:
-	uv build --wheel --out-dir dist
+.PHONY: image live app released cloud cli test
 
 image:
 	docker build -t mypeople:$(VERSION) .
-
-verify:
-	mypeople verify
-
-clean:
-	rm -rf build .hatch dist/*.whl
 
 # The one way a release reaches this Mac's live install. `mypeople up` from this checkout copies
 # the runtime into INSTALL_DIR and only then stamps VERSION, restarts every daemon and plugin still

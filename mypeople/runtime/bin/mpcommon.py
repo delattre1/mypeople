@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MyPlow shared helpers: config, auth/session, json io, tmux delivery, http proxy.
 Python 3 stdlib only."""
-import os, json, hmac, hashlib, base64, time, socket, ssl, subprocess, urllib.request, urllib.parse
+import os, json, hmac, hashlib, base64, html, time, socket, ssl, subprocess, urllib.request, urllib.parse
 import re
 import mimetypes
 import shlex, signal
@@ -242,13 +242,8 @@ def _login_banner():
     if not state or state.get("authenticated") is not False:
         return ""
     steps = "".join(
-        "<code>%s</code>" % html_escape(line) for line in (state.get("howto") or []))
+        "<code>%s</code>" % html.escape(str(line)) for line in (state.get("howto") or []))
     return _LOGIN_BANNER_TMPL.replace("__MP_LOGIN_STEPS__", steps)
-
-
-def html_escape(s):
-    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
-            .replace(">", "&gt;").replace('"', "&quot;"))
 
 
 _FONTS = '<link rel="stylesheet" href="/fonts/fonts.css">'
