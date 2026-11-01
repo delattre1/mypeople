@@ -24,6 +24,7 @@ is never sent twice. The one filter: the speaker sits near the mic, so the Boss'
 comes back in the captions. What arrives while `say` plays (and TAIL_S after) is skipped, and a
 later thought whose word pairs are mostly pairs `say` spoke in the last minute is dropped.
 """
+import difflib
 import http.client
 import json
 import os
@@ -50,7 +51,8 @@ LONG_PAUSE_MS = 3500   # an unfinished one waits for a longer pause: 11-01 a 1.5
 HARD_MS = 30000     # a thought that never pauses still ships
 SENTENCE_END = re.compile(r"[.?!…][\"')\]]*\s*$")
 ECHO_S = 60         # how long a spoken reply can come back through the mic
-TAIL_S = 2.5        # the captions lag the speaker: its echo keeps arriving this long after it stops
+TAIL_S = 2.5        # the captions lag the speaker: its echo keeps arriving this long after it stops. Used only to
+                    # hold a line until the echo is complete so it can be stripped; the mic is never muted (11-01)
 MAX_CHARS = 2000
 
 
@@ -102,6 +104,32 @@ def is_echo(line: str) -> bool:
         return False
     p = _pairs(line)
     return len(p) >= 2 and sum(x in said for x in p) >= 0.4 * len(p)   # garbled echoes kept ~48%; his own lines ~6%
+
+
+def strip_echo(line: str) -> str:
+    """The line minus the words `say` just spoke (11-01: the mic stays open while the speaker plays, so his words
+    and the speaker's echo arrive in one buffer). A word goes when most of its letters line up, in order, with the
+    recently spoken text (the captions garble it: 'Arrumado' comes back as 'o Madu')."""
+    try:
+        if time.time() - SAID.stat().st_mtime > ECHO_S:
+            return line
+        said = SAID.read_text()
+    except OSError:
+        return line
+    words = line.split()
+    norm = [re.sub(r"\W", "", w.lower()) for w in words]
+    joined, spans, pos = "", [], 0
+    for w in norm:
+        spans.append((pos, pos + len(w)))
+        joined += w + " "
+        pos += len(w) + 1
+    ref = " ".join(re.sub(r"\W", "", w.lower()) for w in said.split())
+    covered = set()
+    for b in difflib.SequenceMatcher(None, joined, ref, autojunk=False).get_matching_blocks():
+        if b.size >= 6:   # a run of the speaker's text, not a short word ('vou', 'pra') that happens to match
+            covered.update(range(b.a, b.a + b.size))
+    keep = [w for w, n, (a, z) in zip(words, norm, spans) if not n or sum(i in covered for i in range(a, z)) < .5 * (z - a)]
+    return " ".join(keep)
 
 
 def speaking(now: float) -> bool:
@@ -163,6 +191,9 @@ class Thoughts:
         self.held = ""      # the owner's words from before the speaker began, still to send
         self.ready = ""     # a finished thought to send at once (the speaker began talking)
         self.before_speaker = False
+        self.overlap = False     # the line being built heard the speaker too: strip its words before sending
+        self.was_overlap = False  # that flag for the line due() just returned
+        self.in_speaker = False
         self.changed = self.began = None
 
     def update(self, t: str, now: float, muted: bool = False):
@@ -171,15 +202,17 @@ class Thoughts:
             return
         if t == self.text:
             return
-        if muted:   # the speaker is talking: what the owner said before it is a finished thought; skip what arrives now
-            # 11-01: held words used to wait and ship glued to what came after the speaker, often its own echo, and
-            # the echo filter then dropped the whole line, his words with it. Now they go out on their own, at once.
+        if muted and not self.in_speaker:   # the speaker starts: what he said before it is a finished thought
+            # 11-01: held words used to wait and ship glued to the speaker's echo and were dropped with it.
             pend = (self.held + " " + self.text[self.cut:]).strip()
             if re.search(r"\w", pend):
                 self.ready = (self.ready + " " + pend).strip()
             self.held = ""
-            self.text, self.cut, self.sent = t, len(t), t
-            return
+            self.cut, self.sent = len(self.text), self.text
+            self.changed = self.began = None
+        self.in_speaker = muted
+        if muted:   # 11-01 (Daniel): the mic stays open while the speaker plays; its words are stripped at send
+            self.overlap = True
         if not t.startswith(self.text[:self.cut]):
             self.cut = min(refind(self.sent, t), len(t))
             self.sent = t[:self.cut]
@@ -189,6 +222,7 @@ class Thoughts:
 
     def due(self, now: float):
         self.before_speaker = bool(self.ready)   # said before the speaker began: it cannot be the speaker's echo
+        self.was_overlap = False
         if self.ready:
             r, self.ready = self.ready.lstrip(",.;:?!… "), ""
             return r or None
@@ -206,18 +240,27 @@ class Thoughts:
             return None
         quiet = (now - self.changed) * 1000
         wait = SILENCE_MS if SENTENCE_END.search(pending) else LONG_PAUSE_MS
+        if self.in_speaker:
+            wait = max(wait, TAIL_S * 1000)   # let the speaker's echo finish arriving, so all of it gets stripped
         if quiet < wait and (now - self.began) * 1000 < HARD_MS:
             return None
         self.cut, self.sent, self.held = len(self.text), self.text, ""
         self.changed = self.began = None
+        self.was_overlap, self.overlap = self.overlap, False
         return pending
 
 
-def deliver(line: str, who: str, last: list, cue: str = "", before_speaker: bool = False):
+def deliver(line: str, who: str, last: list, cue: str = "", before_speaker: bool = False, overlap: bool = False):
     line = trim_repeat(" ".join(line.split()), last[0])[-MAX_CHARS:].strip()
+    if overlap:   # heard while the speaker played: keep his words, drop the speaker's
+        kept = strip_echo(line)
+        if len(re.findall(r"\w+", kept)) < 2:
+            log(f"echo stripped: {line[:80]!r}")
+            return
+        line = kept
     if not line:
         return
-    if not before_speaker and is_echo(line):   # 11-01: his words often repeat the reply that follows them
+    if not (before_speaker or overlap) and is_echo(line):   # 11-01: his words often repeat the reply that follows them
         log(f"echo dropped: {line[:80]!r}")
         return
     last[0] = line
@@ -249,10 +292,12 @@ def serve():
             time.sleep(0.05)
             try:   # nothing that goes wrong with one thought may stop the next ones
                 with lock:
-                    line = thoughts.due(time.time())
-                    before = thoughts.before_speaker
+                    now = time.time()
+                    thoughts.in_speaker = speaking(now)   # also between caption events
+                    line = thoughts.due(now)
+                    before, overlap = thoughts.before_speaker, thoughts.was_overlap
                 if line:
-                    deliver(line, who, last, cue, before)
+                    deliver(line, who, last, cue, before, overlap)
             except Exception as e:  # noqa: BLE001
                 log(f"ERROR ship: {type(e).__name__}: {e}")
 

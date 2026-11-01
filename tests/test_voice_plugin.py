@@ -61,15 +61,38 @@ class Voice(unittest.TestCase):
         self.assertTrue(self.v.is_echo("pra você agora e numa batate pari possui o mesmo ativar o dois FA e guardar "
                                        "o segredo no órgão dos agentes"))
 
-    def test_what_arrives_while_speaking_is_skipped_his_earlier_words_kept(self):
+    def test_mic_stays_open_while_speaking_his_words_kept_speaker_stripped(self):
+        """11-01 real case: Daniel tested the mic while the Boss spoke; the old mute dropped 'Vamos testar então se
+        você recebe tudo'. Now his words stay and only the speaker's (said.txt) are stripped at send."""
         th = self.v.Thoughts()
         th.update("", 0.0)
-        th.update("ei Boss liga o OBS", 1.0)                                           # his, not yet sent
-        th.update("ei Boss liga o OBS beleza a gente liga o WebSocket", 2.0, muted=True)  # the speaker's echo
-        th.update("ei Boss liga o OBS beleza a gente liga o WebSocket do OBS agora", 3.0, muted=True)
-        self.assertEqual(th.due(4.0), "ei Boss liga o OBS")
-        th.update("ei Boss liga o OBS beleza a gente liga o WebSocket do OBS agora valeu", 8.0)
-        self.assertEqual(th.due(12.0), "valeu")
+        th.update("ei Boss liga o OBS", 1.0)                                                   # his, not yet sent
+        th.update("ei Boss liga o OBS o Madu agora suas frases chegam inteiras", 2.0, muted=True)  # speaker starts
+        self.assertEqual(th.due(2.1), "ei Boss liga o OBS")                                    # his, at once
+        self.assertTrue(th.before_speaker)
+        th.update("ei Boss liga o OBS o Madu agora suas frases chegam inteiras, pode testar. Vamos testar então se "
+                  "você recebe tudo", 4.0, muted=True)
+        th.in_speaker = False
+        th.update("ei Boss liga o OBS o Madu agora suas frases chegam inteiras, pode testar. Vamos testar então se "
+                  "você recebe tudo que eu falar.", 5.0)
+        line = th.due(7.0)
+        self.assertTrue(th.was_overlap)
+        Path(self.state, "said.txt").write_text("Arrumado: agora suas frases chegam inteiras. Pode testar.\n")
+        sent = []
+        with mock.patch.object(self.v, "send_to_agent", lambda m, agent=None: sent.append(m) or True):
+            self.v.deliver(line, "Daniel", [""], overlap=True)
+        self.assertEqual(len(sent), 1)
+        self.assertIn("Vamos testar então se você recebe tudo que eu falar.", sent[0])
+        self.assertNotIn("frases chegam inteiras", sent[0])
+
+    def test_strip_echo_pure_echo_is_dropped(self):
+        Path(self.state, "said.txt").write_text("A máquina de criativos já começou: cinco anúncios pra cada produto.\n")
+        self.assertEqual(self.v.strip_echo("a máquina de criativos já começou cinco anúncios pra cada produto"), "")
+        self.assertEqual(self.v.strip_echo("quanto custa isso"), "quanto custa isso")
+        sent = []
+        with mock.patch.object(self.v, "send_to_agent", lambda m, agent=None: sent.append(m) or True):
+            self.v.deliver("a máquina de criativos já começou cinco anúncios", "Daniel", [""], overlap=True)
+        self.assertEqual(sent, [])
 
     def test_long_utterance_with_a_pause_ships_whole_never_mid_word(self):
         """11-01 real lines: a 1.5 s pause shipped 'me', then 'lhor entendi ...' (= 'melhor'), and a comma the
