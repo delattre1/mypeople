@@ -164,6 +164,59 @@ class Voice(unittest.TestCase):
         self.assertLessEqual(start, end)
         self.assertEqual(Path(self.state, "said.txt").read_text().splitlines(), ["linha 1", "linha 2", "linha 3"])
 
+    def _speak(self, th, words, start, step=0.3):
+        """Words arriving one at a time; a tuple is a pause before that word. Returns the time after the last."""
+        now, text = start, th.text
+        for w in words:
+            if isinstance(w, tuple):
+                now += w[1]
+                w = w[0]
+            text = (text + " " + w).strip()
+            now += step
+            th.update(text, now)
+        return now
+
+    def test_cap_cuts_at_his_longest_pause_and_loses_nothing(self):
+        th = self.v.Thoughts()
+        th.update("", 0.0)
+        said = [f"um{i}" for i in range(30)] + [("depois", 2.0)] + [f"dois{i}" for i in range(70)]
+        now = self._speak(th, said, 0.0)
+        self.assertGreater(now, self.v.HARD_MS / 1000)
+        line = th.due(now)
+        self.assertEqual(line, " ".join(f"um{i}" for i in range(30)), "the line ends where he paused")
+        self.assertFalse(th.due(now + 0.1))
+        rest = th.due(now + 10)
+        self.assertTrue(rest.startswith("depois dois0"), rest)
+        self.assertEqual(f"{line} {rest}".split(), [w[0] if isinstance(w, tuple) else w for w in said], "every word once, in order")
+
+    def test_cap_with_no_pause_ships_everything_as_before(self):
+        th = self.v.Thoughts()
+        th.update("", 0.0)
+        said = [f"w{i}" for i in range(120)]
+        now = self._speak(th, said, 0.0)
+        self.assertEqual(th.due(now).split(), said)
+
+    def test_cap_ignores_a_pause_inside_a_word_and_a_stub_at_the_start(self):
+        th = self.v.Thoughts()
+        th.update("", 0.0)
+        now = self._speak(th, ["so", ("this", 5.0)] + [f"w{i}" for i in range(50)], 0.0)
+        th.update(th.text + " me", now)            # the model is mid-word: "me" ... "lhor"
+        th.update(th.text + "lhor", now + 3.0)
+        now = self._speak(th, [f"x{i}" for i in range(40)], now + 3.0)
+        line = th.due(now)
+        self.assertNotIn(line.split()[-1], ("me",), line)
+        self.assertGreater(len(line.split()), 3, "no stub")
+        self.assertIn("melhor", line + " " + (th.due(now + 10) or ""))
+
+    def test_rewrite_after_a_cap_cut_sends_nothing_twice(self):
+        th = self.v.Thoughts()
+        th.update("", 0.0)
+        now = self._speak(th, [f"a{i}" for i in range(30)] + [("b0", 2.0)] + [f"b{i}" for i in range(1, 70)], 0.0)
+        first = th.due(now)
+        th.update(th.text + " final", now + 0.3)
+        second = th.due(now + 10)
+        self.assertEqual(len(set(first.split()) & set(second.split())), 0, (first, second))
+
     def test_bare_run_is_usage_not_a_second_serve(self):
         with mock.patch("sys.stderr", new=io.StringIO()):
             self.assertEqual(self.v.main([]), 1)

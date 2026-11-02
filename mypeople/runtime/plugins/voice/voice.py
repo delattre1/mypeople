@@ -18,7 +18,8 @@ most of it is the owner talking to their stream or the room; the package says so
 answers only what is meant for it.
 
 A thought ships once his sentence ends ('.?!' and SILENCE_MS without new words), after LONG_PAUSE_MS of silence
-mid-sentence, or HARD_MS after it began; it never starts mid-word. The caption text
+mid-sentence, or HARD_MS after it began, then cut at his longest pause so the next line starts where he took a breath;
+it never starts mid-word. The caption text
 grows, but the model can rewrite or trim it; text already sent is re-found in the new buffer so it
 is never sent twice. The one filter: the speaker sits near the mic, so the Boss's own spoken reply
 comes back in the captions. What arrives while `say` plays (and TAIL_S after) is skipped, and a
@@ -49,6 +50,8 @@ SILENCE_MS = 1500   # a finished sentence ('.', '?', '!') ships after this pause
 LONG_PAUSE_MS = 3500   # an unfinished one waits for a longer pause: 11-01 a 1.5 s pause mid-sentence (even mid-word:
                        # "me" ... "lhor") shipped half a thought, and Daniel got cut-up lines all day
 HARD_MS = 30000     # a thought that never pauses still ships
+CUT_PAUSE_S = 0.4   # at the cap, a gap in the words this long is a place to cut; shorter is just the model's pace
+CUT_MIN_WORDS = 4   # never leave a stub of a line at the cap
 SENTENCE_END = re.compile(r"[.?!…][\"')\]]*\s*$")
 ECHO_S = 60         # how long a spoken reply can come back through the mic
 TAIL_S = 2.5        # the captions lag the speaker: its echo keeps arriving this long after it stops. Used only to
@@ -195,6 +198,7 @@ class Thoughts:
         self.was_overlap = False  # that flag for the line due() just returned
         self.in_speaker = False
         self.changed = self.began = None
+        self.marks = []     # (when, buffer length) at each caption change since the line began: where his pauses are
 
     def update(self, t: str, now: float, muted: bool = False):
         if self.text is None:
@@ -210,12 +214,15 @@ class Thoughts:
             self.held = ""
             self.cut, self.sent = len(self.text), self.text
             self.changed = self.began = None
+            self.marks = []
         self.in_speaker = muted
         if muted:   # 11-01 (Daniel): the mic stays open while the speaker plays; its words are stripped at send
             self.overlap = True
         if not t.startswith(self.text[:self.cut]):
             self.cut = min(refind(self.sent, t), len(t))
             self.sent = t[:self.cut]
+            self.marks = []   # the buffer moved: lengths no longer point at the same words
+        self.marks.append((now, len(self.text)))   # the pause, if any, ended here: the words before it end at this length
         self.text, self.changed = t, now
         if self.began is None and t[self.cut:].strip():
             self.began = now
@@ -244,10 +251,27 @@ class Thoughts:
             wait = max(wait, TAIL_S * 1000)   # let the speaker's echo finish arriving, so all of it gets stripped
         if quiet < wait and (now - self.began) * 1000 < HARD_MS:
             return None
+        split = self.longest_pause(start) if quiet < wait else None   # at the cap he's mid-speech: cut where he breathed
+        self.was_overlap, self.overlap = self.overlap, False
+        if split:
+            line = (self.held + " " + self.text[start:split]).strip().lstrip(",.;:?!… ")
+            self.cut, self.sent, self.held = split, self.text[:split], ""
+            self.began = next((w for w, n in self.marks if n > split), now)
+            self.marks = [m for m in self.marks if m[1] >= split]
+            return line
         self.cut, self.sent, self.held = len(self.text), self.text, ""
         self.changed = self.began = None
-        self.was_overlap, self.overlap = self.overlap, False
+        self.marks = []
         return pending
+
+    def longest_pause(self, start: int):
+        """Where to cut a line at the cap: the end of the words before his longest pause, if it's at a word boundary."""
+        best, best_gap = None, CUT_PAUSE_S
+        for (a, _), (b, n) in zip(self.marks, self.marks[1:]):
+            enough = n < len(self.text) and len(self.text[start:n].split()) >= CUT_MIN_WORDS
+            if b - a >= best_gap and enough and not (self.text[n - 1].isalnum() and self.text[n].isalnum()):
+                best, best_gap = n, b - a
+        return best
 
 
 def deliver(line: str, who: str, last: list, cue: str = "", before_speaker: bool = False, overlap: bool = False):
