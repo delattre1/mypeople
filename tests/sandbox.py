@@ -42,7 +42,7 @@ def load(home, filename="mp", **keys):
     config = Path(home) / "queue.env"
     config.write_text("".join('export %s="%s"\n' % kv for kv in dict(DEFAULTS, **keys).items()),
                       encoding="utf-8")
-    for cached in ("mpcommon", "mprole", "boardstore"):
+    for cached in ("mpcommon", "mprole", "mpplugins", "boardstore"):
         sys.modules.pop(cached, None)
     sys.path.insert(0, str(BIN))
     try:

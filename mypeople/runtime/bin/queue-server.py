@@ -159,7 +159,7 @@ class Handler(C.JSONHandler):
         p = self.path.split("?", 1)[0]
         if p == "/dashboard" or p.startswith("/dashboard/"):
             return self._send(200, raw=b"", ctype="text/html; charset=utf-8", extra=self._page_extra())
-        if p in ("/", "/todos", "/terminal-graph") or p.startswith("/todo/"):
+        if p in ("/", "/todos", "/terminal-graph", "/plugins") or p.startswith("/todo/"):
             return C.proxy_request(self, "127.0.0.1", TODO_PORT)
         self.send_response(200)
         self.send_header("Content-Length", "0")
@@ -181,7 +181,7 @@ class Handler(C.JSONHandler):
             return self._send(200, raw=html, ctype="text/html; charset=utf-8",
                               extra=self._page_extra())
         # TODO routes -> proxy to todo-server (symmetric front doors); /fonts/ is what every page links
-        if p in ("/", "/todos", "/terminal-graph") or p.startswith("/todo/") or p.startswith("/fonts/"):
+        if p in ("/", "/todos", "/terminal-graph", "/plugins") or p.startswith("/todo/") or p.startswith("/fonts/"):
             return C.proxy_request(self, "127.0.0.1", TODO_PORT)
         # gated JSON
         if p in ("/agents", "/clients", "/roster"):

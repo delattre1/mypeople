@@ -47,6 +47,33 @@ ensure(){
   fi
 }
 
+# Plugins: each folder's plugin.conf says what runs it (run=INTERPRETER SCRIPT) and what it needs first
+# (needs=env:KEY in queue.env, or needs=file:PATH under the install); see mpplugins.py. One that has what
+# it needs and no state/<name>/off is kept running. `mp plugins` and the board's Plugins page flip that file.
+ensure_plugins(){
+  local conf dir name run needs k v
+  for conf in "$ID"/plugins/*/plugin.conf "$ID"/plugins.d/*/plugin.conf; do
+    [ -f "$conf" ] || continue
+    dir="${conf%/plugin.conf}"; name="${dir##*/}"; run=""; needs=""
+    while IFS='=' read -r k v || [ -n "$k" ]; do
+      case "$k" in run) run="$v" ;; needs) needs="$v" ;; esac
+    done < "$conf"
+    case "$run" in *" "*) ;; *) continue ;; esac
+    [ -e "$ID/state/$name/off" ] && continue
+    case "$needs" in
+      "") ;;
+      file:*) [ -f "$ID/${needs#file:}" ] || continue ;;
+      env:*)
+        v="${needs#env:}"
+        # A bad name in someone's conf would be a fatal "bad substitution" and take this supervisor with it.
+        case "$v" in ""|[0-9]*|*[!A-Za-z0-9_]*) continue ;; esac
+        [ -n "${!v:-}" ] || continue ;;
+      *) continue ;;
+    esac
+    ensure "$dir/${run##* } serve$" "exec ${run% *} '$dir/${run##* }' serve"
+  done
+}
+
 OS="$(uname)"
 TTYD_PORT="${TTYD_PORT:-7681}"
 # The Terminal Graph tiles onto a READ-ONLY ttyd: a tile is a view, and a stray click must never
@@ -93,36 +120,10 @@ while true; do
   ensure "$BIN/mp cron serve$"             "exec python3 '$BIN/mp' cron serve"
   # App Data recorder: one line per macOS "access data from other apps" request (mp tcc). macOS only.
   [ "$OS" = Darwin ] && ensure "$BIN/mp tcc serve$" "exec python3 '$BIN/mp' tcc serve"
-  # GitHub PR watcher: off until queue.env sets GITHUB_PRS (see the plugin's header).
-  [ -n "${GITHUB_PRS:-}" ] && ensure "$ID/plugins/github-prs/github-prs.py serve$" "exec python3 '$ID/plugins/github-prs/github-prs.py' serve"
-  # Instagram comment watcher: off until queue.env sets INSTAGRAM_COMMENTS (see the plugin's header).
-  [ -n "${INSTAGRAM_COMMENTS:-}" ] && ensure "$ID/plugins/instagram-comments/instagram-comments.py serve$" "exec python3 '$ID/plugins/instagram-comments/instagram-comments.py' serve"
-  # Plow Chat: the owner texts the Boss over iMessage. Off until queue.env sets PLOW_CHAT (see the plugin's header).
-  [ -n "${PLOW_CHAT:-}" ] && ensure "$ID/plugins/plow-chat/plow-chat.py serve$" "exec python3 '$ID/plugins/plow-chat/plow-chat.py' serve"
+  ensure_plugins
   # A second, labelled bridge for one number on the owner's WhatsApp lab (whatsapp-linq-api): on while
   # its login exists; that file names the lab's URL and holds the number's own key.
   [ -f "$ID/state/plow-chat-lab/creds.json" ] && ensure "$ID/plugins/plow-chat/plow-chat.py serve lab$" "PLOW_CHAT_STATE_DIR='$ID/state/plow-chat-lab' exec python3 '$ID/plugins/plow-chat/plow-chat.py' serve lab"
-  # Web chat: people on a public web page chat with the Boss, through a cloud relay this Mac polls outbound. On while
-  # its login (the relay's URL and this Mac's agent key) exists; see the plugin's header.
-  [ -f "$ID/state/web-chat/creds.json" ] && ensure "$ID/plugins/web-chat/web-chat.py serve$" "exec python3 '$ID/plugins/web-chat/web-chat.py' serve"
-  # Voice call: the owner phones the Boss and talks to it live. Off until queue.env sets VOICE_CALL
-  # (see the plugin's header). Needs uv on PATH: it is the one plugin with a dependency (websockets).
-  [ -n "${VOICE_CALL:-}" ] && ensure "$ID/plugins/voice-call/voice-call.py serve$" "exec uv run --script '$ID/plugins/voice-call/voice-call.py' serve"
-  # Discord agent: builders' questions in the listed channels, answered by its own agent. Off until
-  # queue.env sets DISCORD_AGENT (see the plugin's header).
-  [ -n "${DISCORD_AGENT:-}" ] && ensure "$ID/plugins/discord-agent/discord-agent.py serve$" "exec python3 '$ID/plugins/discord-agent/discord-agent.py' serve"
-  # Discord chat: people in the owner's Discord channel talk to the Boss, and the developers he selects
-  # build with it. Off until queue.env sets DISCORD_CHAT (see the plugin's header).
-  [ -n "${DISCORD_CHAT:-}" ] && ensure "$ID/plugins/discord-chat/discord-chat.py serve$" "exec python3 '$ID/plugins/discord-chat/discord-chat.py' serve"
-  # YouTube chat: bridge between the owner's YouTube live chat and MyPlow, both ways. Off until
-  # queue.env sets YOUTUBE_CHAT (see the plugin's header).
-  [ -n "${YOUTUBE_CHAT:-}" ] && ensure "$ID/plugins/youtube-chat/youtube-chat.mjs serve$" "exec node '$ID/plugins/youtube-chat/youtube-chat.mjs' serve"
-  # A2A: mp send to an agent on a paired MyPlow crosses the relay. On once a pairing or an invite exists
-  # (mp pair; see the plugin's header).
-  [ -f "$ID/state/a2a/keys.json" ] && ensure "$ID/plugins/a2a/a2a.py serve$" "exec python3 '$ID/plugins/a2a/a2a.py' serve"
-  # Voice: what the owner says at their live mic reaches the Boss, which answers out loud. On once
-  # state/voice/config.json exists (see the plugin's header).
-  [ -f "$ID/state/voice/config.json" ] && ensure "$ID/plugins/voice/voice.py serve$" "exec python3 '$ID/plugins/voice/voice.py' serve"
   recycle_leaked_ttyd "ttyd -W -a -p $TTYD_PORT"
   recycle_leaked_ttyd "ttyd -a -p $TTYD_RO_PORT"
   sleep 10

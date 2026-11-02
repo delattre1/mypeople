@@ -217,6 +217,59 @@ class Voice(unittest.TestCase):
         second = th.due(now + 10)
         self.assertEqual(len(set(first.split()) & set(second.split())), 0, (first, second))
 
+    SWITCH = {"switch": {"off": r"\b(desliga\w*|turn off)\b.{0,20}\b(microfone|mic|voz)\b", "on": r"\b(liga|turn on)\b.{0,20}\b(microfone|mic|voz)\b",
+                         "off_said": "Microfone desligado.", "on_said": "Microfone ligado."}}
+
+    def _flip_waits(self, line):
+        before = set(self.v.threading.enumerate())
+        got = self.v.heard_switch(line, self.SWITCH)
+        for t in set(self.v.threading.enumerate()) - before:
+            t.join(2)
+        return got
+
+    def test_spoken_switch_turns_the_mic_off_and_on_and_goes_to_nobody(self):
+        sent, said = [], []
+        self.v.send_to_agent, self.v.say = lambda m, *a: sent.append(m) or True, said.append
+        self.assertTrue(self._flip_waits("Piratinha, desliga o microfone."))
+        self.assertTrue(self.v.OFF.exists())
+        self.assertEqual(said, ["Microfone desligado."])
+        self.assertIn("mic off", sent[0])
+        self.assertTrue(self._flip_waits("liga o microfone"))
+        self.assertFalse(self.v.OFF.exists())
+        self.assertEqual(said[-1], "Microfone ligado.")
+        self.assertEqual(len(sent), 2)
+
+    def test_saying_it_twice_flips_once(self):
+        sent = []
+        self.v.send_to_agent, self.v.say = lambda m, *a: sent.append(m) or True, lambda t: None
+        self._flip_waits("desliga o microfone")
+        self.assertTrue(self._flip_waits("desliga o microfone"))
+        self.assertEqual(len(sent), 1)
+
+    def test_talk_about_the_mic_is_not_a_switch(self):
+        self.v.send_to_agent = lambda *a: self.fail("nothing to tell")
+        for line in ("hoje eu vou te explicar como eu desliga o microfone quando a live termina aqui", "desliga o anúncio", "microfone ligado", ""):
+            self.assertFalse(self._flip_waits(line), line)
+        self.assertFalse(self.v.OFF.exists())
+        self.assertFalse(self.v.heard_switch("desliga o microfone", {}), "no phrases set: no switch")
+
+    def test_its_own_confirmation_coming_back_is_not_a_switch(self):
+        self.v.send_to_agent = lambda *a: self.fail("nothing to tell")
+        self.v.SAID.write_text("desliga o microfone\n")
+        self.v.SPEAKING.write_text(f"{time.time()} {time.time()}")
+        self.assertFalse(self._flip_waits("desliga o microfone"))
+
+    def test_command_line_toggle_for_a_stream_deck_key(self):
+        self.v.send_to_agent, self.v.say = lambda *a: True, lambda t: None
+        self.v.CONFIG.write_text("{}")
+        with mock.patch("sys.stdout", new=io.StringIO()) as out:
+            self.assertEqual(self.v.main(["toggle"]), 0)
+            self.assertEqual(self.v.main(["toggle"]), 0)
+            self.assertEqual(self.v.main(["off"]), 0)
+            self.assertEqual(self.v.main(["off"]), 0)
+        self.assertEqual(out.getvalue().split(), ["off", "on", "off", "off"])
+        self.assertTrue(self.v.OFF.exists())
+
     def test_bare_run_is_usage_not_a_second_serve(self):
         with mock.patch("sys.stderr", new=io.StringIO()):
             self.assertEqual(self.v.main([]), 1)

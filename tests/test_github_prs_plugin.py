@@ -297,12 +297,12 @@ class NewIssueTests(unittest.TestCase):
 
 class WiringTests(unittest.TestCase):
     def test_supervise_starts_it_only_when_turned_on(self):
-        sup = (ROOT / "mypeople" / "runtime" / "bin" / "supervise.sh").read_text()
-        self.assertIn('[ -n "${GITHUB_PRS:-}" ] && ensure "$ID/plugins/github-prs/github-prs.py serve$"', sup)
+        conf = (ROOT / "mypeople" / "runtime" / "plugins" / "github-prs" / "plugin.conf").read_text()
+        self.assertIn("needs=env:GITHUB_PRS\n", conf)
 
     def test_down_stops_it(self):
         cli = (ROOT / "mypeople" / "cli.py").read_text()
-        self.assertIn('os.path.join(install, "plugins") + os.sep', cli)
+        self.assertIn('os.path.join(install, sub) + os.sep', cli)
 
 
 if __name__ == "__main__":

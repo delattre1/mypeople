@@ -6,6 +6,7 @@ import os, re, sys, json, time, shlex, subprocess, shutil, urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpcommon as C
 import mprole
+import mpplugins
 
 CFG = C.CFG
 INSTALL_DIR = CFG["INSTALL_DIR"]
@@ -1995,6 +1996,38 @@ def do_pair(argv):
     return subprocess.call([sys.executable, os.path.join(INSTALL_DIR, "plugins", "a2a", "a2a.py"), "pair"] + argv)
 
 
+def do_plugins(argv):
+    """mp plugins ... -- list, switch and install plugins; the logic lives in mpplugins, shared with the board."""
+    verb = argv[0] if argv else ""
+    try:
+        if verb in ("", "--json"):
+            rows = mpplugins.listing()
+            if verb:
+                print(json.dumps(rows, indent=2))
+                return 0
+            for r in rows:
+                also = "  (also running, not switched here: %s)" % ", ".join(r["also"]) if r["also"] else ""
+                print("%-20s %-11s %s%s" % (r["name"], r["state"], r["desc"], also))
+            return 0
+        if verb in ("on", "off") and len(argv) == 2:
+            mpplugins.set_on(argv[1], verb == "on")
+            print("%s: %s" % (argv[1], {"on": "on, supervise starts it within 10 s if it is down", "off": "off"}[verb]))
+            return 0
+        if verb == "install" and len(argv) == 2:
+            name, run = mpplugins.install(argv[1])
+            print("%s installed, off. `mp plugins on %s` runs: %s serve" % (name, name, run))
+            return 0
+        if verb == "rm" and len(argv) == 2:
+            mpplugins.remove(argv[1])
+            print("%s removed; state/%s is kept" % (argv[1], argv[1]))
+            return 0
+    except mpplugins.PluginError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print(USAGE["plugins"], file=sys.stderr)
+    return 2
+
+
 USAGE = {
     "status": "usage: mp status",
     "spawn": "usage: mp spawn <agent_id> [--backend claude|codex|grok] [--cwd PATH] [--boss <id>] "
@@ -2017,6 +2050,8 @@ USAGE = {
     "tcc": TCC_USAGE,
     "pair": "usage: mp pair | mp pair <code> | mp pair ls | mp pair rm <host>   (the owner pairs this MyPlow "
             "with another, so mp send reaches its agents: <host>/<session>:<tab>)",
+    "plugins": "usage: mp plugins [--json] | mp plugins on|off <name> | mp plugins install <folder|git-url> | "
+               "mp plugins rm <name>",
 }
 TOP_USAGE = "usage: mp {%s} ...   (mp <verb> --help for one verb)" % "|".join(USAGE)
 
@@ -2037,7 +2072,7 @@ def main():
             "ensure-boss": do_ensure_boss, "reconcile": do_reconcile,
             "stop-recorders": do_stop_recorders,
             "board": do_board, "card": do_card, "comment": do_comment, "proof": do_proof,
-            "owner": do_owner, "cron": do_cron, "tcc": do_tcc, "pair": do_pair}.get(
+            "owner": do_owner, "cron": do_cron, "tcc": do_tcc, "pair": do_pair, "plugins": do_plugins}.get(
         verb, lambda a: (print("unknown verb %s" % verb, file=sys.stderr) or 2))(rest)
 
 

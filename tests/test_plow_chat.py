@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -670,19 +671,23 @@ class WiringTest(unittest.TestCase):
     def test_supervise_starts_it_only_when_turned_on_and_down_stops_it(self):
         root = PLUGINS.parents[2]
         sup = (root / "mypeople" / "runtime" / "bin" / "supervise.sh").read_text()
-        self.assertIn('[ -n "${PLOW_CHAT:-}" ] && ensure "$ID/plugins/plow-chat/plow-chat.py serve$"', sup)
-        self.assertIn('os.path.join(install, "plugins") + os.sep', (root / "mypeople" / "cli.py").read_text())
+        self.assertIn("ensure_plugins\n", sup)
+        self.assertIn("needs=env:PLOW_CHAT\n", (PLUGINS / "plow-chat" / "plugin.conf").read_text())
+        self.assertIn('os.path.join(install, sub) + os.sep', (root / "mypeople" / "cli.py").read_text())
 
     def test_supervise_sees_only_the_main_bridge_as_the_main_bridge(self):
         """10-13: a second bridge (the owner's WhatsApp number as its own Plow account) ran the same
         script, supervise's liveness check matched it, and the dead main bridge was never restarted:
         the owner's texts went unanswered for 51 minutes. A labelled second bridge or a one-shot
         `reply` must not count as the main bridge; the main bridge itself still must."""
-        sup = (PLUGINS.parent / "bin" / "supervise.sh").read_text()
-        pat = re.search(r'\[ -n "\$\{PLOW_CHAT:-\}" \] && ensure "([^"]+)"', sup).group(1)
+        fn = re.search(r"^ensure_plugins\(\)\{.*?^\}", (PLUGINS.parent / "bin" / "supervise.sh").read_text(), re.S | re.M).group(0)
         with tempfile.TemporaryDirectory() as idir:
             script = f"{idir}/plugins/plow-chat/plow-chat.py"
-            pat = pat.replace("$ID", idir)
+            Path(script).parent.mkdir(parents=True)
+            shutil.copy(PLUGINS / "plow-chat" / "plugin.conf", Path(script).parent)
+            pat = subprocess.run(["bash", "-c", f'ensure(){{ echo "$1"; }}; ID={idir}; PLOW_CHAT=1; {fn}\nensure_plugins'],
+                                 capture_output=True, text=True).stdout.strip()
+            self.assertEqual(f"{script} serve$", pat)
 
             def running(*argv):
                 return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", script, *argv])

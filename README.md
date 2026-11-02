@@ -126,6 +126,28 @@ mypeople up --client
 For cross-host terminal links, set `TTYD_PUBLIC_URL` to a browser-reachable URL for that worker,
 such as `http://worker.lan:7681`. A same-host board derives the terminal host from the browser origin.
 
+## Plugins
+
+```bash
+mp plugins                          # each plugin, its state, what it does
+mp plugins off voice                # stop it; it stays off through restarts and upgrades
+mp plugins on voice                 # supervise.sh starts it within 10 seconds
+mp plugins install ./my-plugin      # a folder or a git URL; it arrives off
+mp plugins rm my-plugin             # installed plugins only
+```
+
+The Plugins page on the board shows the same list and the same switches. A plugin that isn't set up yet says so: the sections below say how. Installed plugins live in `$INSTALL_DIR/plugins.d`, and a release never touches them. A plugin runs with your full access, so install only code you trust.
+
+A plugin is a folder holding its script and a `plugin.conf`:
+
+```
+desc=One line for the list
+run=python3 my-plugin.py
+needs=env:MY_PLUGIN
+```
+
+`run` is the interpreter and the script: supervise.sh adds the folder and `serve`. `needs` is optional: a key set in queue.env (`env:KEY`) or a file under the install (`file:state/my-plugin/creds.json`).
+
 ## GitHub PR watcher
 
 Agents open PRs and ask for reviews; this plugin makes sure they hear back. Every minute it finds the
@@ -163,6 +185,7 @@ Write `$INSTALL_DIR/state/voice/config.json`: `{"sse": "HOST:PORT", "say": ["/pa
 `sse` is a live-caption server whose `GET /events` streams `{"text": ...}`; `say` is any command that speaks the
 text added after it. Each finished thought you say reaches the Boss with the command to answer, and the Boss
 answers out loud only when you are talking to it (with `cue`, only lines that address it that way). Its own voice coming back through the mic is dropped.
+`voice.py off`, `on` or `toggle` stop and resume what the mic sends the Boss while the captions keep running, and `"switch": {"off": "REGEX", "on": "REGEX", "off_said": "Mic off.", "on_said": "Mic on."}` does the same when you say a short phrase.
 
 ## Let people ask your agent in Discord
 

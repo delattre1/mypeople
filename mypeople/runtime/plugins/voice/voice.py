@@ -5,12 +5,15 @@ Turn it on by writing state/voice/config.json; `mypeople up` then keeps it runni
   {"sse": "HOST:PORT",                  a live-caption server whose GET /events streams {"text": ...}
    "say": ["/path/to/speak", "--flag"], the command that speaks one line (the text is added last)
    "from": "Ana (studio mic)",          who is talking, as the Boss is told
-   "cue": "\"hey Boss\""}               optional: how the owner addresses the Boss; lines without it are left alone
+   "cue": "\"hey Boss\"",               optional: how the owner addresses the Boss; lines without it are left alone
+   "switch": {"off": "REGEX", "on": "REGEX", "off_said": "Mic off.", "on_said": "Mic on."}}
+                                        optional: the short phrases that turn the mic on and off, and what the speaker says back
 
 Usage:
   voice.py serve        follow the captions; each finished thought is one mp send to the Boss
   voice.py say "text"   speak a reply out loud (the command every voice message carries)
-  voice.py status       print the config and the lines last spoken
+  voice.py off | on | toggle   stop or resume what the mic sends the Boss; the captions keep running (for a Stream Deck key)
+  voice.py status       print the config, whether the mic is off, and the lines last spoken
 
 Like plow-chat, each message is a package: the words, who said them, and the exact command that
 answers in the same medium (spoken at the mic -> spoken back on the speaker). The mic is live, so
@@ -41,6 +44,7 @@ INSTALL = Path(os.environ.get("INSTALL_DIR") or os.environ.get("MYPEOPLE_HOME") 
 STATE_DIR = Path(os.environ.get("VOICE_STATE_DIR") or INSTALL / "state" / "voice")
 CONFIG = STATE_DIR / "config.json"
 SAID = STATE_DIR / "said.txt"   # the last lines `say` spoke, for the echo filter
+OFF = STATE_DIR / "off"   # exists: the owner turned the mic off, so no thought reaches the Boss
 SPEAKING = STATE_DIR / "speaking"   # "<start> <end>" of the last `say`; no end yet while it plays
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
@@ -57,6 +61,7 @@ ECHO_S = 60         # how long a spoken reply can come back through the mic
 TAIL_S = 2.5        # the captions lag the speaker: its echo keeps arriving this long after it stops. Used only to
                     # hold a line until the echo is complete so it can be stripped; the mic is never muted (11-01)
 MAX_CHARS = 2000
+SWITCH_WORDS = 10   # a longer thought that mentions the mic is them talking about it, not flipping it
 
 
 def log(msg: str):
@@ -306,6 +311,31 @@ def events(host: str):
                 yield json.loads(line[6:]).get("text") or ""
 
 
+def flip(off: bool, cfg: dict):
+    """Turn the mic off or on, tell the Boss so the silence isn't taken for a fault, and say it back."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    OFF.touch() if off else OFF.unlink(missing_ok=True)
+    log(f"mic {'off' if off else 'on'}")
+    who = cfg.get("from") or "the owner (live mic)"
+    send_to_agent(f"[voice] {who} turned the mic {'off: no lines reach you until it is back on' if off else 'back on'}. Nothing to do.")
+    said = (cfg.get("switch") or {}).get("off_said" if off else "on_said")
+    if said:
+        say(said)
+
+
+def heard_switch(line: str, cfg: dict) -> bool:
+    """The owner's spoken on/off phrase flips the mic and goes to nobody. True if this line was one."""
+    sw = cfg.get("switch") or {}
+    if len(line.split()) > SWITCH_WORDS or is_echo(line):
+        return False
+    for off, key in ((True, "off"), (False, "on")):
+        if sw.get(key) and re.search(sw[key], line, re.I):
+            if OFF.exists() != off:
+                threading.Thread(target=flip, args=(off, cfg), daemon=True).start()   # the speaker must not hold up the next thought
+            return True
+    return False
+
+
 def serve():
     cfg = config()
     who, cue = cfg.get("from") or "the owner (live mic)", cfg.get("cue") or ""
@@ -320,7 +350,7 @@ def serve():
                     thoughts.in_speaker = speaking(now)   # also between caption events
                     line = thoughts.due(now)
                     before, overlap = thoughts.before_speaker, thoughts.was_overlap
-                if line:
+                if line and not heard_switch(line, cfg) and not OFF.exists():
                     deliver(line, who, last, cue, before, overlap)
             except Exception as e:  # noqa: BLE001
                 log(f"ERROR ship: {type(e).__name__}: {e}")
@@ -358,8 +388,12 @@ def main(argv):
         serve()
     elif argv[:1] == ["say"] and len(argv) > 1:
         return say(" ".join(argv[1:]))
+    elif argv[:1] in (["off"], ["on"], ["toggle"]):
+        off = {"off": True, "on": False, "toggle": not OFF.exists()}[argv[0]]
+        flip(off, config())
+        print("off" if off else "on")
     elif argv[:1] == ["status"]:
-        print(json.dumps({"config": json.loads(CONFIG.read_text()) if CONFIG.exists() else None,
+        print(json.dumps({"config": json.loads(CONFIG.read_text()) if CONFIG.exists() else None, "off": OFF.exists(),
                           "said": SAID.read_text().splitlines() if SAID.exists() else []}, indent=2))
     else:
         print(__doc__, file=sys.stderr)

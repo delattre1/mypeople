@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MyPlow · Plugins</title>
+<style>
+:root{--volt:#d5ef8a;--bg:#111110;--panel:#1a1a18;--ink:#f0f0e8;--muted:#9c9c94;--amber:#febc2e;--red:#ff3b30;--mono:"DM Mono","SFMono-Regular",Menlo,monospace;--sans:"DM Sans",system-ui,sans-serif;--serif:"Instrument Serif",Georgia,serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--sans)}
+main{max-width:760px;margin:0 auto;padding:18px 16px 60px}
+h1{font:400 28px/44px var(--serif);margin:0 0 20px;padding-right:300px}
+#msg:empty{display:none}
+#msg{margin:0 0 14px;color:var(--amber)}
+#msg a{color:inherit}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;align-items:center;gap:14px;padding:14px 16px;margin-bottom:8px;background:var(--panel);border:1px solid #ffffff14;border-radius:12px}
+.text{flex:1;min-width:0}
+.name{font-weight:600;overflow-wrap:anywhere}
+.desc,.also{color:var(--muted);font-size:13px}
+.state{font:12px var(--mono);color:var(--muted);white-space:nowrap}
+.state.running{color:var(--volt)}
+.state.down{color:var(--red)}
+button[role=switch]{flex:none;position:relative;width:44px;height:26px;padding:0;border:0;border-radius:13px;background:#ffffff26;cursor:pointer}
+button[role=switch]::after{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:var(--ink);transition:transform .15s}
+button[role=switch][aria-checked=true]{background:var(--volt)}
+button[role=switch][aria-checked=true]::after{transform:translateX(18px);background:#111110}
+button[role=switch]:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
+button[role=switch]:disabled{opacity:.5;cursor:default}
+.install{margin-top:22px;color:var(--muted);font-size:13px}
+code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
+@media(max-width:700px){main{padding-top:56px}h1{padding-right:0;margin-bottom:12px}li{flex-wrap:wrap}.text{flex-basis:100%}.state{flex:1}}
+</style></head>
+<body><main>
+<h1>Plugins</h1>
+<p id="msg" role="status"></p>
+<ul id="list"></ul>
+<p class="install">To install a plugin, run this on the Mac. It arrives switched off: <code>mp plugins install &lt;folder or git URL&gt;</code></p>
+</main>
+<script>
+"use strict";
+const list=document.getElementById("list"),msg=document.getElementById("msg");
+let busy=false;
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
+function render(rows){
+  list.replaceChildren(...rows.map(r=>{
+    const li=el("li"),text=el("div","text");
+    text.append(el("div","name",r.name),el("div","desc",r.desc));
+    if(r.also.length)text.append(el("div","also","Also running, not switched here: "+r.also.join(", ")));
+    li.append(text,el("span","state "+r.state.replace(/ /g,"-"),r.state));
+    if(r.state!=="not set up"){
+      const b=el("button");b.type="button";b.setAttribute("role","switch");
+      b.setAttribute("aria-checked",String(r.state!=="off"));b.setAttribute("aria-label",r.name);
+      b.onclick=()=>flip(r.name,r.state==="off",b);li.append(b);
+    }
+    return li;
+  }));
+}
+function fail(status,text){
+  if(status===401){msg.textContent="";const a=el("a","","Log in on the board");a.href="/";msg.append(a," to see your plugins.")}
+  else msg.textContent=text||"Couldn't reach MyPlow.";
+}
+async function load(){
+  if(busy)return;
+  try{
+    const r=await fetch("/todo/plugins",{credentials:"same-origin"});
+    if(!r.ok)return fail(r.status);
+    const d=await r.json();
+    if(!busy){msg.textContent="";render(d.plugins)}
+  }catch(e){fail(0)}
+}
+async function flip(name,on,button){
+  busy=true;button.disabled=true;
+  try{
+    const r=await fetch("/todo/plugins/set",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,on})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok){msg.textContent="";render(d.plugins)}else fail(r.status,d.error);
+  }catch(e){fail(0)}
+  busy=false;button.disabled=false;
+}
+load();setInterval(load,5000);
+</script>
+</body></html>

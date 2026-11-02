@@ -9,6 +9,7 @@ from http.server import ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpcommon as C
+import mpplugins
 import boardstore as BS
 
 CFG = C.CFG
@@ -25,6 +26,7 @@ INBOX_LOG = os.path.join(TODOS_DIR, "boss-inbox.log")
 HTML_DIR = os.path.dirname(os.path.abspath(__file__))
 TODOS_HTML = os.path.join(HTML_DIR, "todos.html")
 TERMINAL_GRAPH_HTML = os.path.join(HTML_DIR, "terminal-graph.html")
+PLUGINS_HTML = os.path.join(HTML_DIR, "plugins.html")
 FONT_TYPES = {".woff2": "font/woff2", ".css": "text/css; charset=utf-8"}
 
 VALID_STATES = {"working", "review", "done", "blocked", "cancelled", "recurring"}
@@ -648,7 +650,7 @@ class Handler(C.JSONHandler):
 
     def do_HEAD(self):
         p = self.path.split("?", 1)[0]
-        if p in ("/", "/todos", "/terminal-graph"):
+        if p in ("/", "/todos", "/terminal-graph", "/plugins"):
             return self._send(200, raw=b"", ctype="text/html; charset=utf-8", extra=self._page_extra())
         if p == "/dashboard" or p.startswith("/dashboard/") or p in ("/agents", "/clients", "/roster"):
             return C.proxy_request(self, "127.0.0.1", HUD_PORT)
@@ -683,6 +685,8 @@ class Handler(C.JSONHandler):
         if p == "/terminal-graph":
             return self._serve_page(TERMINAL_GRAPH_HTML if os.path.exists(TERMINAL_GRAPH_HTML)
                                     else TODOS_HTML)
+        if p == "/plugins":
+            return self._serve_page(PLUGINS_HTML)
         # HUD routes -> proxy to queue-server (symmetric front doors)
         if p == "/dashboard" or p.startswith("/dashboard/") or p in ("/agents", "/clients", "/roster"):
             return C.proxy_request(self, "127.0.0.1", HUD_PORT)
@@ -715,6 +719,10 @@ class Handler(C.JSONHandler):
             if not ok:
                 return self._send(401, {"error": "unauthorized"})
             return self._send(200, self._terminal_graph())
+        if p == "/todo/plugins":
+            if not ok:
+                return self._send(401, {"error": "unauthorized"})
+            return self._send(200, {"plugins": mpplugins.listing()})
         if p.startswith("/todo/attach"):
             if not ok:
                 return self._send(401, {"error": "unauthorized"})
@@ -768,6 +776,12 @@ class Handler(C.JSONHandler):
             return self._status_op(body, ident)
         if p == "/todo/boss":
             return self._boss_op(body, ident)
+        if p == "/todo/plugins/set":
+            try:
+                mpplugins.set_on(str(body.get("name") or ""), body.get("on") is True)
+            except mpplugins.PluginError as e:
+                return self._send(400, {"error": str(e)})
+            return self._send(200, {"plugins": mpplugins.listing()})
         return self._send(404, {"error": "not_found"})
 
     # ---- Boss lifecycle control (card 0cc0bde980) ----
