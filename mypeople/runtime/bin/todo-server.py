@@ -723,6 +723,10 @@ class Handler(C.JSONHandler):
             if not ok:
                 return self._send(401, {"error": "unauthorized"})
             return self._send(200, {"plugins": mpplugins.listing()})
+        if p == "/todo/plugins/messages":
+            if not ok:
+                return self._send(401, {"error": "unauthorized"})
+            return self._send(200, {"messages": mpplugins.messages()})
         if p.startswith("/todo/attach"):
             if not ok:
                 return self._send(401, {"error": "unauthorized"})

@@ -24,6 +24,9 @@ button[role=switch][aria-checked=true]{background:var(--volt)}
 button[role=switch][aria-checked=true]::after{transform:translateX(18px);background:#111110}
 button[role=switch]:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
 button[role=switch]:disabled{opacity:.5;cursor:default}
+.said{margin-top:8px;color:var(--muted);font-size:13px}
+.said summary{cursor:pointer}
+.said pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--mono);color:var(--ink)}
 .install{margin-top:22px;color:var(--muted);font-size:13px}
 code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
 @media(max-width:700px){main{padding-top:56px}h1{padding-right:0;margin-bottom:12px}li{flex-wrap:wrap}.text{flex-basis:100%}.state{flex:1}}
@@ -37,13 +40,22 @@ code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
 <script>
 "use strict";
 const list=document.getElementById("list"),msg=document.getElementById("msg");
-let busy=false;
+let busy=false,said={},shown="";
+const opened=new Set();
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
 function render(rows){
+  const now=JSON.stringify(rows);
+  if(now===shown)return;  // the 5 s poll must not redraw what they may be reading or selecting
+  shown=now;
   list.replaceChildren(...rows.map(r=>{
     const li=el("li"),text=el("div","text");
     text.append(el("div","name",r.name),el("div","desc",r.desc));
     if(r.also.length)text.append(el("div","also","Also running, not switched here: "+r.also.join(", ")));
+    if(said[r.name]){
+      const d=el("details","said");d.open=opened.has(r.name);
+      d.ontoggle=()=>{d.open?opened.add(r.name):opened.delete(r.name)};
+      d.append(el("summary","","What it tells the agent"),el("pre","",said[r.name]));text.append(d);
+    }
     li.append(text,el("span","state "+r.state.replace(/ /g,"-"),r.state));
     if(r.state!=="not set up"){
       const b=el("button");b.type="button";b.setAttribute("role","switch");
@@ -75,6 +87,12 @@ async function flip(name,on,button){
   }catch(e){fail(0)}
   busy=false;button.disabled=false;
 }
-load();setInterval(load,5000);
+async function loadSaid(){
+  try{
+    const r=await fetch("/todo/plugins/messages",{credentials:"same-origin"});
+    if(r.ok){said=(await r.json()).messages;shown="";load()}
+  }catch(e){}
+}
+load();loadSaid();setInterval(load,5000);
 </script>
 </body></html>

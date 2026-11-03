@@ -136,7 +136,7 @@ mp plugins install ./my-plugin      # a folder or a git URL; it arrives off
 mp plugins rm my-plugin             # installed plugins only
 ```
 
-The Plugins page on the board shows the same list and the same switches. A plugin that isn't set up yet says so: the sections below say how. Installed plugins live in `$INSTALL_DIR/plugins.d`, and a release never touches them. A plugin runs with your full access, so install only code you trust.
+The Plugins page on the board shows the same list and the same switches, and under each plugin what it tells the agent with every message. A plugin that isn't set up yet says so: the sections below say how. Installed plugins live in `$INSTALL_DIR/plugins.d`, and a release never touches them. A plugin runs with your full access, so install only code you trust.
 
 A plugin is a folder holding its script and a `plugin.conf`:
 

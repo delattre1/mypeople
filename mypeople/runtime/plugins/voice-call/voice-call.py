@@ -638,6 +638,8 @@ def main():
         serve()
     elif cmd == "say" and len(sys.argv) == 4:
         cmd_say(sys.argv[2], sys.argv[3])
+    elif cmd == "message":   # the board's Plugins page shows this
+        print(envelope("<ticket>", "<language>", "<what they said>", False))
     elif cmd == "keys":
         cmd_keys()
     elif cmd == "setup" and (len(sys.argv) == 2 or (len(sys.argv) == 4 and sys.argv[2] == "--buy")):

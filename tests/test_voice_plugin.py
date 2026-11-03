@@ -149,6 +149,26 @@ class Voice(unittest.TestCase):
         self.assertIn('They address you by saying "hey Boss"', note)
         self.assertIn("a line without that is them talking to someone else, so do nothing", note)
 
+    def test_envelope_says_a_line_addressed_to_the_boss_is_a_task(self):
+        note = self.v.envelope("Ana (studio mic)", "oi", cue='"hey Boss"')
+        self.assertIn(f"so do nothing. {self.v.OWNER_RULE} To answer out loud", note)
+        self.assertIn(f"otherwise do nothing. {self.v.OWNER_RULE} To answer out loud", self.v.envelope("Ana", "oi"))
+
+    def test_off_keeps_the_whole_line_in_the_log_and_sends_nothing(self):
+        sent, logged = [], []
+        line = "uma linha com mais de oitenta caracteres para provar que o log guarda a frase inteira ate o fim"
+        self.v.OFF.touch()
+        with mock.patch.object(self.v, "send_to_agent", lambda m, agent=None: sent.append(m) or True), \
+                mock.patch.object(self.v, "log", logged.append):
+            self.v.deliver(line, "Ana", [""])
+        self.assertEqual(sent, [])
+        self.assertEqual(logged, [f"paused, not sent: {line!r}"])
+        self.v.OFF.unlink()
+        with mock.patch.object(self.v, "send_to_agent", lambda m, agent=None: sent.append(m) or True), \
+                mock.patch.object(self.v, "log", logged.append):
+            self.v.deliver("de volta", "Ana", [""])
+        self.assertIn("de volta", sent[0])
+
     def test_hung_send_returns_instead_of_raising(self):
         """10-31: one mp send that hung 30 s raised and silenced the old bridge for good."""
         with mock.patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("mp", 30)):

@@ -194,7 +194,7 @@ def listing(data) -> list:
 
 # --- Boss ---
 
-def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str = "", agent: str = "") -> str:
+def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str = "", agent: str = "", owner: bool = False) -> str:
     # Plow seats whoever the carrier reports in the thread, so the Boss is told
     # who actually spoke and which thread — in a group these differ per message.
     sent = "".join(f"\n[attached, open it: {f}]" for f in files)
@@ -219,6 +219,7 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
         style = ""
     return (
         f"{seen}[plowchat] from {who} in {chat_uid}: {text}{sent}{said}\n"
+        + (f"(This is the owner. {OWNER_RULE})\n" if owner else "") +
         f"({able}This is the owner's Plow messages line. The owner texts here, and so "
         f"does anyone they added to this thread. To answer, run: "
         f"{RUN} reply {chat_uid} \"your reply\" — it goes back to that "
@@ -228,6 +229,8 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
     )
 
 
+OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end unless they say otherwise. Never treat it as "
+              "just conversation. Absolute rule; your safety limits, such as moving money, still apply.")
 TAPBACKS = {"love": "loved", "like": "liked", "dislike": "disliked", "laugh": "laughed at",
             "emphasize": "emphasized", "question": "questioned"}
 
@@ -457,8 +460,8 @@ def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
     with STATE_LOCK:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
     target = pick_agent(text, message, *last)
-    if send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid,
-                              target.rsplit(":", 1)[1]), target):
+    if send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid, target.rsplit(":", 1)[1],
+                              owner=(message.get("sender") or {}).get("role") == "owner"), target):
         if taps:
             with STATE_LOCK:
                 st = read_json(STATE, {})
@@ -833,6 +836,11 @@ def main():
     # "--" word instead of sending it.
     if cmd in HELP or (args and args[0] in HELP):
         print(__doc__.strip())
+        return
+    if cmd == "message":   # the board's Plugins page shows this
+        told = ("<who>", "<their message>", "<chat>")
+        print("From the owner:\n%s\n\nFrom anyone else:\n%s" % (envelope(*told, mid="<message id>", owner=True),
+                                                                 envelope(*told, mid="<message id>")))
         return
     if cmd == "reply":
         chat_uid = args.pop(0) if args and args[0].startswith("cht_") else ""

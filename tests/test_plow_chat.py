@@ -566,6 +566,16 @@ class PlowChatTest(unittest.TestCase):
         self.assertEqual((b"\x8a\x82", b"hb"), (head, bytes(c ^ mask[i % 4] for i, c in enumerate(data))))
 
 
+    def test_only_a_message_plow_marks_as_the_owner_gets_the_task_rule(self):
+        for uid, stamp, sender, told in (("msg_a", "1", {"type": "member", "display_name": "Dan", "role": "owner"}, True),
+                                         ("msg_b", "2", {"type": "member", "display_name": "Sam", "role": "member"}, False),
+                                         ("msg_c", "3", {"type": "member", "display_name": "Nia"}, False)):
+            self.sent.clear()
+            self.pc.route_message({"uid": uid, "direction": "inbound", "body": "faz isso", "chat_uid": "cht_a",
+                                   "created_at": stamp, "sender": sender}, "cht_a")
+            self.assertEqual(self.pc.OWNER_RULE in self.sent[0], told, sender)
+
+
 class CloudTest(unittest.TestCase):
     """A 1-click Plow VM: no saved login, PLOW_API_BASE + a proxied token."""
 

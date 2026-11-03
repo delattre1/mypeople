@@ -375,7 +375,7 @@ class Bridge:
                 and C.parse_agent_id(to)[0] == self.host and "/" in to):
             log("dropped a message from %s: from %s to %s" % (h, frm, to))
             return True
-        payload = {"message": "[from %s, on another MyPlow] %s" % (frm, body.get("text", ""))}
+        payload = {"message": FROM % (frm, body.get("text", ""))}
         if body.get("reply"):
             payload["reply_to"] = frm
         code, out = self.queue("POST", "/task/submit", {"type": "send", "target_agent": to, "payload": payload})
@@ -464,6 +464,9 @@ def pair(argv):
         raise SystemExit("usage: mp pair | mp pair <code> | mp pair ls | mp pair rm <host>")
 
 
+FROM = "[from %s, on another MyPlow] %s"
+
+
 def main(argv):
     # No default: a bare run started a second, unsupervised serve beside supervise.sh's (discord-chat, Mac 2, 10-30).
     cmd, args = (argv[1] if len(argv) > 1 else ""), argv[2:]
@@ -474,6 +477,8 @@ def main(argv):
         relay(*args[:1])
     elif cmd == "pair":
         pair(args)
+    elif cmd == "message":   # the board's Plugins page shows this
+        print(FROM % ("<agent>", "<their message>"))
     else:
         raise SystemExit(__doc__)
 

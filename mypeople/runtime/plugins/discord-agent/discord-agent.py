@@ -395,9 +395,10 @@ def alert(kind, text, now=None):
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(sent))
     log("alerting the Boss: %s: %s" % (kind, text))
-    subprocess.run([sys.executable, MP_BIN, "send", BOSS,
-                    "[discord escalation] the Discord agent needs a look (%s): %s. Stop it: mp kill %s"
-                    % (kind, text, AID)], capture_output=True, timeout=60)
+    subprocess.run([sys.executable, MP_BIN, "send", BOSS, ALERT % (kind, text, AID)], capture_output=True, timeout=60)
+
+
+ALERT = "[discord escalation] the Discord agent needs a look (%s): %s. Stop it: mp kill %s"
 
 
 def refuse(item, why):
@@ -514,6 +515,8 @@ def main(argv):
     cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "serve":
         serve()
+    elif cmd == "message":   # the board's Plugins page shows this
+        print(ALERT % ("<what>", "<detail>", AID))
     elif cmd == "status":
         st = read_state()
         print(json.dumps({"off": OFF.exists(), "channels": channels(), "cursor": st.get("cursor"),

@@ -917,6 +917,8 @@ def main(argv):
         if not cfg("DISCORD_CHAT_COOKING"):
             raise SystemExit("DISCORD_CHAT_COOKING is not set: no issue is followed")
         print("\n".join(cook_locked(args[1:]) or ["nothing to say"]) if args else cooking_list())
+    elif cmd == "message":   # the board's Plugins page shows this
+        print(envelope({"author": {"id": "0", "username": "<who>"}, "id": "0", "content": "<their message>"}, "0", {}))
     elif cmd == "status":
         print(json.dumps({"channels": channels(), "threads": read_json(STATE, {}).get("threads"), "users": users(),
                           "cursor": read_json(STATE, {}).get("cursor"),

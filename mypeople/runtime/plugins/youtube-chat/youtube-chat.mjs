@@ -322,6 +322,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const [cmd = 'serve', ...rest] = process.argv.slice(2);
   if (cmd === 'serve') serve();
   else if (cmd === 'reply') reply(rest.join(' ')).catch((e) => { console.error(`not posted: ${e.message}`); process.exit(1); });
+  else if (cmd === 'message') console.log(envelope('<who>', '<their message>'));   // the board's Plugins page shows this
   else if (cmd === 'status') console.log(JSON.stringify({ target: TARGET, video: readJson(STATE, {}).video || null,
     allowlist: ALLOWLIST, bound: readJson.raw(BOUND) }, null, 2));
   else { console.error('usage: youtube-chat.mjs serve | reply "text" | status'); process.exit(2); }

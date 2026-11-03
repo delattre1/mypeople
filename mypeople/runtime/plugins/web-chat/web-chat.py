@@ -215,6 +215,8 @@ def main():
         print(json.dumps([{k: m[k] for k in ("id", "mine", "text", "created_at")} for m in msgs], ensure_ascii=False, indent=1))
     elif cmd == "route" and len(args) == 2:
         print(json.dumps(call("POST", "/agent/route", {"visitor": args[0], "key_sha256": None if args[1] == "none" else args[1]})))
+    elif cmd == "message":   # the board's Plugins page shows this
+        print(envelope({"visitor": "<visitor>", "id": "<message id>", "text": "<their message>"}))
     elif cmd == "status":
         print(json.dumps({"relay": read_json(CREDS, {}).get("url"), "target": TARGET, "after": read_json(STATE, {}).get("after", 0)}, indent=2))
     else:

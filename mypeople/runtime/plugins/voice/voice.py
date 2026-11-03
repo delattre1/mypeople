@@ -12,7 +12,8 @@ Turn it on by writing state/voice/config.json; `mypeople up` then keeps it runni
 Usage:
   voice.py serve        follow the captions; each finished thought is one mp send to the Boss
   voice.py say "text"   speak a reply out loud (the command every voice message carries)
-  voice.py off | on | toggle   stop or resume what the mic sends the Boss; the captions keep running (for a Stream Deck key)
+  voice.py off | on | toggle   stop or resume what the mic sends the Boss; the captions keep running, and while off each
+                        line goes to this plugin's log instead (for a Stream Deck key)
   voice.py status       print the config, whether the mic is off, and the lines last spoken
 
 Like plow-chat, each message is a package: the words, who said them, and the exact command that
@@ -62,6 +63,8 @@ TAIL_S = 2.5        # the captions lag the speaker: its echo keeps arriving this
                     # hold a line until the echo is complete so it can be stripped; the mic is never muted (11-01)
 MAX_CHARS = 2000
 SWITCH_WORDS = 10   # a longer thought that mentions the mic is them talking about it, not flipping it
+OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end unless they say otherwise. Never treat it as "
+              "just conversation. Absolute rule; your safety limits, such as moving money, still apply.")
 
 
 def log(msg: str):
@@ -91,7 +94,7 @@ def envelope(who: str, text: str, cue: str = "") -> str:
             "Answer only when they are talking to you, and otherwise do nothing.")
     return (f"[voice] from {who}: {text}\n"
             f"(This is the owner's live mic, transcribed as they speak. Most of it is them talking to their "
-            f"stream, the room or other agents, not to you. {when} To answer out loud, run: {RUN} say "
+            f"stream, the room or other agents, not to you. {when} {OWNER_RULE} To answer out loud, run: {RUN} say "
             f"\"your reply\" — it plays on the speaker next to them. Short spoken sentences in the language "
             f"they used, no markdown.)")
 
@@ -293,6 +296,9 @@ def deliver(line: str, who: str, last: list, cue: str = "", before_speaker: bool
         log(f"echo dropped: {line[:80]!r}")
         return
     last[0] = line
+    if OFF.exists():   # paused: the transcription is kept in the log and goes to nobody
+        log(f"paused, not sent: {line!r}")
+        return
     if send_to_agent(envelope(who, line, cue)):
         log(f"-> {BOSS_AGENT}: {line[:80]!r}")
 
@@ -350,7 +356,7 @@ def serve():
                     thoughts.in_speaker = speaking(now)   # also between caption events
                     line = thoughts.due(now)
                     before, overlap = thoughts.before_speaker, thoughts.was_overlap
-                if line and not heard_switch(line, cfg) and not OFF.exists():
+                if line and not heard_switch(line, cfg):
                     deliver(line, who, last, cue, before, overlap)
             except Exception as e:  # noqa: BLE001
                 log(f"ERROR ship: {type(e).__name__}: {e}")
@@ -392,6 +398,9 @@ def main(argv):
         off = {"off": True, "on": False, "toggle": not OFF.exists()}[argv[0]]
         flip(off, config())
         print("off" if off else "on")
+    elif argv[:1] == ["message"]:   # the board's Plugins page shows this
+        cfg = config() if CONFIG.exists() else {}
+        print(envelope(cfg.get("from") or "the owner (live mic)", "<what they said>", cfg.get("cue") or ""))
     elif argv[:1] == ["status"]:
         print(json.dumps({"config": json.loads(CONFIG.read_text()) if CONFIG.exists() else None, "off": OFF.exists(),
                           "said": SAID.read_text().splitlines() if SAID.exists() else []}, indent=2))

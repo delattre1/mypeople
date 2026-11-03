@@ -6,6 +6,7 @@ folder in plugins/ it does not ship). Its plugin.conf:
   run=INTERPRETER SCRIPT      supervise.sh runs `INTERPRETER <folder>/SCRIPT serve`
   needs=env:KEY | file:PATH   optional: what it must have to run (KEY set in queue.env, PATH under the install)
   switch=yes                  optional: `SCRIPT off` and `SCRIPT on` are its own switch, and it keeps running while off
+  message=yes                 optional: `SCRIPT message` prints what it wraps a message in, for the board's Plugins page
 
 state/<name>/off exists = off: supervise.sh won't start it. Setup stays in each plugin's header, so nothing here
 writes queue.env or shows a value from it, only whether a key is set.
@@ -101,14 +102,33 @@ def listing():
     return rows
 
 
-def _own_switch(p, verb):
+def _run(p, verb, timeout=60):
     interp = shlex.split(p["conf"]["run"].rsplit(" ", 1)[0])
     # supervise.sh's daemons get these from queue.env; a terminal's shell doesn't have them, and without HOST_ID
     # a plugin falls back to the Mac's hostname and addresses its note to a Boss that doesn't exist.
     env = dict(os.environ, HOST_ID=C.CFG["HOST_ID"], INSTALL_DIR=INSTALL)
-    r = subprocess.run(interp + [_script(p), verb], capture_output=True, text=True, timeout=60, env=env)
+    return subprocess.run(interp + [_script(p), verb], capture_output=True, text=True, timeout=timeout, env=env)
+
+
+def _own_switch(p, verb):
+    r = _run(p, verb)
     if r.returncode:
         raise PluginError("%s %s failed: %s" % (_script(p), verb, r.stderr.strip()[-300:]))
+
+
+def messages():
+    """{plugin: the text it wraps a message in}, printed by the plugin's own code so this can't drift from what the
+    agent receives. It starts a process per plugin, so the page asks once per open, not on its 5 s poll."""
+    out = {}
+    for name, p in _plugins().items():
+        if p["conf"].get("message") == "yes":
+            try:
+                r = _run(p, "message", 20)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if r.returncode == 0 and r.stdout.strip():
+                out[name] = r.stdout.strip()
+    return out
 
 
 def _stop(p):

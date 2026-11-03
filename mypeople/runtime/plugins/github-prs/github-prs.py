@@ -508,6 +508,10 @@ def catchup(author, state, send=True, max_age_days=CATCHUP_MAX_AGE_DAYS):
 def main(argv):
     # No default: a bare run started a second, unsupervised serve beside supervise.sh's (discord-chat, Mac 2, 10-30).
     cmd = argv[1] if len(argv) > 1 else ""
+    if cmd == "message":   # the board's Plugins page shows this
+        print(format_event("<repo>", 1, {"kind": "review", "state": "CHANGES_REQUESTED", "user": "<who>",
+                                         "body": "<their review>", "url": "<link>"}, True))
+        return 0
     if cmd == "watch" and len(argv) > 2:
         key = watch_pr(argv[2], argv[3] if len(argv) > 3 else os.environ.get("AGENT_ID", ""))
         print("watching %s for %s (until it is merged or closed)" % (key, load_watch()[key]["agent"]))

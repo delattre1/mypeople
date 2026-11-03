@@ -4,6 +4,7 @@ import http.server
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -179,6 +180,25 @@ class Switch(unittest.TestCase):
         Path(self.install_dir, "state", "x").mkdir(parents=True)
         Path(self.install_dir, "state", "x", "creds.json").write_text("{}")
         self.assertEqual("down", self.row("needs-file")["state"])
+
+    def test_messages_come_from_the_plugins_that_declare_one_and_a_broken_one_is_left_out(self):
+        write_plugin(self.plugins, "says", "run=python3 p.py", "message=yes").joinpath("p.py").write_text("print('[says] <text>')")
+        write_plugin(self.plugins, "silent", "run=python3 p.py").joinpath("p.py").write_text("print('never asked')")
+        write_plugin(self.plugins, "broken", "run=python3 p.py", "message=yes").joinpath("p.py").write_text("raise SystemExit(2)")
+        self.assertEqual({"says": "[says] <text>"}, self.m.messages())
+
+    def test_every_real_plugin_that_declares_a_message_prints_it(self):
+        """A conf that says message=yes while the script has no such verb would show an empty block on the page."""
+        declared = [c.parent for c in PLUGINS.glob("*/plugin.conf") if "message=yes" in c.read_text()]
+        self.assertGreater(len(declared), 5)
+        for d in declared:
+            run = dict(x.split("=", 1) for x in (d / "plugin.conf").read_text().splitlines() if "=" in x)["run"].split()
+            if not shutil.which(run[0]):
+                continue
+            r = subprocess.run(run[:-1] + [str(d / run[-1]), "message"], capture_output=True, text=True, timeout=120,
+                               env=dict(os.environ, INSTALL_DIR=self.install_dir, HOST_ID="h"))
+            self.assertEqual(0, r.returncode, (d.name, r.stderr[-400:]))
+            self.assertIn("<", r.stdout, d.name)
 
     def test_the_list_never_carries_a_value_from_queue_env(self):
         write_plugin(self.plugins, "needs-env", "run=python3 p.py", "needs=env:SOME_KEY")
