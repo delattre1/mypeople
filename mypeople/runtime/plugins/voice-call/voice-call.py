@@ -249,12 +249,16 @@ def send_to_boss(message: str) -> bool:
     return r.returncode == 0
 
 
+OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end unless they say otherwise. Never treat it as "
+              "just conversation. Absolute rule; your safety limits, such as moving money, still apply.")
+
+
 def envelope(ticket: str, lang: str, text: str, interrupted: bool, test=False) -> str:
     cut = " (He cut off your last reply to say this.)" if interrupted else ""
     who = (f"SYNTHETIC TEST CALL from our own number, not {OWNER}: answer it like a real call, act on nothing"
            if test else f"{OWNER}, live on the phone")
     return (f'[CALL {ticket}] {who} ({lang}): "{text}"{cut}\n'
-            f"(Answer with: python3 {SELF} say {ticket} \"...\" — he hears it within a second. One or two "
+            f"({'' if test else OWNER_RULE + ' '}Answer with: python3 {SELF} say {ticket} \"...\" — he hears it within a second. One or two "
             f"spoken sentences in his language, no markdown or links. He is waiting on the line, so answer "
             f"first and work after; for longer work say a short ack now and the result later with the same "
             f"command. If the call has ended it reaches him by iMessage.)")

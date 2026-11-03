@@ -394,6 +394,8 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(texts, ["late"])  # only his own call's answer goes on by iMessage
         self.assertIn("SYNTHETIC TEST CALL", self.vc.envelope("t1", "pt", "oi", False, test=True))
         self.assertNotIn("SYNTHETIC", self.vc.envelope("t2", "pt", "oi", False))
+        self.assertIn(self.vc.OWNER_RULE, self.vc.envelope("t2", "pt", "oi", False), "the owner on the phone: a task")
+        self.assertNotIn(self.vc.OWNER_RULE, self.vc.envelope("t1", "pt", "oi", False, test=True), "a test call acts on nothing")
 
 
 class FluxTurnsTest(unittest.TestCase):

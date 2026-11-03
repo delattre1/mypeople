@@ -200,6 +200,11 @@ class Switch(unittest.TestCase):
             self.assertEqual(0, r.returncode, (d.name, r.stderr[-400:]))
             self.assertIn("<", r.stdout, d.name)
 
+    def test_the_owner_rule_is_one_sentence_in_every_plugin_that_carries_it(self):
+        found = {re.search(r'^OWNER_RULE = \((.*?)\)$', (PLUGINS / n / f"{n}.py").read_text(), re.S | re.M).group(1)
+                 for n in ("voice", "plow-chat", "voice-call")}
+        self.assertEqual(1, len(found), found)
+
     def test_the_list_never_carries_a_value_from_queue_env(self):
         write_plugin(self.plugins, "needs-env", "run=python3 p.py", "needs=env:SOME_KEY")
         self.assertNotIn("s3cret-value", json.dumps(self.m.listing()))
