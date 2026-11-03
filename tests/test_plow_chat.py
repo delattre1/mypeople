@@ -575,6 +575,14 @@ class PlowChatTest(unittest.TestCase):
                                    "created_at": stamp, "sender": sender}, "cht_a")
             self.assertEqual(self.pc.OWNER_RULE in self.sent[0], told, sender)
 
+    def test_a_line_that_names_its_owner_gives_the_rule_to_that_person_only(self):
+        self.pc.CREDS.write_text(json.dumps({"token": "t", "owner_handle": "+5511900000001"}))
+        for uid, stamp, key, told in (("msg_d", "4", "+5511900000001", True), ("msg_e", "5", "+5542900000002", False)):
+            self.sent.clear()
+            self.pc.route_message({"uid": uid, "direction": "inbound", "body": "faz isso", "chat_uid": "cht_b", "created_at": stamp,
+                                   "sender": {"type": "member", "provider_key": key, "role": "owner"}}, "cht_b")
+            self.assertEqual(self.pc.OWNER_RULE in self.sent[0], told, key)
+
 
 class CloudTest(unittest.TestCase):
     """A 1-click Plow VM: no saved login, PLOW_API_BASE + a proxied token."""

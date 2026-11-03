@@ -461,7 +461,7 @@ def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
     target = pick_agent(text, message, *last)
     if send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid, target.rsplit(":", 1)[1],
-                              owner=(message.get("sender") or {}).get("role") == "owner"), target):
+                              owner=is_owner(message.get("sender") or {})), target):
         if taps:
             with STATE_LOCK:
                 st = read_json(STATE, {})
@@ -493,6 +493,13 @@ def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
     except (SystemExit, OSError) as exc:
         log(f"could not warn the sender either: {exc}")
     return "ERROR mp send failed; sender warned, retrying next pass"
+
+
+def is_owner(sender: dict) -> bool:
+    """Plow marks the account's owner. The WhatsApp lab marks everyone it allowlists, so a line's creds can name the one
+    owner_handle; a mismatch only costs the owner the rule, never hands it to someone else."""
+    handle = read_json(CREDS, {}).get("owner_handle")
+    return sender.get("role") == "owner" and (not handle or sender.get("provider_key") == handle)
 
 
 def load_creds() -> dict:
