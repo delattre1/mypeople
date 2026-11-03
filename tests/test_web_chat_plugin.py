@@ -25,6 +25,7 @@ class PageAnalytics(unittest.TestCase):
         for name in ("landing.html", "landing-c.html", "page.html"):
             page = (PLUGIN / name).read_text()
             self.assertEqual(page.count("posthog.init("), 1, name)
+            self.assertRegex(page, r"posthog\.init\(/\(\^\|\\\.\)danedelattre\\\.com\$/\.test\(location\.hostname\) \? 'phc_y6Dd\w+' : 'phc_qFo7\w+', \{", name)  # his sites to his own project, Daniel 11-03
             for off in ("autocapture: false", "rageclick: false", "capture_dead_clicks: false", "enable_heatmaps: false",
                         "disable_session_recording: true"):
                 self.assertIn(off, page, name)
