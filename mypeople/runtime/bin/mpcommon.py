@@ -750,6 +750,12 @@ TMUX_STALL_WAIT = 8.0
 TMUX_REFUSED = ("no server running", "error connecting")
 
 
+def tmux_refused(r):
+    """Did this tmux result fail at the connection, before any command ran?"""
+    err = r.stderr.decode("utf-8", "replace") if isinstance(r.stderr, bytes) else str(r.stderr or "")
+    return r.returncode != 0 and any(m in err for m in TMUX_REFUSED)
+
+
 def tmux_server_gone(env=None):
     """True when no server can be behind the socket, False when it may only be stalled.
 
@@ -781,9 +787,7 @@ def tmux_run(*args, env=None, wait=None, **kw):
     deadline = time.time() + (TMUX_STALL_WAIT if wait is None else wait)
     while True:
         r = subprocess.run(["tmux"] + list(args), env=env, capture_output=True, **kw)
-        err = r.stderr.decode("utf-8", "replace") if isinstance(r.stderr, bytes) else str(r.stderr or "")
-        if (r.returncode == 0 or not any(m in err for m in TMUX_REFUSED)
-                or time.time() >= deadline or tmux_server_gone(env)):
+        if not tmux_refused(r) or time.time() >= deadline or tmux_server_gone(env):
             return r
         time.sleep(0.25)
 
@@ -799,7 +803,7 @@ def tmux_windows(wait=None):
     r = tmux_run("list-windows", "-a", "-F", "#{session_name}:#{window_name}", env=env, wait=wait, text=True)
     if r.returncode == 0:
         return set(r.stdout.splitlines())
-    return set() if tmux_server_gone(env) else None
+    return None if tmux_refused(r) and not tmux_server_gone(env) else set()
 
 
 def pane_key(target, key):

@@ -244,6 +244,76 @@ class ReconcileTests(unittest.TestCase):
         self.assertFalse(json.loads(Path(mp.ROSTER_PATH).read_text())[aid]["retired"])
 
 
+class SpawnOnAStalledServerTests(unittest.TestCase):
+    """review-watch on 12b49de: new-window ran plain with its result ignored, so a refusal left a roster row
+    and an /agents/register saying alive with no window. And window_exists read a refusal as "no window", so a
+    spawn could start a second copy of a live agent once tmux answered again."""
+    AID = "test-node/main:eng-9"
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.mp = sandbox.load(tmp.name, "mp", DEFAULT_BACKEND="claude")
+        self.mp.ROLE_DIR = str(ROOT / "mypeople" / "runtime" / "roles")
+        trust = mock.patch.object(self.mp, "pretrust")  # it edits ~/.claude.json
+        trust.start()
+        self.addCleanup(trust.stop)
+        self.calls = []
+        self.register = mock.patch.object(self.mp.C, "http_json", return_value=(200, {}))
+        self.posts = self.register.start()
+        self.addCleanup(self.register.stop)
+
+    def fake_tmux(self, refuse=()):
+        def run(argv, *a, **k):
+            if argv[0] != "tmux":
+                return mock.Mock(returncode=0, stdout="", stderr="")
+            self.calls.append(argv[1])
+            if argv[1] in refuse:
+                return mock.Mock(returncode=1, stdout="", stderr="no server running on /tmp/tmux-501/default")
+            out = "mc-main:Boss\n" if "-a" in argv else "Boss\n" if argv[1] == "list-windows" else ""
+            return mock.Mock(returncode=0, stdout=out, stderr="")
+        return mock.patch.object(self.mp.subprocess, "run", side_effect=run)
+
+    def spawn(self, refuse=()):
+        with self.fake_tmux(refuse), mock.patch.object(self.mp.C, "tmux_server_gone", return_value=False), \
+             mock.patch.object(self.mp.C, "TMUX_STALL_WAIT", 0), mock.patch.object(self.mp.C.time, "sleep"), \
+             mock.patch.object(self.mp, "wait_for_backend_ready", return_value=("", "pane")), \
+             mock.patch.object(self.mp, "is_local", return_value=True):
+            return self.mp.do_spawn([self.AID, "--temporary", "--role", "engineer", "--backend", "claude"])
+
+    def assert_nothing_happened(self):
+        self.assertNotIn(self.AID, self.mp.load_roster())
+        self.assertFalse([c for c in self.posts.call_args_list if "/agents/register" in c.args[1]])
+
+    def test_a_refused_new_window_leaves_no_agent_behind(self):
+        self.assertEqual(1, self.spawn(refuse=("new-window",)))
+        self.assert_nothing_happened()
+
+    def test_an_unreadable_tmux_never_starts_a_second_copy(self):
+        self.assertEqual(1, self.spawn(refuse=("list-windows",)))
+        self.assertNotIn("new-window", self.calls)
+        self.assertNotIn("new-session", self.calls)
+        self.assert_nothing_happened()
+
+    def test_a_healthy_tmux_still_spawns(self):
+        created = []
+
+        def run(argv, *a, **k):
+            if argv[0] != "tmux":
+                return mock.Mock(returncode=0, stdout="", stderr="")
+            if argv[1] == "new-window":
+                created.append(argv)
+            names = ["Boss"] + (["eng-9"] if created else [])
+            out = "".join("mc-main:%s\n" % n for n in names) if "-a" in argv else "\n".join(names) if argv[1] == "list-windows" else ""
+            return mock.Mock(returncode=0, stdout=out, stderr="")
+        with mock.patch.object(self.mp.subprocess, "run", side_effect=run), \
+             mock.patch.object(self.mp, "wait_for_backend_ready", return_value=("", "pane")), \
+             mock.patch.object(self.mp, "is_local", return_value=True):
+            self.assertEqual(0, self.mp.do_spawn([self.AID, "--temporary", "--role", "engineer", "--backend", "claude"]))
+        self.assertEqual(1, len(created))
+        self.assertIn(self.AID, self.mp.load_roster())
+
+
 class HeartbeatSurvivesASlowCensus(unittest.TestCase):
     """The real daemons on private ports, as two hosts, with a tmux shim that only sleeps."""
 

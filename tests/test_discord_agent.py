@@ -256,6 +256,15 @@ class RealTmuxSlotTest(unittest.TestCase):
         self.d.ensure_agent()
         self.assertTrue(self.d.check_pane()[0])
 
+    def test_a_refused_window_registers_nothing(self):
+        real, registered = self.d.tmux, []
+        self.d.register = registered.append
+        self.d.tmux = lambda *a, stdin=None: (
+            mock.Mock(returncode=1, stdout="", stderr="no server running") if a[:1] == ("new-window",)
+            else real(*a, stdin=stdin))
+        self.assertFalse(self.d.ensure_agent())
+        self.assertEqual([], registered)
+
     def test_revived_unlocked_is_replaced_never_fed(self):
         self.d.ensure_agent()
         self.d.tmux("kill-pane", "-t", self.d.PANE_FILE.read_text())

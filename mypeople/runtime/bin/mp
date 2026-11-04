@@ -821,6 +821,14 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
 
     e = tmux_env()
     reused = window_exists(sess, tab)
+    if not reused:
+        # window_exists says False for a tmux that refused the question too. Going on from that
+        # starts a second copy of a live agent once tmux answers.
+        windows = C.tmux_windows()
+        if windows is None:
+            print("ERROR: mp spawn: tmux is not answering; %s not spawned" % aid, file=sys.stderr)
+            return 1
+        reused = "mc-%s:%s" % (sess, tab) in windows
     if reused:
         # A standing window is not a running agent. Reusing one that holds anything else -- a bare
         # `claude` from the interactive auth step, a leftover shell -- is what shipped a Boss with
@@ -832,8 +840,7 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
         if launched is False:
             print("mp spawn: %s exists but holds no correctly launched %s agent; relaunching"
                   % (aid, backend))
-            rw = subprocess.run(["tmux", "respawn-window", "-k", "-t", tgt, "-c", cwd, launch],
-                                env=e, capture_output=True, text=True)
+            rw = C.tmux_run("respawn-window", "-k", "-t", tgt, "-c", cwd, launch, env=e, text=True)
             if rw.returncode != 0:
                 print("ERROR: could not relaunch %s: %s"
                       % (aid, (rw.stderr or "").strip() or "tmux respawn-window failed"),
@@ -855,20 +862,25 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
                 print("ERROR: mp spawn: tmux refused a new session for %s: %s"
                       % (aid, (started.stderr or "").strip()), file=sys.stderr)
                 return 1
-            subprocess.run(["tmux", "set-option", "-g", "-t", "mc-%s" % sess, "automatic-rename", "off"],
-                           env=e, capture_output=True)
+            C.tmux_run("set-option", "-g", "-t", "mc-%s" % sess, "automatic-rename", "off", env=e)
         else:
-            subprocess.run(["tmux", "new-window", "-d", "-t", "mc-%s" % sess, "-n", tab,
-                            "-c", cwd, launch], env=e, capture_output=True)
+            # Checked before the roster row below: a refusal here used to leave an agent registered
+            # alive with no window. tmux_run only retries a connection refused, so never two windows.
+            made = C.tmux_run("new-window", "-d", "-t", "mc-%s" % sess, "-n", tab, "-c", cwd, launch,
+                              env=e, text=True)
+            if made.returncode != 0:
+                print("ERROR: mp spawn: tmux refused a window for %s: %s"
+                      % (aid, (made.stderr or "").strip()), file=sys.stderr)
+                return 1
         tgt = "mc-%s:%s" % (sess, tab)
         # disable auto-rename so mc-<sess>:<tab> keeps resolving by name (§5 window naming)
-        subprocess.run(["tmux", "set-option", "-t", tgt, "-w", "automatic-rename", "off"], env=e, capture_output=True)
-        subprocess.run(["tmux", "set-option", "-t", tgt, "-w", "allow-rename", "off"], env=e, capture_output=True)
-        subprocess.run(["tmux", "rename-window", "-t", tgt, tab], env=e, capture_output=True)
+        C.tmux_run("set-option", "-t", tgt, "-w", "automatic-rename", "off", env=e)
+        C.tmux_run("set-option", "-t", tgt, "-w", "allow-rename", "off", env=e)
+        C.tmux_run("rename-window", "-t", tgt, tab, env=e)
         # load the CEO tmux conf into this (possibly new) server
         conf = os.path.expanduser("~/.tmux.conf")
         if os.path.exists(conf):
-            subprocess.run(["tmux", "source-file", conf], env=e, capture_output=True)
+            C.tmux_run("source-file", conf, env=e)
 
     # durable roster
     roster = load_roster()
@@ -950,9 +962,7 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
             save_roster(roster)
 
     # SELF-CHECK window naming
-    r = subprocess.run(["tmux", "list-windows", "-t", "mc-%s" % sess, "-F", "#{window_name}"],
-                       env=e, capture_output=True, text=True)
-    if tab not in r.stdout.split():
+    if not window_exists(sess, tab):
         print("ERROR: window %s not named correctly after spawn" % tab, file=sys.stderr)
         return 4
 

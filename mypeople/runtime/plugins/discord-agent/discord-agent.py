@@ -321,6 +321,9 @@ def ensure_agent():
     made = tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=" + FLEET + ":", "-n", "discord",
                 "-c", str(AGENT), "env -u BOSS_ID AGENT_ID=%s bash -c %s" % (shlex.quote(AID), shlex.quote(
                     "while true; do %s; sleep 2; done" % cmd)))
+    if made.returncode != 0:  # e.g. a stalled tmux refused it: registering would claim an agent with no window
+        log("could not start agent: %s" % made.stderr.strip())
+        return False
     PANE_FILE.write_text(made.stdout.strip())
     register(cmd)
     return False
