@@ -743,6 +743,27 @@ def retired_note(target):
                rr.get("retire_reason") or "mp kill", aid))
 
 
+def pane_key(target, key):
+    """Press a key ("Enter", or a literal like "2") for the program in a pane. Returns True on success.
+
+    send-keys goes to a pane's MODE first: with the window chooser open on an agent, a delivered
+    message's Enter picked the highlighted row, jumped whoever was looking, and left the message
+    unsubmitted in the composer; copy-mode ate it the same way. A paste always reaches the program.
+    """
+    env = dict(os.environ)
+    env.pop("TMUX", None)
+
+    def tmux(*args, **kw):
+        return subprocess.run(["tmux"] + list(args), env=env, capture_output=True, **kw)
+
+    if tmux("display-message", "-p", "-t", target, "#{pane_in_mode}", text=True).stdout.strip() != "1":
+        return tmux("send-keys", "-t", target, key).returncode == 0
+    buf = "mp-" + base64.urlsafe_b64encode(os.urandom(9)).decode("ascii").rstrip("=")
+    raw = b"\r" if key == "Enter" else key.encode("utf-8")
+    return (tmux("load-buffer", "-b", buf, "-", input=raw).returncode == 0 and
+            tmux("paste-buffer", "-r", "-d", "-b", buf, "-t", target).returncode == 0)
+
+
 def tmux_send_message(target, message):
     """Deliver a message into a tmux pane's composer and submit it.
     target = mc-<sess>:<tab>. Returns True on success.
@@ -793,7 +814,7 @@ def tmux_send_message(target, message):
             time.sleep(0.3)
             continue
         time.sleep(0.15)
-        if tmux("send-keys", "-t", target, "Enter").returncode != 0:
+        if not pane_key(target, "Enter"):
             time.sleep(0.3)
             continue
         # A composer that holds the paste as a chip needs a second Enter. Guarded by the
@@ -802,7 +823,7 @@ def tmux_send_message(target, message):
             time.sleep(0.4)
             pane = tmux("capture-pane", "-p", "-t", target, "-S", "-30", text=True)
             if "[Pasted text" in (pane.stdout or ""):
-                tmux("send-keys", "-t", target, "Enter")
+                pane_key(target, "Enter")
         return True
     return False
 

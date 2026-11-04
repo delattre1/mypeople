@@ -340,6 +340,24 @@ def window_exists(sess, tab):
     return r.returncode == 0 and tab in r.stdout.split()
 
 
+def close_agent_window(sess, tab, e):
+    """Close an agent's window and the web viewers parked on it. True once the window is gone.
+
+    Names are exact (`=`): tmux falls back to a prefix match, so closing an already-gone eng-11
+    closed eng-1155, a live agent, and said it worked. A viewer left on a dying window lands on a
+    neighbour (Boss, measured) and types into it under the dead agent's name, so it goes too; one
+    that moved to another window through the chooser is still in use and stays.
+    """
+    group = "mc-%s" % sess
+    listed = subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}\t#{session_group}\t#{window_name}"],
+                            env=e, capture_output=True, text=True).stdout
+    for name, grp, window in (l.split("\t") for l in listed.splitlines() if l.count("\t") == 2):
+        if name.startswith("_v_%s_" % tab) and grp == group and window == tab:
+            subprocess.run(["tmux", "kill-session", "-t", "=" + name], env=e, capture_output=True)
+    subprocess.run(["tmux", "kill-window", "-t", "=%s:=%s" % (group, tab)], env=e, capture_output=True)
+    return not window_exists(sess, tab)
+
+
 # The permission-bypass flag each backend MUST be launched with. An agent without it stops on the
 # first tool prompt and looks hung to whoever installed MyPlow -- the exact symptom reported for
 # a first-run Boss (card 5211716904, items 6+7).
@@ -1068,7 +1086,9 @@ def do_kill(argv):
         roster[aid]["recorder_stop"] = recorder_stop
         save_roster(roster)
     C.http_json("POST", QUEUE_URL + "/agents/unregister", {"agent_id": aid}, HDR, timeout=6)
-    subprocess.run(["tmux", "kill-window", "-t", "mc-%s:%s" % (sess, tab)], env=e, capture_output=True)
+    if not close_agent_window(sess, tab, e):
+        print("retired %s but its window is still open" % aid, file=sys.stderr)
+        return 1
     print("killed %s" % aid)
     return 0
 
@@ -1083,10 +1103,9 @@ def do_answer(argv):
         print(result)
         return 0 if ok else 1
     tgt = C.tmux_target(aid)
-    e = tmux_env()
-    subprocess.run(["tmux", "send-keys", "-t", tgt, str(n)], env=e, capture_output=True)
+    C.pane_key(tgt, str(n))
     time.sleep(0.2)
-    subprocess.run(["tmux", "send-keys", "-t", tgt, "Enter"], env=e, capture_output=True)
+    C.pane_key(tgt, "Enter")
     print("answered %s -> %s" % (aid, n))
     return 0
 
@@ -1284,7 +1303,7 @@ def reap_birth_zombie(aid, rr):
     roster[aid] = cur
     save_roster(roster)
     C.http_json("POST", QUEUE_URL + "/agents/unregister", {"agent_id": aid}, HDR, timeout=6)
-    subprocess.run(["tmux", "kill-window", "-t", "mc-%s:%s" % (sess, tab)], env=e, capture_output=True)
+    close_agent_window(sess, tab, e)
     # drop stale starting status so the next spawn's readiness wait is honest
     write_status(aid, "starting", cur.get("backend", "claude"), drop_session=True)
     latest = load_roster().get(aid, cur)

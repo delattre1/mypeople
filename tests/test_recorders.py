@@ -129,7 +129,7 @@ class RecorderLifecycleTests(unittest.TestCase):
                 self.assertEqual(0, mp.do_kill([aid, "--reason", "done"]))
             stop.assert_called_once_with("main", "eng-1", metadata, "test-node")
             commands = [call.args[0] for call in run.call_args_list]
-            self.assertIn(["tmux", "kill-window", "-t", "mc-main:eng-1"], commands)
+            self.assertIn(["tmux", "kill-window", "-t", "=mc-main:=eng-1"], commands)
             self.assertFalse(any(cmd[:2] == ["tmux", "kill-session"] for cmd in commands))
             roster = json.loads(Path(mp.ROSTER_PATH).read_text())
             self.assertTrue(roster[aid]["retired"])

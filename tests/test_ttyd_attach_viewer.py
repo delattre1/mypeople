@@ -27,10 +27,17 @@ class ViewerTests(unittest.TestCase):
         sessions = lambda: subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}"], env=env,
                                           capture_output=True, text=True).stdout.split()
         subprocess.run(["tmux", "new-session", "-d", "-s", "mc-t", "-n", "w"], env=env, check=True)
+        subprocess.run(["tmux", "new-window", "-d", "-t", "mc-t", "-n", "gone-prefix"], env=env, check=True)
         self.addCleanup(subprocess.run, ["tmux", "kill-server"], env=env, capture_output=True)
+        # a retired agent's tile reconnecting: no session, and it never lands on a live window
+        gone = subprocess.run(["bash", str(SCRIPT), "-t", "mc-t:gon"], env=env,
+                              capture_output=True, text=True, timeout=10)
+        self.assertEqual(1, gone.returncode)
+        self.assertIn("gon is gone", gone.stdout)
+        self.assertEqual(["mc-t"], sessions())
         pid, fd = pty.fork()
-        if pid == 0:  # the viewer, as ttyd runs it, on a tab that no longer exists
-            os.execve("/bin/bash", ["bash", str(SCRIPT), "-t", "mc-t:gone"], env)
+        if pid == 0:  # the viewer, as ttyd runs it
+            os.execve("/bin/bash", ["bash", str(SCRIPT), "-t", "mc-t:w"], env)
         deadline = time.time() + 5
         while time.time() < deadline and not any(s.startswith("_v_") for s in sessions()):
             time.sleep(0.05)
