@@ -84,6 +84,47 @@ class OnlyWhatIsInViewCosts(unittest.TestCase):
         self.assertRegex(draw, r"if\(now===edgesDrawn\)return")
 
 
+@unittest.skipUnless(shutil.which("node"), "needs node")
+class AnOpenPageFollowsTheRelease(unittest.TestCase):
+    """5.22.151 and .152 could not reach the Graph page he had open: it kept the code it loaded."""
+
+    def run_follow(self, versions, modal=False, stream=False, stored=None):
+        fn = re.search(r'const PAGE_VERSION=.*?\nfunction reconcile', PAGE, re.S).group(0).rsplit("\n", 1)[0]
+        js = """
+const STREAM=%s;let reloads=0;const store=%s;
+const sessionStorage={getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=v}};
+const location={reload(){reloads++}};
+const document={getElementById:()=>({classList:{contains:()=>%s}})};
+%s
+for(const v of %s)followRelease(v);
+console.log(reloads);""" % (json.dumps(stream), json.dumps({"mp_graph_version": stored} if stored else {}),
+                            json.dumps(modal), fn.replace("__MP_VERSION__", "v1"), json.dumps(versions))
+        out = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=20)
+        self.assertEqual(0, out.returncode, out.stderr)
+        return int(out.stdout)
+
+    def test_same_version_never_reloads(self):
+        self.assertEqual(0, self.run_follow(["v1"] * 50))
+
+    def test_a_new_version_reloads_once_even_if_a_stale_page_comes_back(self):
+        self.assertEqual(1, self.run_follow(["v2"] * 50))
+        self.assertEqual(0, self.run_follow(["v2"] * 50, stored="v2"))
+
+    def test_not_while_an_interactive_terminal_is_open(self):
+        self.assertEqual(0, self.run_follow(["v2"] * 5, modal=True))
+
+    def test_not_in_an_obs_overlay(self):
+        self.assertEqual(0, self.run_follow(["v2"] * 5, stream=True))
+
+    def test_an_older_server_that_sends_no_version_reloads_nothing(self):
+        self.assertEqual(0, self.run_follow([None, ""] * 5))
+
+    def test_page_and_poll_carry_the_same_stamp(self):
+        self.assertIn('PAGE_VERSION="__MP_VERSION__"', PAGE)  # render_page fills this in: "v" + version()
+        self.assertIn('"version": "v" + C.version()', (BIN / "todo-server.py").read_text())
+        self.assertIn("followRelease(data.version)", PAGE)
+
+
 class ServerSaysWhichTilesAreLive(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

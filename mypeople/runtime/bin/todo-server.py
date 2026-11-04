@@ -910,7 +910,8 @@ class Handler(C.JSONHandler):
         # ttyd, and a hardcoded port silently renders every tile dead wherever ttyd was moved.
         return {"nodes": nodes, "edges": edges,
                 "readonly_port": int(CFG["TTYD_RO_PORT"]),
-                "interactive_port": int(CFG["TTYD_BROWSER_PORT"]), "ts": now()}
+                "interactive_port": int(CFG["TTYD_BROWSER_PORT"]), "ts": now(),
+                "version": "v" + C.version()}
 
     def _board_view(self):
         board = load_board()
