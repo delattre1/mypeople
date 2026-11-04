@@ -94,8 +94,9 @@ TTYD_CLIENT_OPTS="-t disableLeaveAlert=true"
 # 2026-08-11: one ttyd holding 414 ptys, 410 of its children terminated-but-unreaped.
 # 1.7.7 is current stable, so there is no upgrade; recycle the viewer instead. Keyed on the count
 # of TERMINATED children (macOS STAT `E`, Linux `Z`) — never on total children, which is just the
-# live tile count and scales with the fleet. ttyd is a stateless viewer and browsers reconnect on
-# their own, so a recycle costs a blink; `ensure` below respawns it within one loop.
+# live tile count and scales with the fleet. ttyd is a stateless viewer and `ensure` below respawns it
+# within one loop. Its browser client does not reconnect by itself; the Graph page reloads a tile with
+# no viewer session (healTile in terminal-graph.html), so a recycle costs the tiles about half a minute.
 TTYD_MAX_DEAD_CHILDREN="${TTYD_MAX_DEAD_CHILDREN:-20}"
 recycle_leaked_ttyd(){
   local pat="$1" pid dead
@@ -114,7 +115,7 @@ while true; do
   ensure "$BIN/queue-client.py"            "exec python3 '$BIN/queue-client.py'"
   ensure "$BIN/board-exporter.py"          "exec python3 '$BIN/board-exporter.py'"
   ensure "ttyd -W -a -p $TTYD_PORT"        "exec ttyd -W -a -p $TTYD_PORT $TTYD_CLIENT_OPTS '$BIN/ttyd-attach.sh'"
-  ensure "ttyd -a -p $TTYD_RO_PORT"        "exec ttyd -a -p $TTYD_RO_PORT $TTYD_CLIENT_OPTS '$BIN/ttyd-attach.sh'"
+  ensure "ttyd -a -p $TTYD_RO_PORT"        "exec ttyd -a -p $TTYD_RO_PORT $TTYD_CLIENT_OPTS '$BIN/ttyd-attach.sh' --viewer"
   ensure "$BIN/boss-supervisor.sh"         "exec bash '$BIN/boss-supervisor.sh'"
   # Cron: each schedule is one `mp send` on a timer (mp cron add/ls/rm). Idle when none exist.
   ensure "$BIN/mp cron serve$"             "exec python3 '$BIN/mp' cron serve"

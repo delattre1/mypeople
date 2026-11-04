@@ -370,6 +370,29 @@ def _tmux_window_sizes():
     return sizes
 
 
+def _tmux_viewers():
+    """Live viewer sessions per window name, or None if tmux could not say.
+
+    A tile is a `_v_<tab>_<pid>_<random>` session (ttyd-attach.sh), so this is how the page learns
+    a tile died: its frame is cross-origin and ttyd's client never reconnects. None is not zero:
+    a tmux hiccup must not make the page reload every tile.
+    """
+    try:
+        out = subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}"],
+                             capture_output=True, text=True, timeout=4,
+                             env={**os.environ, "TMUX": ""})
+        if out.returncode != 0:
+            return None
+    except Exception:
+        return None
+    viewers = {}
+    for name in out.stdout.split():
+        if name.startswith("_v_"):
+            tab = name[3:].rsplit("_", 2)[0]
+            viewers[tab] = viewers.get(tab, 0) + 1
+    return viewers
+
+
 # ---------------- board->Boss ping ----------------
 def mp_path():
     return shutil.which("mp") or os.path.join(INSTALL_DIR, "bin", "mp")
@@ -865,6 +888,7 @@ class Handler(C.JSONHandler):
         roster_by_id = {r.get("agent_id", ""): r for r in roster}
         live_ids = {a.get("agent_id", "") for a in agents if a.get("state", "alive") == "alive"}
         sizes = _tmux_window_sizes()
+        viewers = _tmux_viewers()
         nodes = []
         for a in agents:
             aid = a.get("agent_id", ""); rr = roster_by_id.get(aid, {})
@@ -876,6 +900,8 @@ class Handler(C.JSONHandler):
                           "state": a.get("status", "ready"), "summary": a.get("summary", ""),
                           "target": target, "host": rr.get("host") or a.get("host", ""),
                           "cols": cols or 160, "rows": rows or 48})
+            if viewers is not None:  # tmux turns . and : into _ in a session name
+                nodes[-1]["viewers"] = viewers.get(target.split(":", 1)[-1].replace(".", "_"), 0)
         nodes.sort(key=lambda n: (not n["is_master"], n["agent_id"]))
         node_ids = {n["agent_id"] for n in nodes}
         edges = [{"from": n["boss_id"], "to": n["agent_id"]} for n in nodes
