@@ -310,7 +310,7 @@ def is_birth_zombie(aid, rr, now=None):
     if not rr or rr.get("retired") or rr.get("is_master"):
         return False
     _, sess, tab = C.parse_agent_id(aid)
-    if not sess or not tab or not window_exists(sess, tab):
+    if not sess or not tab:
         return False
     st = read_agent_status(aid)
     sid = (st.get("session_id") or rr.get("session_id") or "").strip()
@@ -324,6 +324,8 @@ def is_birth_zombie(aid, rr, now=None):
         return False
     if (now - ts) < ZOMBIE_STARTING_SEC:
         return False
+    if not window_exists(sess, tab):
+        return False
     if pane_looks_working(aid):
         return False
     # codex fires SessionStart only with its first prompt, so an idle codex TUI has no session
@@ -335,9 +337,21 @@ def is_birth_zombie(aid, rr, now=None):
 
 
 def window_exists(sess, tab):
-    r = subprocess.run(["tmux", "list-windows", "-t", "mc-%s" % sess, "-F", "#{window_name}"],
-                       capture_output=True, text=True)
+    r = C.tmux_run("list-windows", "-t", "mc-%s" % sess, "-F", "#{window_name}", text=True)
     return r.returncode == 0 and tab in r.stdout.split()
+
+
+def start_tmux_session(args, e):
+    """`tmux new-session` that cannot strand the fleet.
+
+    Refused by a stalled server, a plain new-session deletes the socket and starts a second server,
+    rc 0, leaving every agent running where nothing can reach them. -N never starts one, so a new
+    server is only started once tmux_server_gone says nothing is there.
+    """
+    r = C.tmux_run("-N", "new-session", *args, env=e, text=True)
+    if r.returncode != 0 and C.tmux_server_gone(e):
+        r = subprocess.run(["tmux", "new-session"] + list(args), env=e, capture_output=True, text=True)
+    return r
 
 
 def close_agent_window(sess, tab, e):
@@ -431,8 +445,7 @@ def window_runs_launched_agent(sess, tab, backend):
 
 
 def session_exists(sess):
-    return subprocess.run(["tmux", "has-session", "-t", "mc-%s" % sess],
-                          capture_output=True).returncode == 0
+    return C.tmux_run("has-session", "-t", "mc-%s" % sess).returncode == 0
 
 
 def tmux_env():
@@ -483,7 +496,7 @@ def start_recorder(tab, sess, previous=None):
     inner = "TMUX= tmux attach -rt mc-%s:%s" % (sess, tab)
     cmd = "asciinema rec --quiet --append -c %s %s" % (shlex.quote(inner), shlex.quote(cast))
     try:
-        r = subprocess.run(["tmux", "new-session", "-d", "-s", rec_sess, cmd], env=e,
+        r = subprocess.run(["tmux", "-N", "new-session", "-d", "-s", rec_sess, cmd], env=e,
                            capture_output=True, timeout=10)
         if r.returncode != 0:
             return None
@@ -837,8 +850,11 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
             print("mp spawn: %s already running a launched %s agent, reusing" % (aid, backend))
     else:
         if not session_exists(sess):
-            subprocess.run(["tmux", "new-session", "-d", "-s", "mc-%s" % sess, "-n", tab,
-                            "-c", cwd, launch], env=e, capture_output=True)
+            started = start_tmux_session(["-d", "-s", "mc-%s" % sess, "-n", tab, "-c", cwd, launch], e)
+            if started.returncode != 0:
+                print("ERROR: mp spawn: tmux refused a new session for %s: %s"
+                      % (aid, (started.stderr or "").strip()), file=sys.stderr)
+                return 1
             subprocess.run(["tmux", "set-option", "-g", "-t", "mc-%s" % sess, "automatic-rename", "off"],
                            env=e, capture_output=True)
         else:
@@ -1210,6 +1226,9 @@ def do_ensure_boss(argv):
         return 2
     aid = full_aid(aid_arg)
     _, sess, tab = C.parse_agent_id(aid)
+    if C.tmux_windows() is None:
+        print("tmux is not answering; leaving %s alone" % aid)
+        return 0
     # "Window is there" was the whole liveness test, so a Boss window holding a bare `claude` from
     # the interactive auth step was adopted as-is and never relaunched with its bypass flag. Only a
     # window that actually runs a launched agent counts as alive; an undeterminable pane is left
@@ -1367,6 +1386,10 @@ def do_reconcile(argv):
     Also reaps birth-zombies (card 157dcb7c75): live window, empty session_id, status stuck at
     starting longer than ZOMBIE_STARTING_SEC -- kill + fresh spawn + owner-task brief.
     """
+    windows = C.tmux_windows()
+    if windows is None:
+        print("reconcile skipped: tmux is not answering")
+        return 0
     roster = load_roster()
     recovered, failed, zombies = [], [], []
     now = time.time()
@@ -1399,7 +1422,13 @@ def do_reconcile(argv):
             roster = load_roster()
             continue
 
-        if window_exists(sess, tab):
+        if "mc-%s:%s" % (sess, tab) in windows:
+            continue
+        # The roster holds every agent ever retired. Asking tmux and rereading the 700 KB roster for
+        # each of those, every 15 s, cost more than the whole live fleet.
+        if rr.get("retired") and rr.get("retire_reason", "") not in ACCIDENTAL_REASONS:
+            continue
+        if window_exists(sess, tab):  # started after the snapshot above
             continue
         # This pass's snapshot can predate an `mp kill` made while an earlier agent was being
         # respawned (seconds each); deciding on it revived killed agents. mp kill retires before

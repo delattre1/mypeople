@@ -96,6 +96,9 @@ class EnsureBossLivenessTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.mp = load_mp(self.tmp.name)
+        readable = mock.patch.object(self.mp.C, "tmux_windows", return_value=set())
+        readable.start()
+        self.addCleanup(readable.stop)
 
     def test_broken_boss_window_is_not_reported_alive(self):
         """The first-run bug: window present, no launched agent, ensure-boss declared victory."""

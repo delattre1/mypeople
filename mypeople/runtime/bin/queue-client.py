@@ -32,14 +32,6 @@ def attach_base():
     return base.rstrip("/")
 
 
-def window_alive(sess, tab):
-    r = subprocess.run(["tmux", "list-windows", "-t", "mc-%s" % sess, "-F", "#{window_name}"],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        return False
-    return tab in r.stdout.split()
-
-
 def status_summary(aid):
     _, sess, tab = C.parse_agent_id(aid)
     p = os.path.join(STATUS_DIR, "mc-%s" % sess, "%s.json" % tab)
@@ -63,6 +55,10 @@ def auth_health():
 def live_agents():
     """Re-announce every live agent from the durable roster. Robust to a session/tab-less roster:
     derive session/tab from the agent_id itself when the roster fields are missing (§3)."""
+    windows = C.tmux_windows()
+    if windows is None:  # tmux is stalled: this says nothing about any agent, so announce and retire nobody
+        return []
+    tmux_sessions = {w.split(":", 1)[0] for w in windows}
     roster = C.read_json_tracked(ROSTER_PATH, {}) or {}
     health = auth_health()
     node_unauthenticated = health.get("state") == authcheck.DEAD
@@ -76,10 +72,11 @@ def live_agents():
         tab = rr.get("tab") or dtab
         if not (sess and tab):
             continue
-        if not window_alive(sess, tab):
+        if "mc-%s:%s" % (sess, tab) not in windows:
             gone.append((aid, sess, tab))
             continue
-        current_recorder = C.current_recorder(sess, tab, HOST_ID)
+        current_recorder = (C.current_recorder(sess, tab, HOST_ID)
+                            if C.recorder_identity(sess, tab, HOST_ID)["session"] in tmux_sessions else None)
         if current_recorder and rr.get("recorder", {}).get("pid") != current_recorder["pid"]:
             prior_recorder = rr.get("recorder")
             if prior_recorder:
@@ -102,9 +99,10 @@ def live_agents():
         # as it is NOW. Written from the read above, a record killed meanwhile came back as
         # "died-no-window" -- an accidental reason -- and reconcile revived it (delattre1/mypeople#39).
         roster = C.read_json_tracked(ROSTER_PATH, {}) or {}
-        for aid, sess, tab in gone:
+        windows = C.tmux_windows() if gone else set()
+        for aid, sess, tab in gone if windows is not None else ():
             rr = roster.get(aid)
-            if not rr or rr.get("retired") or window_alive(sess, tab):
+            if not rr or rr.get("retired") or "mc-%s:%s" % (sess, tab) in windows:
                 continue
             try:
                 rr["recorder_stop"] = C.stop_recorder(
@@ -122,16 +120,30 @@ def live_agents():
     return out
 
 
-def heartbeat_loop():
+def heartbeat(agents=()):
+    C.http_json("POST", QUEUE_URL + "/heartbeat", {
+        "hostname": HOST_ID, "attach_base": attach_base(), "substrate_ready": True,
+        "purpose": CFG.get("NODE_PURPOSE", "mypeople"),
+        "node_type": CFG.get("NODE_TYPE", "system-agent"),
+        "recording_url": CFG.get("NODE_RECORDING_URL", ""),
+        "state": "ready", "agents": list(agents),
+    }, HDR, timeout=8)
+
+
+def liveness_loop():
+    """"This host is up" never waits for the census below: a slow tmux or a 90 s auth probe in there
+    held the only heartbeat past the queue's 45 s, and it dropped the whole host (card a4607576c1)."""
     while True:
-        body = {
-            "hostname": HOST_ID, "attach_base": attach_base(), "substrate_ready": True,
-            "purpose": CFG.get("NODE_PURPOSE", "mypeople"),
-            "node_type": CFG.get("NODE_TYPE", "system-agent"),
-            "recording_url": CFG.get("NODE_RECORDING_URL", ""),
-            "state": "ready", "agents": live_agents(),
-        }
-        C.http_json("POST", QUEUE_URL + "/heartbeat", body, HDR, timeout=8)
+        heartbeat()
+        time.sleep(INTERVAL)
+
+
+def census_loop():
+    while True:
+        try:
+            heartbeat(live_agents())
+        except Exception as exc:  # liveness keeps beating, so a dead census would otherwise look healthy
+            print("census failed: %s" % exc, flush=True)
         time.sleep(INTERVAL)
 
 
@@ -211,7 +223,8 @@ def poll_loop():
 
 
 def main():
-    threading.Thread(target=heartbeat_loop, daemon=True).start()
+    threading.Thread(target=liveness_loop, daemon=True).start()
+    threading.Thread(target=census_loop, daemon=True).start()
     poll_loop()
 
 

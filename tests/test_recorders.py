@@ -146,7 +146,7 @@ class RecorderLifecycleTests(unittest.TestCase):
                 "recorder": metadata, "retired": False,
             }}))
             stopped = {"validated": [4242], "survivors": []}
-            with mock.patch.object(queue, "window_alive", return_value=False), \
+            with mock.patch.object(queue.C, "tmux_windows", return_value=set()), \
                  mock.patch.object(queue, "auth_health", return_value={"state": "live"}), \
                  mock.patch.object(queue.C, "stop_recorder", return_value=stopped) as stop:
                 self.assertEqual([], queue.live_agents())
@@ -166,12 +166,12 @@ class RecorderLifecycleTests(unittest.TestCase):
             Path(queue.ROSTER_PATH).write_text(json.dumps({aid: {
                 "agent_id": aid, "session": "main", "tab": "eng-1", "retired": False}}))
 
-            def window_alive(sess, tab):   # mp kill lands while the heartbeat probes this window
+            def tmux_windows():   # mp kill lands while the heartbeat probes
                 roster = json.loads(Path(queue.ROSTER_PATH).read_text())
                 roster[aid].update(retired=True, retire_reason="killed")
                 Path(queue.ROSTER_PATH).write_text(json.dumps(roster))
-                return False
-            with mock.patch.object(queue, "window_alive", window_alive), \
+                return set()
+            with mock.patch.object(queue.C, "tmux_windows", tmux_windows), \
                  mock.patch.object(queue, "auth_health", return_value={"state": "live"}), \
                  mock.patch.object(queue.C, "stop_recorder", return_value={}):
                 self.assertEqual([], queue.live_agents())
@@ -191,7 +191,8 @@ class RecorderLifecycleTests(unittest.TestCase):
                 "agent_id": aid, "session": "main", "tab": "eng-1",
                 "recorder": old, "retired": False,
             }}))
-            with mock.patch.object(queue, "window_alive", return_value=True), \
+            with mock.patch.object(queue.C, "tmux_windows",
+                                   return_value={"mc-main:eng-1", current["session"] + ":x"}), \
                  mock.patch.object(queue, "auth_health", return_value={"state": "live"}), \
                  mock.patch.object(queue.C, "current_recorder", return_value=current), \
                  mock.patch.object(queue.C, "stop_recorder", return_value={}) as stop:

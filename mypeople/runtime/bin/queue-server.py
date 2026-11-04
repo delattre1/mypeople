@@ -10,6 +10,7 @@ import mpcommon as C
 
 CFG = C.CFG
 INSTALL_DIR = CFG["INSTALL_DIR"]
+HOST_ID = CFG["HOST_ID"]
 HUD_PORT = int(CFG["HUD_PORT"])
 TODO_PORT = int(CFG["TODO_PORT"])
 DEAD_AFTER = float(CFG["QUEUE_DEAD_AFTER"])
@@ -103,25 +104,33 @@ def agent_row(aid, rec):
     return row
 
 
+def reap(t):
+    # This host's own client going quiet means this Mac is slow or the client is restarting, not that
+    # its agents died: reaping them emptied the Graph at load 94 with all 35 alive (card a4607576c1).
+    # A retired agent leaves through /agents/unregister, whatever the heartbeat is doing.
+    dead_hosts = [h for h, c in CLIENTS.items() if h != HOST_ID and t - c.get("last_seen", 0) > CLIENT_TTL]
+    for h in dead_hosts:
+        del CLIENTS[h]
+    # prune agents whose host is gone/stale
+    for aid in list(AGENTS.keys()):
+        rec = AGENTS[aid]
+        h = rec.get("host", "")
+        if h == HOST_ID:
+            continue
+        c = CLIENTS.get(h)
+        if not c or (t - c.get("last_seen", 0) > DEAD_AFTER):
+            del AGENTS[aid]
+    # expire delivered tasks older than 5m
+    for tid in list(TASKS.keys()):
+        if TASKS[tid].get("done_ts") and t - TASKS[tid]["done_ts"] > 300:
+            del TASKS[tid]
+
+
 def reaper():
     while True:
         time.sleep(5)
         with LOCK:
-            t = now()
-            dead_hosts = [h for h, c in CLIENTS.items() if t - c.get("last_seen", 0) > CLIENT_TTL]
-            for h in dead_hosts:
-                del CLIENTS[h]
-            # prune agents whose host is gone/stale
-            for aid in list(AGENTS.keys()):
-                rec = AGENTS[aid]
-                h = rec.get("host", "")
-                c = CLIENTS.get(h)
-                if not c or (t - c.get("last_seen", 0) > DEAD_AFTER):
-                    del AGENTS[aid]
-            # expire delivered tasks older than 5m
-            for tid in list(TASKS.keys()):
-                if TASKS[tid].get("done_ts") and t - TASKS[tid]["done_ts"] > 300:
-                    del TASKS[tid]
+            reap(now())
 
 
 def upsert_agents(host, agents):

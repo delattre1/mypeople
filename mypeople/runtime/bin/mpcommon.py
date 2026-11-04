@@ -702,12 +702,11 @@ def pane_input_state(target):
     reads "ready": there is no composer shape to hold it to."""
     env = dict(os.environ)
     env.pop("TMUX", None)
-    if subprocess.run(["tmux", "list-panes", "-t", target], env=env, capture_output=True).returncode != 0:
+    if tmux_run("list-panes", "-t", target, env=env).returncode != 0:
         return "no_pane"
     if _target_backend(target) != "claude":
         return "ready"
-    screen = subprocess.run(["tmux", "capture-pane", "-e", "-p", "-t", target],
-                            env=env, capture_output=True, text=True).stdout or ""
+    screen = tmux_run("capture-pane", "-e", "-p", "-t", target, env=env, text=True).stdout or ""
     return "ready" if claude_composer_ready(screen) else "not_ready"
 
 
@@ -743,6 +742,66 @@ def retired_note(target):
                rr.get("retire_reason") or "mp kill", aid))
 
 
+# tmux serves on one thread with about 128 connections queued behind it. While it is stalled, a client
+# past that queue is refused and says "no server running", rc 1, in 0.03 s, with the server alive
+# (card a4607576c1). So a stall reads as no pane, no window and no session at once, and acting on that
+# is what must never happen. Short enough that three tries still fit plow-chat's 30 s around mp send.
+TMUX_STALL_WAIT = 8.0
+TMUX_REFUSED = ("no server running", "error connecting")
+
+
+def tmux_server_gone(env=None):
+    """True when no server can be behind the socket, False when it may only be stalled.
+
+    ponytail: any daemonized tmux counts, so a private `tmux -L` server beside a crashed default one
+    holds recovery back until it exits. Naming the socket's owner needs lsof, not on every node.
+    """
+    env = os.environ if env is None else env
+    path = os.path.join(env.get("TMUX_TMPDIR") or "/tmp", "tmux-%d" % os.getuid(), "default")
+    if not os.path.exists(path):
+        return True
+    try:
+        ps = subprocess.run(["ps", "-axo", "ppid=,comm="], capture_output=True, text=True, timeout=5).stdout
+    except subprocess.TimeoutExpired:
+        return False
+    except OSError:
+        return True
+    for line in ps.splitlines():
+        ppid, _, comm = line.strip().partition(" ")
+        if ppid == "1" and os.path.basename(comm.strip()).startswith("tmux"):
+            return False
+    return True
+
+
+def tmux_run(*args, env=None, wait=None, **kw):
+    """Run a tmux command, riding out a stalled server. Returns the last result."""
+    if env is None:
+        env = dict(os.environ)
+        env.pop("TMUX", None)
+    deadline = time.time() + (TMUX_STALL_WAIT if wait is None else wait)
+    while True:
+        r = subprocess.run(["tmux"] + list(args), env=env, capture_output=True, **kw)
+        err = r.stderr.decode("utf-8", "replace") if isinstance(r.stderr, bytes) else str(r.stderr or "")
+        if (r.returncode == 0 or not any(m in err for m in TMUX_REFUSED)
+                or time.time() >= deadline or tmux_server_gone(env)):
+            return r
+        time.sleep(0.25)
+
+
+def tmux_windows(wait=None):
+    """{"mc-main:eng-1", ...} from one tmux call, or None when the server cannot be read right now.
+
+    None is not "no windows": deciding on it would retire and respawn live agents. Forking tmux per
+    agent here and in mp reconcile, retired agents included, was most of 38 tmux commands a second.
+    """
+    env = dict(os.environ)
+    env.pop("TMUX", None)
+    r = tmux_run("list-windows", "-a", "-F", "#{session_name}:#{window_name}", env=env, wait=wait, text=True)
+    if r.returncode == 0:
+        return set(r.stdout.splitlines())
+    return set() if tmux_server_gone(env) else None
+
+
 def pane_key(target, key):
     """Press a key ("Enter", or a literal like "2") for the program in a pane. Returns True on success.
 
@@ -754,7 +813,7 @@ def pane_key(target, key):
     env.pop("TMUX", None)
 
     def tmux(*args, **kw):
-        return subprocess.run(["tmux"] + list(args), env=env, capture_output=True, **kw)
+        return tmux_run(*args, env=env, **kw)
 
     if tmux("display-message", "-p", "-t", target, "#{pane_in_mode}", text=True).stdout.strip() != "1":
         return tmux("send-keys", "-t", target, key).returncode == 0
@@ -794,26 +853,29 @@ def tmux_send_message(target, message):
     buf = "mp-" + base64.urlsafe_b64encode(os.urandom(9)).decode("ascii").rstrip("=")
 
     def tmux(*args, **kw):
-        return subprocess.run(["tmux"] + list(args), env=env, capture_output=True, **kw)
+        return tmux_run(*args, env=env, **kw)
 
+    pasted = False
     for attempt in range(3):
-        state = pane_input_state(target)
-        if state == "no_pane":
-            time.sleep(0.3)
-            continue
-        if state == "not_ready":
-            # Refuse rather than paste into a session that is starting or behind a dialog: the
-            # sender learns it failed and can retry, instead of a "sent" that never arrived.
-            return False
-        if tmux("load-buffer", "-b", buf, "-", input=message.encode("utf-8")).returncode != 0:
-            time.sleep(0.3)
-            continue
-        # -p = bracketed paste markers, -d = drop the buffer once pasted.
-        if tmux("paste-buffer", "-p", "-d", "-b", buf, "-t", target).returncode != 0:
-            tmux("delete-buffer", "-b", buf)
-            time.sleep(0.3)
-            continue
-        time.sleep(0.15)
+        if not pasted:
+            state = pane_input_state(target)
+            if state == "no_pane":
+                time.sleep(0.3)
+                continue
+            if state == "not_ready":
+                # Refuse rather than paste into a session that is starting or behind a dialog: the
+                # sender learns it failed and can retry, instead of a "sent" that never arrived.
+                return False
+            if tmux("load-buffer", "-b", buf, "-", input=message.encode("utf-8")).returncode != 0:
+                time.sleep(0.3)
+                continue
+            # -p = bracketed paste markers, -d = drop the buffer once pasted.
+            if tmux("paste-buffer", "-p", "-d", "-b", buf, "-t", target).returncode != 0:
+                tmux("delete-buffer", "-b", buf)
+                time.sleep(0.3)
+                continue
+            pasted = True  # a retry from here is for the Enter: pasting again would double the message
+            time.sleep(0.15)
         if not pane_key(target, "Enter"):
             time.sleep(0.3)
             continue

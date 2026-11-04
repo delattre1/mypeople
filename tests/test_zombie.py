@@ -134,6 +134,7 @@ class ReconcileKillRaceTests(unittest.TestCase):
                 revived.append(argv[0])
                 return 0
             with mock.patch.object(mp, "is_local", return_value=True), \
+                 mock.patch.object(mp.C, "tmux_windows", return_value=set()), \
                  mock.patch.object(mp, "window_exists", return_value=False), \
                  mock.patch.object(mp, "is_birth_zombie", return_value=False), \
                  mock.patch.object(mp, "do_revive", revive):

@@ -32,6 +32,7 @@ V="_v_${TAB}_${UNIQ}"
 # does, however that happens; SIGHUP is how ttyd closes a viewer.
 trap 'tmux kill-session -t "=$V" 2>/dev/null' EXIT
 trap 'exit 1' HUP TERM INT
-tmux new-session -t "$SESS" -s "$V" \; \
+# -N: refused by a stalled server, a plain new-session starts a second one and strands the fleet.
+tmux -N new-session -t "$SESS" -s "$V" \; \
      select-window -t "$TAB" \; \
      set-option destroy-unattached on
