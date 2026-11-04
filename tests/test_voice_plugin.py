@@ -100,8 +100,8 @@ class Voice(unittest.TestCase):
         th = self.v.Thoughts()
         th.update("", 0.0)
         th.update("eu ligo faço a ligação se eu ficar me", 1.0)          # he pauses mid-word
-        self.assertIsNone(th.due(3.0))
-        th.update("eu ligo faço a ligação se eu ficar melhor entendi o que você quiser comprar.", 3.2)
+        self.assertIsNone(th.due(2.5))
+        th.update("eu ligo faço a ligação se eu ficar melhor entendi o que você quiser comprar.", 2.7)
         self.assertEqual(th.due(5.0), "eu ligo faço a ligação se eu ficar melhor entendi o que você quiser comprar.")
         th.update("eu ligo faço a ligação, se eu ficar melhor, entendi o que você quiser comprar.", 6.0)  # commas only
         self.assertIsNone(th.due(12.0))

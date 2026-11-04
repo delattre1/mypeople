@@ -52,8 +52,8 @@ BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 RUN = f"{sys.executable} {Path(__file__).resolve()}"   # the Boss answers with the python that runs the bridge
 SILENCE_MS = 1500   # a finished sentence ('.', '?', '!') ships after this pause
-LONG_PAUSE_MS = 3500   # an unfinished one waits for a longer pause: 11-01 a 1.5 s pause mid-sentence (even mid-word:
-                       # "me" ... "lhor") shipped half a thought, and Daniel got cut-up lines all day
+LONG_PAUSE_MS = 2000   # an unfinished one waits for a longer pause: 11-01 a 1.5 s pause mid-sentence (even mid-word:
+                       # "me" ... "lhor") shipped half a thought, and Daniel got cut-up lines all day. 3.5 s until 11-04, when he asked for 2 s
 HARD_MS = 30000     # a thought that never pauses still ships
 CUT_PAUSE_S = 0.4   # at the cap, a gap in the words this long is a place to cut; shorter is just the model's pace
 CUT_MIN_WORDS = 4   # never leave a stub of a line at the cap
