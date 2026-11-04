@@ -67,6 +67,23 @@ console.log(JSON.stringify(reloads.map(r=>r[0])));""" % json.dumps(polls)
         self.assertIn("healTile(frame,n,Date.now())", PAGE)
 
 
+class OnlyWhatIsInViewCosts(unittest.TestCase):
+    """At 34 tiles, 11 in view: 2.4 s of attach against 235 ms for 9, and 533 MB of page against 152 MB."""
+
+    def test_a_new_tile_waits_until_it_is_seen(self):
+        self.assertIn("new IntersectionObserver", PAGE)
+        self.assertIn("tileSeen.observe(el)", PAGE)
+        update = re.search(r"function updateNode\(.*?\n", PAGE).group(0)
+        self.assertIn("if(frame.dataset.on)frame.src=", update, "a poll must not attach an unseen tile")
+        self.assertIn("if(frame.dataset.on)healTile", update, "an unseen tile has no viewer and is not dead")
+
+    def test_a_poll_that_changed_nothing_touches_nothing(self):
+        update = re.search(r"function updateNode\(.*?\n", PAGE).group(0)
+        self.assertIn("if(el.dataset.label!==", update)
+        draw = re.search(r"function drawEdges\(\).*?\n", PAGE).group(0)
+        self.assertRegex(draw, r"if\(now===edgesDrawn\)return")
+
+
 class ServerSaysWhichTilesAreLive(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -86,6 +103,24 @@ class ServerSaysWhichTilesAreLive(unittest.TestCase):
         self.assertIsNone(self.viewers("", returncode=1))
         with mock.patch.object(self.srv.subprocess, "run", side_effect=OSError("no tmux")):
             self.assertIsNone(self.srv._tmux_viewers())
+
+
+class AgentsReadsTheRosterOnce(unittest.TestCase):
+    """Every open Graph asks every 2 s. A read per row was 35 parses of 700 KB, 95 ms, under LOCK."""
+
+    def test_the_whole_list_shares_one_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            srv = sandbox.load(tmp, "queue-server.py")
+            srv.AGENTS.update({"h/main:e%d" % i: {"host": "h"} for i in range(5)})
+            reads = []
+            real = srv.load_roster
+            srv.load_roster = lambda: (reads.append(1), real())[1]
+            roster = srv.load_roster()
+            rows = [srv.agent_row(a, r, roster) for a, r in srv.AGENTS.items()]
+            self.assertEqual(5, len(rows))
+            self.assertEqual(1, len(reads))
+        code = (BIN / "queue-server.py").read_text()
+        self.assertIn("agent_row(a, r, roster) for a, r in AGENTS.items()", code)
 
 
 @unittest.skipUnless(shutil.which("tmux"), "needs tmux")

@@ -792,7 +792,7 @@ def tmux_windows(wait=None):
     """{"mc-main:eng-1", ...} from one tmux call, or None when the server cannot be read right now.
 
     None is not "no windows": deciding on it would retire and respawn live agents. Forking tmux per
-    agent here and in mp reconcile, retired agents included, was most of 38 tmux commands a second.
+    agent here and in mp reconcile, retired agents included, was 59% of the commands tmux logged.
     """
     env = dict(os.environ)
     env.pop("TMUX", None)

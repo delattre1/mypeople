@@ -54,7 +54,7 @@ def display_status(raw):
     return s if s in ("idle", "blocked", "working", "starting") else "ready"
 
 
-def agent_row(aid, rec):
+def agent_row(aid, rec, roster=None):
     host = rec.get("host", "")
     client = CLIENTS.get(host, {})
     ab = client.get("attach_base", "") or ""
@@ -68,7 +68,7 @@ def agent_row(aid, rec):
         ab = ""
     tgt = rec.get("tmux_target") or C.tmux_target(aid)
     attach_url = ("%s/?arg=-t&arg=%s" % (ab, tgt)) if ab else ""
-    roster = load_roster()
+    roster = load_roster() if roster is None else roster
     rrec = roster.get(aid, {})
     spawn_cmd = rec.get("spawn_cmd") or rrec.get("spawn_cmd", "")
     model = rec.get("model") or rrec.get("model", "")
@@ -198,7 +198,10 @@ class Handler(C.JSONHandler):
                 return self._send(401, {"error": "unauthorized"})
             with LOCK:
                 if p == "/agents":
-                    return self._send(200, [agent_row(a, r) for a, r in AGENTS.items()])
+                    # One read for the whole list, under LOCK: the roster is 700 KB, every open Graph
+                    # asks every 2 s, and a read per row held the queue 95 ms each time.
+                    roster = load_roster()
+                    return self._send(200, [agent_row(a, r, roster) for a, r in AGENTS.items()])
                 if p == "/clients":
                     return self._send(200, [
                         {"hostname": h, "attach_base": c.get("attach_base", ""),
