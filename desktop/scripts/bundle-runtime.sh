@@ -60,6 +60,11 @@ find "$OUT/pylib" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/nu
 say "bytecode (unchecked-hash)"
 "$OUT/python/bin/python3" -m compileall -q -j 0 --invalidation-mode unchecked-hash "$OUT/python/lib" "$OUT/pylib" >/dev/null
 
+# ---------------------------------------------------------------- the mypeople command
+# boss-supervisor.sh gates the Boss on `mypeople auth-check` and treats an absent `mypeople` as "no gate at all": without this launcher the
+# gate was open on every install and a Boss started before the login ("Not logged in" as its first turn, kept in its persisted session).
+install -m 755 "$HERE/mypeople-launcher.sh" "$OUT/bin/mypeople"
+
 # ---------------------------------------------------------------- native binaries
 # Recursively vendor a Mach-O file's non-system dylibs and repoint its load commands.
 vendor_deps() {
@@ -167,6 +172,12 @@ for probe in "bin/ttyd --version" "bin/tmux -V" "bin/asciinema --version" "pytho
     exit 1
   fi
 done
+
+# The gate's command must RUN: exit 0 = logged in, 1 = not. Anything else (a crash, 127) means the gate would silently open.
+probe_home="$(mktemp -d)"; rc=0
+env -i HOME="$probe_home" PATH=/usr/bin:/bin "$OUT/bin/mypeople" auth-check --quiet >/dev/null 2>&1 || rc=$?
+rm -rf "$probe_home"
+[ "$rc" -le 1 ] || { echo "[bundle] bin/mypeople auth-check exited $rc: the Boss login gate would not work" >&2; exit 1; }
 
 # ttyd --version exits before libwebsockets ever builds its event loop, so the probe above says
 # "runs" for a ttyd that cannot serve a single tile. Start it for real and fetch a page: that is
