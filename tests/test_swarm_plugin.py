@@ -82,6 +82,21 @@ class SwarmPlugin(unittest.TestCase):
         self.assertIn("(This is the owner. When the owner addresses you", own)
         self.assertNotIn("This is the owner", self.s.envelope(dict(m, sender=OWNER), "", self.cfg), "an unknown owner is nobody")
 
+    def test_only_what_is_for_this_boss_reaches_it(self):
+        self.s.ROOMS.update({"!general": "general", "!competitors": "Competitors", "!dm": ""})
+        m = lambda chat, text, **k: dict({"chat": chat, "content": text, "sender": "@cos:x", "thread": "$t"}, **k)
+        meant = lambda x: self.s.meant_for(x, ME, OWNER)
+        self.assertTrue(meant(m("!dm", "anything at all")), "a direct message")
+        self.assertFalse(meant(m("!competitors", "Samsung Food: AI recipes")), "a room's traffic stays unread")
+        self.assertTrue(meant(m("!general", "Pirata, can you check this?")))
+        self.assertTrue(meant(m("!general", "ask daniel@plow.co first")))
+        self.assertTrue(meant(m("!general", "Daniel's call")))
+        self.assertFalse(meant(m("!general", "the piratas of the danielle cup")), "a name inside another word is not a name")
+        self.assertTrue(meant(m("!general", "diagnostics", on_behalf_of=OWNER)))
+        self.assertFalse(meant(m("!general", "later in that thread", thread="$mine")))
+        self.s.posted_in("$mine")
+        self.assertTrue(meant(m("!general", "later in that thread", thread="$mine")), "a thread it posted in")
+
     def test_kept_until_the_boss_has_it_in_order(self):
         told, up = [], [False]
         send = lambda text: up[0] and (told.append(text) or True)
@@ -110,6 +125,7 @@ class SwarmPlugin(unittest.TestCase):
         self.assertEqual({"name": "reply", "arguments": {"chat": "!dm", "text": "so, done", "thread": "$t1", "file": "/tmp/a.png"}},
                          self.calls_made()[-1])
         self.assertEqual([], list((self.dir / "state" / "outbox").glob("*")))
+        self.assertIn("$t1", self.s.read_json(self.s.THREADS, []), "its answers bring that thread to its Boss")
 
     def test_with_no_bridge_an_answer_is_sent_directly(self):
         self.assertEqual(0, self.s.reply(["!dm", "$root", "so,", "done"]))

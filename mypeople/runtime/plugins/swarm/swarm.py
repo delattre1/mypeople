@@ -5,7 +5,8 @@ to the Boss, as Plow Chat does for texts.
 Pushed, not polled: one `swarm mcp` process holds the credential, keeps the server's sync open (Matrix long-poll; the server offers
 no websocket) and pushes each message, decrypted, the moment it lands. This bridge is its MCP client: every message is kept in a
 spool before it is handed to the Boss with mp send, so a Boss that is down loses nothing, and the Boss's answers go back through
-the same process with its `reply` tool, in the message's thread. One process, because the CLI allows one per credential and
+the same process with its `reply` tool, in the message's thread. Only what is for this Boss is handed over: a direct message,
+one naming it or its owner, or a thread it has posted in; the rest of every room stays with the agent's rooms, unread here. One process, because the CLI allows one per credential and
 refuses `swarm send` while it runs. Who the owner is comes from the credential's own Agent Card (swarm.owner).
 
   swarm.py setup <credential.json>                  use this Swarm credential (the one `swarm join` saved)
@@ -17,6 +18,7 @@ refuses `swarm send` while it runs. Who the owner is comes from the credential's
 import itertools
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,6 +37,7 @@ CONFIG = STATE / "config.json"       # {"credential": "/path/to/<name>.json"}
 SPOOL = STATE / "spool"              # one file per message not yet handed to the Boss
 OUTBOX = STATE / "outbox"            # one file per answer for the bridge to send; <id>.done holds how it went
 PIDFILE = STATE / "serve.pid"
+THREADS = STATE / "threads.json"     # threads this credential has posted in: what is said in them is for its Boss
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
@@ -141,6 +144,38 @@ def envelope(m, owner, cfg):
     })
 
 
+def names(user_id):
+    """What a member is called in text: '@daniel=40plow.co:plow.swarm.plow.co' -> the id, 'daniel@plow.co' and 'daniel'."""
+    local = user_id.lstrip("@").split(":", 1)[0].replace("=40", "@")
+    return {n.lower() for n in (user_id, local, local.split("@", 1)[0]) if n}
+
+
+def meant_for(m, mine, owner):
+    """Only what is for this Boss: a direct message, one naming it or its owner (or asking on the owner's behalf), or a
+    thread it has posted in. Everything else in every room would reach the Boss too, dozens a minute (11-05), and stays
+    unread here: the agent reads its rooms, it does not answer them."""
+    if not room_name_cached(m):
+        return True
+    said = (m.get("content") or "").lower()
+    who = names(mine) | (names(owner) if owner else set())
+    if any(re.search(r"(?<![\w@.])%s(?![\w])" % re.escape(n), said) for n in who):
+        return True
+    if owner and m.get("on_behalf_of") == owner:
+        return True
+    return m.get("thread", "") in set(read_json(THREADS, []))
+
+
+def room_name_cached(m):
+    return ROOMS.get(m.get("chat", ""), "") if m.get("chat", "") in ROOMS else None
+
+
+def posted_in(*events):
+    """Remember threads this credential posted in, so their answers reach its Boss."""
+    with LOCK:
+        known = read_json(THREADS, [])
+        write_json(THREADS, (known + [e for e in events if e and e not in known])[-500:])
+
+
 def send_to_boss(text):
     try:
         r = subprocess.run([sys.executable, MP_BIN, "send", BOSS, text], capture_output=True, text=True, timeout=60)
@@ -225,7 +260,10 @@ def send_reply(mcp, req):
         return {"ok": False, "text": str(e)}
     res = r.get("result") or {}
     text = " ".join(c.get("text", "") for c in res.get("content", []) if c.get("type") == "text") or json.dumps(r.get("error") or res)[:300]
-    return {"ok": not r.get("error") and not res.get("isError"), "text": text}
+    ok = not r.get("error") and not res.get("isError")
+    if ok:
+        posted_in(req.get("thread"), *re.findall(r"\$[\w-]+", text))
+    return {"ok": ok, "text": text}
 
 
 def outbox(get_mcp, stop):
@@ -246,6 +284,9 @@ def bridge(cfg, owner, send=send_to_boss):
 
     def on_message(m):
         if m.get("sender") == mine:
+            return
+        room_name(cfg, m.get("chat", ""))
+        if not meant_for(m, mine, owner):
             return
         keep(m)
         deliver(owner, cfg, send)
@@ -270,6 +311,12 @@ def bridge(cfg, owner, send=send_to_boss):
 def serve():
     cfg = config()
     owner = owner_of(cfg)
+    mine = credential(cfg).get("user_id", "")
+    for path in sorted(SPOOL.glob("*.json")) if SPOOL.is_dir() else []:
+        m = read_json(path, {})
+        room_name(cfg, m.get("chat", ""))
+        if not meant_for(m, mine, owner):
+            path.unlink()
     write_json(PIDFILE, {"pid": os.getpid()})
     log("bridging %s to %s; owner %s" % (credential(cfg).get("user_id"), BOSS, owner or "unknown: nobody is treated as the owner"))
 
@@ -321,6 +368,8 @@ def reply(args):
     cmd = [swarm_bin(), "send", req["chat"], req["text"], "--thread", req["thread"]] + (["--file", req["file"]] if req["file"] else [])
     r = subprocess.run(cmd + ["--credential", cfg["credential"]], capture_output=True, text=True, timeout=120)
     print((r.stdout or r.stderr).strip()[-300:] or ("sent" if r.returncode == 0 else "not sent"))
+    if r.returncode == 0:
+        posted_in(req["thread"], *re.findall(r"\$[\w-]+", r.stdout or ""))
     return r.returncode
 
 
