@@ -34,6 +34,8 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: 3559PD337Z
+      # The oldest macOS the app runs on: 169's. Homebrew keeps no bottles for it, so what the app carries is built here for it.
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,7 +45,7 @@ jobs:
       # Nothing here is needed on the machine that installs the DMG.
       - name: Tools to vendor
         run: |
-          brew install ttyd tmux asciinema
+          brew install cmake pkgconf
           curl -LsSf https://astral.sh/uv/install.sh | sh
           ~/.local/bin/uv python install 3.13
           cargo install tauri-cli --version "^2" --locked
@@ -64,6 +66,12 @@ jobs:
           [ -n "$IDENTITY" ] || { echo "no Developer ID Application identity in the certificate" >&2; exit 1; }
           echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
+      - name: Build what the app carries for macOS 14
+        run: |
+          desktop/scripts/build-floor.sh "$RUNNER_TEMP/floor"
+          echo "$RUNNER_TEMP/floor/bin" >> "$GITHUB_PATH"
+          echo "DEPS=$RUNNER_TEMP/floor" >> "$GITHUB_ENV"
+
       - name: Bundle the runtime
         run: PYTHON_SRC="$(~/.local/bin/uv python find 3.13 | xargs dirname | xargs dirname)" desktop/scripts/bundle-runtime.sh
 
@@ -75,6 +83,11 @@ jobs:
                 xargs -0 -n 1 vtool -show-build 2>/dev/null | awk '/minos/{print $2}' | sort -V | tail -1)
           [ -n "$MIN" ] || { echo "no minos read from the carried binaries" >&2; exit 1; }
           echo "carried binaries need macOS $MIN or newer"
+          # Never above the floor: a Mac that ran 169 must run this.
+          [ "$(printf '%s\n%s\n' "$MIN" "$MACOSX_DEPLOYMENT_TARGET" | sort -V | tail -1)" = "$MACOSX_DEPLOYMENT_TARGET" ] || {
+            find desktop/src-tauri/runtime -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 |
+              xargs -0 -n 1 sh -c 'v=$(vtool -show-build "$0" 2>/dev/null | awk "/minos/{print \$2}"); [ -n "$v" ] && echo "$v $0"' | sort -V | tail -5 >&2
+            echo "carried binaries need macOS $MIN, above the floor $MACOSX_DEPLOYMENT_TARGET" >&2; exit 1; }
           echo "MIN_MACOS=$MIN" >> "$GITHUB_ENV"
 
       - name: Build, sign and notarize

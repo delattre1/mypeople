@@ -16,6 +16,8 @@ LWS_VERSION=4.3.5
 TTYD_VERSION=1.7.7
 CMAKE="${CMAKE:-cmake}"
 BREW="$(brew --prefix)"
+# DEPS: one prefix holding libuv, json-c and OpenSSL built for an older macOS (build-floor.sh); without it, Homebrew's.
+UV="${DEPS:-$BREW/opt/libuv}"; JSONC="${DEPS:-$BREW/opt/json-c}"; SSL="${DEPS:-$BREW/opt/openssl@3}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 say() { printf '[ttyd] %s\n' "$*"; }
@@ -29,8 +31,8 @@ $CMAKE -S "$WORK/libwebsockets-$LWS_VERSION" -B "$WORK/lws-build" -DCMAKE_BUILD_
   -DLWS_WITHOUT_TESTAPPS=ON -DLWS_WITHOUT_CLIENT=ON -DLWS_UNIX_SOCK=ON -DLWS_IPV6=ON \
   -DLWS_WITH_HTTP2=ON -DLWS_WITH_UDP=OFF -DLWS_ROLE_RAW_FILE=OFF \
   -DLWS_WITH_LEJP=OFF -DLWS_WITH_LEJP_CONF=OFF -DLWS_WITH_LWSAC=OFF -DLWS_WITH_SEQUENCER=OFF \
-  -DLIBUV_INCLUDE_DIRS="$BREW/opt/libuv/include" -DLIBUV_LIBRARIES="$BREW/opt/libuv/lib/libuv.dylib" \
-  -DOPENSSL_ROOT_DIR="$BREW/opt/openssl@3" >/dev/null
+  -DLIBUV_INCLUDE_DIRS="$UV/include" -DLIBUV_LIBRARIES="$UV/lib/libuv.dylib" \
+  -DOPENSSL_ROOT_DIR="$SSL" >/dev/null
 $CMAKE --build "$WORK/lws-build" --target install -j 4 >/dev/null
 # Its exported config names the shared library too, which a static-only build never makes, and
 # ttyd links whatever that list says.
@@ -41,7 +43,7 @@ perl -pi -e 's/ websockets_shared//' "$cfg"
 say "ttyd $TTYD_VERSION"
 curl -fsSL "https://github.com/tsl0922/ttyd/archive/refs/tags/$TTYD_VERSION.tar.gz" | tar -xz -C "$WORK"
 $CMAKE -S "$WORK/ttyd-$TTYD_VERSION" -B "$WORK/ttyd-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-  -DCMAKE_PREFIX_PATH="$WORK/lws;$BREW/opt/libuv;$BREW/opt/json-c;$BREW/opt/openssl@3" >/dev/null
+  -DCMAKE_PREFIX_PATH="$WORK/lws;$UV;$JSONC;$SSL" >/dev/null
 $CMAKE --build "$WORK/ttyd-build" -j 4 >/dev/null
 
 mkdir -p "$OUT"
