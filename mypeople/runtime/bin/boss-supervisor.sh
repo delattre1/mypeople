@@ -15,7 +15,14 @@ export TMUX=
 # standalone) means no gate at all -- i.e. the previous behaviour, unchanged.
 LOGIN_GATE=closed
 authenticated(){
-  [ "$LOGIN_GATE" = open ] && return 0
+  if [ "$LOGIN_GATE" = open ]; then
+    # Open stays open, so an agent working is never stopped. But status/auth.json is what the pages' login banner reads, and
+    # nothing else rechecks it: anything that writes "no login" here would show until the next `mypeople up`, true or not.
+    if grep -qE '"authenticated": *false' "${INSTALL_DIR:-$HOME/mypeople}/status/auth.json" 2>/dev/null; then
+      mypeople auth-check --quiet >/dev/null 2>&1
+    fi
+    return 0
+  fi
   command -v mypeople >/dev/null 2>&1 || { LOGIN_GATE=open; return 0; }
   if mypeople auth-check --quiet >/dev/null 2>&1; then
     LOGIN_GATE=open
