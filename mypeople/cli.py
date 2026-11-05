@@ -289,7 +289,9 @@ def cmd_down(args):
 
 # ---------------------------------------------------------------- auth-check
 def _another_home(install):
-    """Is this user's HOME overridden to somewhere that does not hold this install?"""
+    """Is MYPEOPLE_HOME naming an install while this user's HOME is overridden to somewhere that does not hold it?"""
+    if not os.environ.get("MYPEOPLE_HOME"):
+        return False
     try:
         import pwd
         own = pwd.getpwuid(os.getuid()).pw_dir
