@@ -52,7 +52,7 @@ textarea:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
 "use strict";
 // Every value here came from another MyPlow, an agent or an owner's input: textContent and .value only, never markup.
 const msg=document.getElementById("msg"),requests=document.getElementById("requests"),granted=document.getElementById("granted"),paired=document.getElementById("paired"),lineBox=document.getElementById("line");
-let busy=false,shown="",force=false;
+let busy=false,shown="",force=false,kept=false;  // kept: a click's error, which a poll must not wipe
 const opened=new Set();
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
 function fail(status,text){
@@ -98,18 +98,18 @@ async function load(){
     const r=await fetch("/todo/access",{credentials:"same-origin"});
     if(!r.ok)return fail(r.status);
     const d=await r.json();
-    if(!busy){msg.textContent="";render(d)}
+    if(!busy){if(!kept)msg.textContent="";render(d)}
   }catch(e){fail(0)}
 }
 async function post(op,body){
-  busy=true;
+  busy=true;kept=false;
   document.querySelectorAll("main button").forEach(b=>b.disabled=true);
   let d={};
   try{
     const r=await fetch("/todo/access/"+op,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     d=await r.json().catch(()=>({}));
-    if(!r.ok)fail(r.status,d.error);else msg.textContent="";
-  }catch(e){fail(0)}
+    if(!r.ok){kept=true;fail(r.status,d.error)}else msg.textContent="";
+  }catch(e){kept=true;fail(0)}
   busy=false;shown="";force=true;
   document.querySelectorAll("#new button").forEach(b=>b.disabled=false);
   if(d.line)showLine(d.line);

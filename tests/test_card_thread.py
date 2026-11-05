@@ -55,16 +55,26 @@ class CardThreadTests(unittest.TestCase):
         self.post(by="test-node/main:eng-1")
         self.emit.assert_called_once()
 
-    def test_a_plugins_ask_shows_on_the_boss_card_where_the_agent_can_confirm_it(self):
+    def boss_card(self):
         with self.srv.LOCK:
             b = self.srv.load_board()
             b["bossChat"] = "c1"
             self.srv.save_board(b)
-        note = self.srv.Handler._on_boss_card(mock.Mock(), "connect Slack")
-        self.assertIn("mp card c1", note)
+
+    def test_a_plugins_ask_shows_on_the_boss_card_where_the_agent_can_confirm_it(self):
+        self.boss_card()
+        with mock.patch.object(self.srv, "mp_send", return_value=0) as send:
+            self.srv.Handler._ask_agent(mock.Mock(), "context", "connect Slack")
+        self.assertIn("mp card c1", send.call_args[0][1])
         c = self.thread()[-1]
         self.assertEqual((c["by"], c["to"]), ("CEO", self.srv.BOSS_AGENT))
         self.assertIn("connect Slack", c["body"])
+
+    def test_an_ask_that_did_not_get_there_leaves_nothing_on_the_card(self):
+        self.boss_card()
+        with mock.patch.object(self.srv, "mp_send", return_value=1), self.assertRaises(self.srv.mpplugins.PluginError):
+            self.srv.Handler._ask_agent(mock.Mock(), "context", "connect Slack")
+        self.assertEqual(self.thread(), [])
 
 
 if __name__ == "__main__":

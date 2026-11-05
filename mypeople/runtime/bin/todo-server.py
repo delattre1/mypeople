@@ -823,11 +823,10 @@ class Handler(C.JSONHandler):
             try:
                 if p == "/todo/plugins/wrap":
                     mpplugins.save_rule(str(body.get("name") or ""), body.get("text"))
+                elif p.endswith("connect"):
+                    mpplugins.connect_ask(body.get("text"), self._ask_agent)
                 else:
-                    text = (mpplugins.connect_ask(body.get("text")) if p.endswith("connect")
-                            else mpplugins.rule_ask(str(body.get("name") or ""), body.get("text")))
-                    if mp_send(BOSS_AGENT, text + self._on_boss_card(str(body.get("text")))) != 0:
-                        return self._send(400, {"error": "not sent: your agent could not be reached"})
+                    mpplugins.rule_ask(str(body.get("name") or ""), body.get("text"), self._ask_agent)
             except mpplugins.PluginError as e:
                 return self._send(400, {"error": str(e)})
             return self._send(200, {"plugins": mpplugins.listing()})
@@ -846,21 +845,24 @@ class Handler(C.JSONHandler):
                 return self._access(op, host, str(body.get("text") or ""))
         return self._send(404, {"error": "not_found"})
 
-    def _on_boss_card(self, words):
-        """The owner's words on their Boss card: the agent can confirm them there, which no sender can fake, and its
-        answer lands where the owner reads. A careful agent will not act on pasted text that merely says "your owner"."""
+    def _ask_agent(self, text, words):
+        """An ask from the app, to the agent that owns this setup. The owner's words land on the Boss card once it has them:
+        there the agent can confirm them, which no sender can fake, and its answer lands where the owner reads. A careful
+        agent will not act on pasted text that merely says "your owner"."""
+        with LOCK:
+            cid = load_board().get("bossChat")
+        note = ("\nThese words are on your owner's Boss card, written from their app. Confirm with mp card %s, and answer "
+                "there: mp comment %s \"...\"" % (cid, cid)) if cid else ""
+        if mp_send(BOSS_AGENT, text + note) != 0:
+            raise mpplugins.PluginError("not sent: your agent could not be reached")
         with LOCK:
             board = load_board()
-            cid = board.get("bossChat")
             t = board["tasks"].get(cid)
-            if not t:
-                return ""
-            t["comments"].append({"id": uuid.uuid4().hex[:8], "by": "CEO", "to": BOSS_AGENT, "kind": "comment",
-                                  "body": "From the Plugins page: " + words, "ts": now()})
-            t["updated"] = now()
-            save_board(board)
-        return ("\nThese words are on your owner's Boss card, written from their app. Confirm with mp card %s, and answer "
-                "there: mp comment %s \"...\"" % (cid, cid))
+            if t:
+                t["comments"].append({"id": uuid.uuid4().hex[:8], "by": "CEO", "to": BOSS_AGENT, "kind": "comment",
+                                      "body": "From the Plugins page: " + words, "ts": now()})
+                t["updated"] = now()
+                save_board(board)
 
     def _access(self, *op):
         """The a2a plugin owns pairing state: the Access page asks it, as mp pair does."""

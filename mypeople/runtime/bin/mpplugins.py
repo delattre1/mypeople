@@ -8,7 +8,9 @@ folder in plugins/ it does not ship). Its plugin.conf:
   switch=yes                  optional: `SCRIPT off` and `SCRIPT on` are its own switch, and it keeps running while off
   message=yes                 optional: `SCRIPT message` prints what it wraps a message in, for the board's Plugins page
 
-state/<name>/wrap.txt = the owner's own text, added to every message the plugin hands an agent (mpcommon.owner_rule).
+state/<name>/wrap.txt = the owner's own text for what the plugin hands an agent. mp send adds it for the plugin supervise.sh
+named in MP_PLUGIN; a plugin that hands messages over any other way must add mpcommon.owner_rule itself, or, for a locked
+agent that reads all of a stranger's input as data, paste mpcommon.rule_input first.
 The plugin's own lines stay: they carry the reply commands and the sender's trust, stamped here, not by the sender.
 
 state/<name>/off exists = off: supervise.sh won't start it. Setup stays in each plugin's header, so nothing here
@@ -102,7 +104,7 @@ def listing():
         else:
             state = "running" if any(line.endswith(serve) for line in ps) else "down"
         rows.append({"name": name, "state": state, "desc": p["conf"].get("desc", ""), "installed": p["installed"],
-                     "also": also, "rule": rule(name), "asking": os.path.exists(_ask_file(name))})
+                     "also": also, "rule": rule(name), "asking": bool(_open_ask(name))})
     return rows
 
 
@@ -150,6 +152,17 @@ def _ask_file(name):
     return os.path.join(INSTALL, "state", name, "wrap.ask")
 
 
+def _open_ask(name):
+    """The code of the owner's open ask. One nobody answered in an hour is over, or the page says rewriting forever."""
+    try:
+        if time.time() - os.path.getmtime(_ask_file(name)) < 3600:
+            with open(_ask_file(name)) as f:
+                return f.read().strip()
+    except OSError:
+        pass
+    return ""
+
+
 def rule(name):
     """The owner's own text for this plugin, as written."""
     try:
@@ -169,8 +182,9 @@ def save_rule(name, text):
         os.remove(_ask_file(name))
 
 
-def rule_ask(name, words):
-    """The message the agent that owns this setup gets, with a one-use code, so no sender can talk it into a rewrite."""
+def rule_ask(name, words, send):
+    """Send the agent that owns this setup the ask, with a one-use code, so no sender can talk it into a rewrite. send raises
+    if it did not get there, and then no ask stays open."""
     p, words, code = _get(name), " ".join(str(words or "").split())[:1000], secrets.token_hex(4)
     if not words:
         raise PluginError("say what to change")
@@ -178,28 +192,24 @@ def rule_ask(name, words):
         said = _run(p, "message", 20).stdout.strip() if p["conf"].get("message") == "yes" else ""
     except (OSError, subprocess.SubprocessError):
         said = ""
+    send(RULE_ASK % {"name": name, "words": words, "said": said, "text": rule(name), "code": code}, words)
     os.makedirs(os.path.dirname(_ask_file(name)), exist_ok=True)
     C.atomic_write(_ask_file(name), code.encode())
-    return RULE_ASK % {"name": name, "words": words, "said": said, "text": rule(name), "code": code}
 
 
 def agent_rule(name, code, text):
     """An agent's write: only with the code of an open ask, which it spends."""
-    try:
-        with open(_ask_file(name)) as f:
-            asked = f.read().strip()
-    except OSError:
-        asked = ""
+    asked = _open_ask(name)
     if not (asked and text.strip() and secrets.compare_digest(asked, code)):
         raise PluginError("refused: your owner has no open ask for %s with that code" % name)
     save_rule(name, text)
 
 
-def connect_ask(words):
+def connect_ask(words, send):
     words = " ".join(str(words or "").split())[:1000]
     if not words:
         raise PluginError("say what to connect")
-    return CONNECT % (words, "; ".join("%s (%s)" % (r["name"], r["state"]) for r in listing()) or "nothing")
+    send(CONNECT % (words, "; ".join("%s (%s)" % (r["name"], r["state"]) for r in listing()) or "nothing"), words)
 
 
 def _stop(p):

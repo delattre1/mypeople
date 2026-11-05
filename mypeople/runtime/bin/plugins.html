@@ -54,7 +54,7 @@ code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
 <script>
 "use strict";
 const list=document.getElementById("list"),msg=document.getElementById("msg");
-let busy=false,said={},shown="",force=false,lastRules=null;
+let busy=false,said={},shown="",force=false,lastRules=null,kept=false;  // kept: a click's error, which a poll must not wipe
 const opened=new Set();
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
 function render(rows){
@@ -103,28 +103,28 @@ async function load(){
     const r=await fetch("/todo/plugins",{credentials:"same-origin"});
     if(!r.ok)return fail(r.status);
     const d=await r.json();
-    if(!busy){msg.textContent="";render(d.plugins)}
+    if(!busy){if(!kept)msg.textContent="";render(d.plugins)}
   }catch(e){fail(0)}
 }
 function button(text,fn){const b=el("button","b",text);b.type="button";b.onclick=fn;return b}
 async function send(path,body,connect){
-  busy=true;document.querySelectorAll("main button.b").forEach(b=>b.disabled=true);
+  busy=true;kept=false;document.querySelectorAll("main button.b").forEach(b=>b.disabled=true);
   try{
     const r=await fetch(path,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
-    if(r.ok){msg.textContent="";if(connect){asked.textContent="Sent to your agent. Its answer shows on your Boss card.";want.value=""}force=true;render(d.plugins);if(!connect)loadSaid()}else fail(r.status,d.error);
-  }catch(e){fail(0)}
+    if(r.ok){msg.textContent="";if(connect){asked.textContent="Sent to your agent. Its answer shows on your Boss card.";want.value=""}force=true;render(d.plugins);if(!connect)loadSaid()}else{kept=true;fail(r.status,d.error)}
+  }catch(e){kept=true;fail(0)}
   busy=false;document.querySelectorAll("main button.b").forEach(b=>b.disabled=false);
 }
 const asked=document.getElementById("asked"),want=document.getElementById("want");
 document.getElementById("connect").onsubmit=e=>{e.preventDefault();send("/todo/plugins/connect",{text:want.value},true)};
 async function flip(name,on,button){
-  busy=true;button.disabled=true;
+  busy=true;kept=false;button.disabled=true;
   try{
     const r=await fetch("/todo/plugins/set",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,on})});
     const d=await r.json().catch(()=>({}));
-    if(r.ok){msg.textContent="";render(d.plugins)}else fail(r.status,d.error);
-  }catch(e){fail(0)}
+    if(r.ok){msg.textContent="";render(d.plugins)}else{kept=true;fail(r.status,d.error)}
+  }catch(e){kept=true;fail(0)}
   busy=false;button.disabled=false;
 }
 async function loadSaid(){

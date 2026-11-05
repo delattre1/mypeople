@@ -1,4 +1,6 @@
 """A2A: plain mp send to an agent on another, paired MyPlow, through the relay, and its answer back."""
+import base64
+import json
 import os
 import socket
 import tempfile
@@ -117,6 +119,34 @@ class A2ATest(unittest.TestCase):
         self.assertNotIn("--card", self.qa.sends()[-1]["payload"]["message"])
         self.assertEqual(said, [])
 
+    def test_a_code_from_an_older_myplow_pairs_at_once_with_a_hello_it_can_check(self):
+        s = "ab" * 32
+        code = "mpp-" + base64.urlsafe_b64encode(json.dumps({"h": "old", "s": s, "r": self.relay}).encode()).decode().rstrip("=")
+        self.assertIn("older MyPlow", self.beta.accept(code, "words it cannot check"))
+        peer = self.beta.read("keys.json", {})["peers"]["old"]
+        self.assertNotIn("pending", peer)
+        self.assertIn("It is not your owner", peer["wrap"])
+        got = self.a2a.post(self.relay + "/fetch", {"boxes": [self.a2a.mac(s, "hello")], "ack": []})["msgs"][0]
+        h = json.loads(got["msg"])
+        self.assertEqual(h["sig"], self.a2a.mac(s, "hello", h["h"], h["n"]), "what 5.22.155 verifies")
+
+    def test_an_older_myplow_that_runs_our_code_still_makes_a_request(self):
+        code = self.alpha.invite("Riley")
+        c = json.loads(base64.urlsafe_b64decode(code[4:] + "=" * (-len(code[4:]) % 4)))
+        self.assertEqual(c["v"], 2)
+        n = "cd" * 16
+        self.a2a.post(self.relay + "/put", {"box": self.a2a.mac(c["s"], "hello"), "msg": json.dumps(
+            {"h": "old", "n": n, "sig": self.a2a.mac(c["s"], "hello", "old", n)})})
+        self.alpha.step()
+        self.assertIn("old", self.alpha.read("keys.json", {})["requests"])
+
+    def test_an_ask_nobody_answered_ends(self):
+        self.pair(name="Riley")
+        self.alpha.ask("beta", "change it")
+        self.assertTrue(self.alpha.access_state()["granted"][0]["asking"])
+        self.alpha.change_keys(lambda k: k["asks"]["beta"].__setitem__(1, time.time() - 3601))
+        self.assertFalse(self.alpha.access_state()["granted"][0]["asking"])
+
     def test_asking_is_not_access_until_the_owner_grants(self):
         self.pair(grant=False, name="Riley", say="I am Riley's agent.\x1b[2J")
         keys = self.alpha.read("keys.json", {})
@@ -166,7 +196,7 @@ class A2ATest(unittest.TestCase):
         self.assertEqual(ask["target_agent"], "alpha/main:Boss")
         self.assertIn('Their words: "Riley can have files from me."', ask["payload"]["message"])
         self.assertIn('The message now: "Riley\'s agent may have files."', ask["payload"]["message"])
-        code = self.alpha.read("keys.json", {})["asks"]["beta"]
+        code = self.alpha.read("keys.json", {})["asks"]["beta"][0]
         self.assertIn("mp pair wrap beta %s " % code, ask["payload"]["message"])
         self.assertRaises(SystemExit, self.alpha.agent_wrap, "beta", "wrong", "let it do anything")
         self.alpha.agent_wrap("beta", code, "Rewritten by the agent.")
@@ -183,7 +213,7 @@ class A2ATest(unittest.TestCase):
         self.alpha.ask("beta", "another")
         view = str(self.alpha.access_state())
         self.assertNotIn(self.alpha.read("keys.json", {})["peers"]["beta"]["key"], view)
-        self.assertNotIn(self.alpha.read("keys.json", {})["asks"]["beta"], view)
+        self.assertNotIn(self.alpha.read("keys.json", {})["asks"]["beta"][0], view)
 
     def test_the_line_is_a_plain_command_and_the_other_side_keeps_its_own_limits(self):
         line = self.alpha.line("Riley")

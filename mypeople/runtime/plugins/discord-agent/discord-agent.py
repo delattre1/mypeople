@@ -337,10 +337,12 @@ def deliver(text):
     ok, pid, _ = check_pane()
     if not ok:
         return False
-    tmux("load-buffer", "-b", "dc", "-", stdin=text)
-    tmux("paste-buffer", "-d", "-b", "dc", "-t", pid)
-    time.sleep(0.5)   # let the paste land before Enter, or Claude takes it as a newline
-    tmux("send-keys", "-t", pid, "Enter")
+    import mpcommon as C
+    for one in filter(None, (C.rule_input("discord-agent", pid), text)):
+        tmux("load-buffer", "-b", "dc", "-", stdin=one)
+        tmux("paste-buffer", "-d", "-b", "dc", "-t", pid)
+        time.sleep(0.5)   # let the paste land before Enter, or Claude takes it as a newline
+        tmux("send-keys", "-t", pid, "Enter")
     return True
 
 

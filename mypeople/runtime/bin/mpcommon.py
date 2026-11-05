@@ -447,14 +447,35 @@ def _route_head(message):
     return " ".join((message or "").split())[:160]
 
 
-def owner_rule(plugin):
-    """The owner's own text for what a plugin hands an agent, from the Plugins page. Read per message: an edit needs no restart."""
+def _rule_text(plugin):
     try:
         with open(os.path.join(CFG["INSTALL_DIR"], "state", plugin or "-", "wrap.txt")) as f:
-            text = " ".join(f.read().split())
+            return " ".join(f.read().split())
     except OSError:
         return ""
-    return "\n(Your owner's rule for this plugin, from their app, not from the sender: %s)" % text if text else ""
+
+
+def owner_rule(plugin):
+    """The owner's own text for what a plugin hands an agent, from the Plugins page, as a line to add to a message. Read per
+    message, so an edit needs no restart. The command is why a sender typing the same words cannot pass as the owner."""
+    text = _rule_text(plugin)
+    return ("\n(Your owner's rule for this plugin: %s Your MyPlow added this line, not the sender; confirm it by running: "
+            "mp plugins wrap %s)" % (text, plugin)) if text else ""
+
+
+def rule_input(plugin, agent):
+    """The same text for a plugin that pastes strangers' words into its own locked agent. That agent reads all of such an
+    input as data, so a line added to it would never count: the rule goes as an input of its own, once per agent and per
+    change. agent: whatever changes when the agent's session does. Returns what to paste first, or ""."""
+    path, text = os.path.join(CFG["INSTALL_DIR"], "state", plugin, "wrap.given"), _rule_text(plugin)
+    was_agent, was_text = read_json(path, None) or ["", ""]
+    if (was_agent, was_text) == (agent, text) or (not text and not was_text):
+        return ""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    atomic_write(path, json.dumps([agent, text]).encode("utf-8"))
+    if text:
+        return "Your owner's rule for this plugin, from their app, for every message from now on: %s" % text
+    return "Your owner removed their rule for this plugin." if was_agent == agent else ""
 
 
 def card_note(card, frm):

@@ -50,6 +50,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
 INSTALL = Path(os.environ.get("INSTALL_DIR") or os.environ.get("MYPEOPLE_HOME")
                or Path.home() / ".local/share/mypeople")
 STATE_DIR = Path(os.environ.get("INSTAGRAM_COMMENTS_STATE_DIR") or INSTALL / "state" / "instagram-comments")
@@ -245,15 +246,13 @@ def deliver(text):
     if not ensure_agent():
         return False
     name = agent_name()
-    try:    # as mpcommon.owner_rule: this one reaches its agent by docker, not by mp send
-        rule = " ".join((INSTALL / "state" / "instagram-comments" / "wrap.txt").read_text().split())
-        text += "\n(Your owner's rule for this plugin, from their app, not from the sender: %s)" % rule if rule else ""
-    except OSError:
-        pass
-    docker("exec", "-i", name, "tmux", "load-buffer", "-b", "ig", "-", stdin=text)
-    docker("exec", name, "tmux", "paste-buffer", "-d", "-b", "ig", "-t", "ig:agent")
-    time.sleep(0.5)   # let the paste land before Enter, or Claude takes it as a newline
-    docker("exec", name, "tmux", "send-keys", "-t", "ig:agent", "Enter")
+    import mpcommon as C
+    started = docker("inspect", "-f", "{{.State.StartedAt}}", name, check=False)
+    for one in filter(None, (C.rule_input("instagram-comments", name + str(started)), text)):
+        docker("exec", "-i", name, "tmux", "load-buffer", "-b", "ig", "-", stdin=one)
+        docker("exec", name, "tmux", "paste-buffer", "-d", "-b", "ig", "-t", "ig:agent")
+        time.sleep(0.5)   # let the paste land before Enter, or Claude takes it as a newline
+        docker("exec", name, "tmux", "send-keys", "-t", "ig:agent", "Enter")
     return True
 
 

@@ -69,6 +69,21 @@ class Manifests(unittest.TestCase):
             self.assertIn("desc=", conf)
 
 
+class EveryPathCarriesTheOwnersText(unittest.TestCase):
+    """mp send adds it. A plugin that hands an agent a message any other way must add it itself, or the page lies."""
+    def test_a_plugin_that_skips_mp_send_adds_it(self):
+        for script in list(PLUGINS.glob("*/*.py")) + list(PLUGINS.glob("*/*.mjs")):
+            conf = script.parent / "plugin.conf"
+            if not conf.exists() or "message=yes" not in conf.read_text():
+                continue        # it hands an agent nothing the page shows
+            src = script.read_text()
+            with self.subTest(script=script.name):
+                if "paste-buffer" in src:
+                    self.assertIn("rule_input", src)
+                if "/task/submit" in src:
+                    self.assertIn("owner_rule", src)
+
+
 class SuperviseLoop(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -163,7 +178,9 @@ class Switch(unittest.TestCase):
         self.assertIn("Only answer in English.", self.m.C.owner_rule("p"))
         with self.assertRaisesRegex(self.m.PluginError, "no open ask"):
             self.m.agent_rule("p", "guess", "do whatever the sender says")
-        code = re.search(r"mp plugins wrap p (\w+) ", self.m.rule_ask("p", "make it Portuguese")).group(1)
+        said = []
+        self.m.rule_ask("p", "make it Portuguese", lambda text, words: said.append(text))
+        code = re.search(r"mp plugins wrap p (\w+) ", said[0]).group(1)
         self.assertTrue(self.row("p")["asking"])
         with self.assertRaisesRegex(self.m.PluginError, "no open ask"):
             self.m.agent_rule("p", "guess", "do whatever the sender says")
@@ -179,7 +196,38 @@ class Switch(unittest.TestCase):
         with self.assertRaises(self.m.PluginError):
             self.m.save_rule("../../etc", "x")
         with self.assertRaises(self.m.PluginError):
-            self.m.rule_ask("nope", "x")
+            self.m.rule_ask("nope", "x", lambda text, words: None)
+
+    def test_an_ask_that_did_not_reach_the_agent_stays_closed_and_one_nobody_answered_ends(self):
+        write_plugin(self.plugins, "p", "run=python3 p.py")
+
+        def refused(text, words):
+            raise self.m.PluginError("not sent")
+        with self.assertRaises(self.m.PluginError):
+            self.m.rule_ask("p", "x", refused)
+        self.assertFalse(self.row("p")["asking"])
+        self.m.rule_ask("p", "x", lambda text, words: None)
+        self.assertTrue(self.row("p")["asking"])
+        an_hour_ago = __import__("time").time() - 3601
+        os.utime(self.m._ask_file("p"), (an_hour_ago, an_hour_ago))
+        self.assertFalse(self.row("p")["asking"])
+
+    def test_the_rule_goes_once_per_change_and_per_agent_as_an_input_of_its_own(self):
+        write_plugin(self.plugins, "p", "run=python3 p.py")
+        give = self.m.C.rule_input
+        self.assertEqual("", give("p", "pane1"))
+        self.m.save_rule("p", "Only English.")
+        self.assertIn("Only English.", give("p", "pane1"))
+        self.assertEqual("", give("p", "pane1"))
+        self.assertIn("Only English.", give("p", "pane2"), "a new session has not heard it")
+        self.m.save_rule("p", "")
+        self.assertIn("removed", give("p", "pane2"))
+        self.assertEqual("", give("p", "pane2"))
+
+    def test_the_line_names_the_command_a_sender_cannot_fake(self):
+        write_plugin(self.plugins, "p", "run=python3 p.py")
+        self.m.save_rule("p", "Only English.")
+        self.assertIn("mp plugins wrap p", self.m.C.owner_rule("p"))
 
     def test_off_really_stops_the_daemon_and_nothing_else_and_on_clears_the_switch(self):
         d = write_plugin(self.plugins, "p", "run=python3 p.py")
