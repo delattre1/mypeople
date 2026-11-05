@@ -79,7 +79,7 @@ class EveryPathCarriesTheOwnersText(unittest.TestCase):
             src = script.read_text()
             with self.subTest(script=script.name):
                 if "paste-buffer" in src:
-                    self.assertIn("rule_input", src)
+                    self.assertIn("give_rule", src)
                 if "/task/submit" in src:
                     self.assertIn("owner_rule", src)
 
@@ -212,17 +212,67 @@ class Switch(unittest.TestCase):
         os.utime(self.m._ask_file("p"), (an_hour_ago, an_hour_ago))
         self.assertFalse(self.row("p")["asking"])
 
-    def test_the_rule_goes_once_per_change_and_per_agent_as_an_input_of_its_own(self):
+    def test_the_rule_goes_once_per_change_and_per_session_as_an_input_of_its_own(self):
         write_plugin(self.plugins, "p", "run=python3 p.py")
-        give = self.m.C.rule_input
-        self.assertEqual("", give("p", "pane1"))
+        said = []
+
+        def give(session):
+            self.assertTrue(self.m.C.give_rule("p", session, lambda t: said.append(t) or True))
+            return said.pop() if said else ""
+        self.assertEqual("", give("cli1"))
         self.m.save_rule("p", "Only English.")
-        self.assertIn("Only English.", give("p", "pane1"))
-        self.assertEqual("", give("p", "pane1"))
-        self.assertIn("Only English.", give("p", "pane2"), "a new session has not heard it")
+        self.assertIn("Only English.", give("cli1"))
+        self.assertEqual("", give("cli1"))
+        self.assertIn("Only English.", give("cli2"), "a new session has not heard it")
+        self.m.save_rule("p", "Only Portuguese.")
+        self.assertIn("Only Portuguese.", give("cli2"))
         self.m.save_rule("p", "")
-        self.assertIn("removed", give("p", "pane2"))
-        self.assertEqual("", give("p", "pane2"))
+        self.assertIn("removed", give("cli2"))
+        self.assertEqual("", give("cli2"))
+
+    def test_a_rule_that_did_not_go_in_is_not_told_and_goes_again(self):
+        write_plugin(self.plugins, "p", "run=python3 p.py")
+        self.m.save_rule("p", "Only English.")
+        self.assertFalse(self.m.C.give_rule("p", "cli1", lambda t: False), "the caller must hold the stranger's message")
+        with self.assertRaises(RuntimeError):      # docker's way of saying the same
+
+            def boom(t):
+                raise RuntimeError("docker exec failed")
+            self.m.C.give_rule("p", "cli1", boom)
+        again = []
+        self.assertTrue(self.m.C.give_rule("p", "cli1", lambda t: again.append(t) or True))
+        self.assertEqual(1, len(again))
+
+    def test_a_session_it_cannot_tell_repeats_the_rule_rather_than_lose_it(self):
+        write_plugin(self.plugins, "p", "run=python3 p.py")
+        self.m.save_rule("p", "Only English.")
+        told = []
+        for _ in range(2):
+            self.m.C.give_rule("p", "", lambda t: told.append(t) or True)
+        self.assertEqual(2, len(told))
+
+    def test_the_session_changes_when_the_cli_restarts_in_its_loop(self):
+        loop = subprocess.Popen(["bash", "-c", "while true; do sleep 60; sleep 0.1; done"])
+        self.addCleanup(loop.wait)
+        self.addCleanup(loop.kill)
+        run = lambda line: subprocess.run(["sh", "-c", line], capture_output=True, text=True).stdout
+
+        def session():
+            for _ in range(50):
+                s = self.m.C.cli_session(str(loop.pid), run)
+                if s:
+                    return s
+                __import__("time").sleep(0.1)
+            self.fail("no child seen")
+        first = session()
+        self.assertEqual(first, session(), "steady while the CLI runs")
+        os.kill(int(first.split()[0]), 9)
+        for _ in range(50):
+            if session() != first:
+                break
+            __import__("time").sleep(0.1)
+        self.assertNotEqual(first, session())
+        self.assertEqual("", self.m.C.cli_session("not a pid; rm -rf /", run))
 
     def test_the_line_names_the_command_a_sender_cannot_fake(self):
         write_plugin(self.plugins, "p", "run=python3 p.py")

@@ -338,12 +338,16 @@ def deliver(text):
     if not ok:
         return False
     import mpcommon as C
-    for one in filter(None, (C.rule_input("discord-agent", pid), text)):
-        tmux("load-buffer", "-b", "dc", "-", stdin=one)
-        tmux("paste-buffer", "-d", "-b", "dc", "-t", pid)
+    cli = C.cli_session(tmux("display-message", "-p", "-t", pid, "#{pane_pid}").stdout,
+                        lambda line: subprocess.run(["sh", "-c", line], capture_output=True, text=True).stdout)
+
+    def paste(one):
+        """True only if every step took."""
+        if tmux("load-buffer", "-b", "dc", "-", stdin=one).returncode or tmux("paste-buffer", "-d", "-b", "dc", "-t", pid).returncode:
+            return False
         time.sleep(0.5)   # let the paste land before Enter, or Claude takes it as a newline
-        tmux("send-keys", "-t", pid, "Enter")
-    return True
+        return tmux("send-keys", "-t", pid, "Enter").returncode == 0
+    return C.give_rule("discord-agent", cli and pid + " " + cli, paste) and paste(text)
 
 
 # ---------------------------------------------------------------- inbound

@@ -463,19 +463,33 @@ def owner_rule(plugin):
             "mp plugins wrap %s)" % (text, plugin)) if text else ""
 
 
-def rule_input(plugin, agent):
-    """The same text for a plugin that pastes strangers' words into its own locked agent. That agent reads all of such an
-    input as data, so a line added to it would never count: the rule goes as an input of its own, once per agent and per
-    change. agent: whatever changes when the agent's session does. Returns what to paste first, or ""."""
+def cli_session(pane_pid, run):
+    """What changes when the CLI in a pane's `while true; do cli; done` restarts: its pid. The pane id and the container's
+    start time do not. run(shell_line) gives its stdout wherever the pane lives; /proc is for an image with no pgrep.
+    "" when it cannot tell."""
+    p = str(pane_pid or "").strip()
+    return " ".join(str(run("pgrep -n -P %s || cat /proc/%s/task/%s/children" % (p, p, p)) or "").split()) if p.isdigit() else ""
+
+
+def give_rule(plugin, session, paste):
+    """The owner's text for a plugin that pastes strangers' words into its own locked agent. That agent reads all of such an
+    input as data, so a line added to it would never count: the rule goes as an input of its own, once per CLI session and
+    per change. paste(text) is True only if it went in, and only then does it count as told; False here means it did not go
+    in, so the caller holds the stranger's message back and tries again. A session it cannot tell ("") never counts as told:
+    the rule repeats rather than go missing."""
     path, text = os.path.join(CFG["INSTALL_DIR"], "state", plugin, "wrap.given"), _rule_text(plugin)
-    was_agent, was_text = read_json(path, None) or ["", ""]
-    if (was_agent, was_text) == (agent, text) or (not text and not was_text):
-        return ""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    atomic_write(path, json.dumps([agent, text]).encode("utf-8"))
+    was_session, was_text = read_json(path, None) or ["", ""]
+    if (not text and not was_text) or (session and (was_session, was_text) == (session, text)):
+        return True
     if text:
-        return "Your owner's rule for this plugin, from their app, for every message from now on: %s" % text
-    return "Your owner removed their rule for this plugin." if was_agent == agent else ""
+        note = "Your owner's rule for this plugin, from their app, for every message from now on: %s" % text
+    else:
+        note = "Your owner removed their rule for this plugin." if was_session == session else ""
+    if note and not paste(note):
+        return False
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    atomic_write(path, json.dumps([session, text]).encode("utf-8"))
+    return True
 
 
 def card_note(card, frm):

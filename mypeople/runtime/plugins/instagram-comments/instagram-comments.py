@@ -247,13 +247,18 @@ def deliver(text):
         return False
     name = agent_name()
     import mpcommon as C
-    started = docker("inspect", "-f", "{{.State.StartedAt}}", name, check=False)
-    for one in filter(None, (C.rule_input("instagram-comments", name + str(started)), text)):
+    boot = docker("inspect", "-f", "{{.State.StartedAt}}", name, check=False)   # pids repeat from one container start to the next
+    cli = C.cli_session(docker("exec", name, "tmux", "display-message", "-p", "-t", "ig:agent", "#{pane_pid}", check=False),
+                        lambda line: docker("exec", name, "sh", "-c", line, check=False))
+
+    def paste(one):
+        """A step that fails raises, which keeps the comment spooled."""
         docker("exec", "-i", name, "tmux", "load-buffer", "-b", "ig", "-", stdin=one)
         docker("exec", name, "tmux", "paste-buffer", "-d", "-b", "ig", "-t", "ig:agent")
         time.sleep(0.5)   # let the paste land before Enter, or Claude takes it as a newline
         docker("exec", name, "tmux", "send-keys", "-t", "ig:agent", "Enter")
-    return True
+        return True
+    return C.give_rule("instagram-comments", cli and str(boot) + " " + cli, paste) and paste(text)
 
 
 def forward_loop():

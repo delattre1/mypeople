@@ -143,6 +143,41 @@ class GuardTest(unittest.TestCase):
             self.assertNotIn("\x1b", out)
         self.assertEqual(self.d.one_line("a" * 5000), "a" * 5000)   # long stays one line
 
+    def test_a_failed_paste_holds_the_message_and_the_rule_goes_after_a_cli_restart(self):
+        import mpcommon as C
+        tmp = tempfile.TemporaryDirectory()     # never the real install: make live runs this on the owner's Mac
+        self.addCleanup(tmp.cleanup)
+        cfg = mock.patch.dict(C.CFG, {"INSTALL_DIR": tmp.name})
+        cfg.start()
+        self.addCleanup(cfg.stop)
+        rule = Path(tmp.name) / "state" / "discord-agent"
+        rule.mkdir(parents=True)
+        (rule / "wrap.txt").write_text("Only English.")
+        pasted, fail, cli = [], [False], ["111"]
+
+        def tmux(*a, stdin=None):
+            if a[0] == "load-buffer":
+                pasted.append(stdin)
+            return mock.Mock(returncode=1 if fail[0] and a[0] == "paste-buffer" else 0, stdout="42")
+        with mock.patch.object(self.d, "ensure_agent", return_value=True), \
+                mock.patch.object(self.d, "check_pane", return_value=(True, "%7", [])), \
+                mock.patch.object(self.d, "tmux", tmux), mock.patch.object(self.d.time, "sleep"), \
+                mock.patch.object(C, "cli_session", lambda p, run: cli[0]):
+            fail[0] = True
+            self.assertFalse(self.d.deliver("[DISCORD] one"))
+            self.assertEqual(1, len(pasted), "the stranger's line waits for the rule")
+            fail[0], pasted[:] = False, []
+            self.assertTrue(self.d.deliver("[DISCORD] two"))
+            self.assertIn("Only English.", pasted[0])
+            self.assertFalse(pasted[0].startswith("[DISCORD]"), "an input of its own, or it reads as a stranger's")
+            self.assertEqual("[DISCORD] two", pasted[1])
+            pasted[:] = []
+            self.assertTrue(self.d.deliver("[DISCORD] three"))
+            self.assertEqual(["[DISCORD] three"], pasted)
+            cli[0], pasted[:] = "222", []
+            self.assertTrue(self.d.deliver("[DISCORD] four"))
+            self.assertIn("Only English.", pasted[0], "the loop restarted the CLI: a new session has not heard it")
+
     def test_no_stranger_text_ever_reaches_an_unproven_pane(self):
         with mock.patch.object(self.d, "ensure_agent", return_value=True), \
                 mock.patch.object(self.d, "check_pane", return_value=(False, None, [])), \

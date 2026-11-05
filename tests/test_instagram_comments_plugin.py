@@ -79,6 +79,33 @@ class InstagramCommentsTests(unittest.TestCase):
         self.assertEqual([], self.m.spool_pending())
         self.assertEqual(["[IG REPLY] comment_id=c1 user=fan permalink=media:m1: hi"], calls)
 
+    def test_a_failed_docker_exec_does_not_count_the_rule_as_told(self):
+        import mpcommon as C
+        tmp = tempfile.TemporaryDirectory()     # never the real install: make live runs this on the owner's Mac
+        self.addCleanup(tmp.cleanup)
+        cfg = mock.patch.dict(C.CFG, {"INSTALL_DIR": tmp.name})
+        cfg.start()
+        self.addCleanup(cfg.stop)
+        rule = Path(tmp.name) / "state" / "instagram-comments"
+        rule.mkdir(parents=True)
+        (rule / "wrap.txt").write_text("Only English.")
+        pasted, fail = [], [True]
+
+        def docker(*a, stdin=None, check=True):
+            if "paste-buffer" in a and fail[0]:
+                raise RuntimeError("docker exec failed")
+            if "load-buffer" in a:
+                pasted.append(stdin)
+            return "x"
+        with mock.patch.object(self.m, "ensure_agent", return_value=True), mock.patch.object(self.m, "docker", docker), \
+                mock.patch.object(self.m.time, "sleep"), mock.patch.object(C, "cli_session", lambda p, run: "111"):
+            with self.assertRaises(RuntimeError):
+                self.m.deliver("[IG REPLY] one")
+            fail[0], pasted[:] = False, []
+            self.assertTrue(self.m.deliver("[IG REPLY] two"))
+        self.assertIn("Only English.", pasted[0])
+        self.assertEqual("[IG REPLY] two", pasted[1])
+
     def test_a_cold_agent_gets_nothing_typed_into_it(self):
         # The session is still starting: the comment must stay spooled, not vanish into a pane
         # that is not taking input yet.

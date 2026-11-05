@@ -10,7 +10,7 @@ folder in plugins/ it does not ship). Its plugin.conf:
 
 state/<name>/wrap.txt = the owner's own text for what the plugin hands an agent. mp send adds it for the plugin supervise.sh
 named in MP_PLUGIN; a plugin that hands messages over any other way must add mpcommon.owner_rule itself, or, for a locked
-agent that reads all of a stranger's input as data, paste mpcommon.rule_input first.
+agent that reads all of a stranger's input as data, go through mpcommon.give_rule first.
 The plugin's own lines stay: they carry the reply commands and the sender's trust, stamped here, not by the sender.
 
 state/<name>/off exists = off: supervise.sh won't start it. Setup stays in each plugin's header, so nothing here
