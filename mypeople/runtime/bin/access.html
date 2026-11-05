@@ -180,11 +180,12 @@ function newLine(){
   i.placeholder="Who is this line for?";i.setAttribute("aria-label","Who is this line for?");i.maxLength=60;i.value=lineFor;i.oninput=()=>{lineFor=i.value};
   const b=el("button","b","Generate a line");b.type="submit";f.onsubmit=e=>{e.preventDefault();post("line",{name:i.value})};f.append(i,b);p.append(f);
   if(line){
-    const box=el("div","line");box.append(el("code","",line));
-    const c=button("b","Copy",async()=>{try{await navigator.clipboard.writeText(line);c.textContent="Copied"}catch(e){msg.textContent="Select the line and copy it."}});
-    const show=button("b",qrShown?"Hide QR":"Show QR",()=>{qrShown=!qrShown;force=true;draw()});
+    // It is a one-use secret: the text and the QR stay off screen until asked for, since this screen may be on a stream. Copy works either way.
+    const box=el("div","line");box.append(el("code","",qrShown?line:"Line ready, hidden. Copy works, or press Show."));
+    const c=button("b","Copy",async()=>{try{await navigator.clipboard.writeText(line);c.textContent="Copied"}catch(e){msg.textContent="Couldn't copy. Press Show and copy the line by hand."}});
+    const show=button("b",qrShown?"Hide":"Show",()=>{qrShown=!qrShown;force=true;draw()});
     box.append(c,show);p.append(box);
-    if(qrShown)p.append(qrCanvas(line));   // It is a one-use secret: off screen until asked for, since this screen may be on a stream.
+    if(qrShown)p.append(qrCanvas(line));
     p.append(el("p","small","Good for 24 h and one use. Whoever runs it asks for access to this MyPlow; nothing is shared until you grant it here."));
   }
   return p;

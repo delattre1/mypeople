@@ -33,7 +33,7 @@ for(const i of __IDS__){document.getElementById(i)}if(ids.find)ids.find.tagName=
 """
 HARNESS = DOM + r"""const {TextEncoder}=require("util"),crypto=require("crypto");const posts=[];const FAKE=__STATE__;
 const fetch=async(u,o)=>{if(o&&o.method==="POST"){const b=JSON.parse(o.body),op=u.split("/").pop();posts.push([op,b]);return{ok:true,status:200,json:async()=>op==="line"?{line:"mp pair mpp-SECRET"}:FAKE}}return{ok:true,status:200,json:async()=>FAKE}};
-const navigator={clipboard:{writeText:async()=>{}}};const setInterval=()=>0;
+let copied="";const navigator={clipboard:{writeText:async t=>{copied=t}}};const setInterval=()=>0;
 const all=()=>{const o=[];for(const i of __IDS__)ids[i]&&(o.push(ids[i]),ids[i].walk(c=>o.push(c)));return o};
 const page=()=>all().map(n=>n._text).join(" ");
 const by=(tag,txt)=>all().find(n=>n.tagName===tag&&n.textContent.trim().startsWith(txt));
@@ -59,8 +59,8 @@ __SCRIPT__
  by("BUTTON","Ended").onclick();await tick();R.ended=ids.view.textContent;
  by("BUTTON","New line").onclick();await tick();R.newLine=!!ids.view.querySelectorAll("form").length;
  ids.view.querySelectorAll("form")[0].onsubmit({preventDefault(){}});await tick();await tick();await tick();
- R.lineShown=ids.view.textContent.includes("mpp-SECRET");R.qrBefore=ids.view.querySelectorAll("canvas").length;by("BUTTON","Show QR").onclick();await tick();R.qrAfter=ids.view.querySelectorAll("canvas").length;R.hideLabel=!!by("BUTTON","Hide QR");
- by("BUTTON","Ended").onclick();await tick();by("BUTTON","New line").onclick();await tick();R.qrAfterLeaving=ids.view.querySelectorAll("canvas").length;
+ R.lineBefore=ids.view.textContent.includes("mpp-SECRET");R.qrBefore=ids.view.querySelectorAll("canvas").length;by("BUTTON","Copy").onclick();await tick();R.copied=copied;by("BUTTON","Show").onclick();await tick();R.lineAfter=ids.view.textContent.includes("mpp-SECRET");R.qrAfter=ids.view.querySelectorAll("canvas").length;R.hideLabel=!!by("BUTTON","Hide");
+ by("BUTTON","Ended").onclick();await tick();by("BUTTON","New line").onclick();await tick();R.qrAfterLeaving=ids.view.querySelectorAll("canvas").length;R.lineAfterLeaving=ids.view.textContent.includes("mpp-SECRET");
  const M=T=>{const m=qrMatrix(T);return{size:m.length,sha:crypto.createHash("sha256").update(m.map(r=>r.map(b=>b?1:0).join("")).join("")).digest("hex")}};
  R.qr={short:M("hello"),real:M(__REAL__)};R.tooLong=qrMatrix("x".repeat(1000));
  R.all=page();R.posts=posts;console.log(JSON.stringify(R));process.exit(0)})().catch(e=>{console.error(e);process.exit(1)});
@@ -135,10 +135,15 @@ class AccessTab(unittest.TestCase):
         self.assertIn("taylor-pc", self.r["ended"])
         self.assertTrue(self.r["newLine"])
 
-    def test_the_qr_stays_hidden_until_asked_and_again_after_leaving(self):
-        self.assertTrue(self.r["lineShown"])
+    def test_the_line_and_its_qr_stay_hidden_until_asked_and_again_after_leaving(self):
+        self.assertFalse(self.r["lineBefore"], "a one-use secret on a screen that may be streaming")
         self.assertEqual((self.r["qrBefore"], self.r["qrAfter"], self.r["qrAfterLeaving"]), (0, 1, 0))
+        self.assertTrue(self.r["lineAfter"])
+        self.assertFalse(self.r["lineAfterLeaving"])
         self.assertTrue(self.r["hideLabel"])
+
+    def test_copy_works_while_the_line_is_hidden(self):
+        self.assertEqual(self.r["copied"], "mp pair mpp-SECRET")
 
     def test_the_qr_is_made_here_and_decodes(self):
         for outside in ("<script src", "<img", "https://", "http://"):
