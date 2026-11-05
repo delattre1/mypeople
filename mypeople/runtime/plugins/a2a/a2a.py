@@ -505,16 +505,16 @@ class Bridge:
         peers, asks = by(keys.get("peers")), keys.get("asks") or {}
 
         def row(h, p):
-            return {"host": h, "name": p.get("name") or h, "own": is_own(p), "said": p.get("said", ""), "waiting": bool(p.get("pending")),
-                    "text": permission_text(p, h), "asking": bool(open_ask(asks, h)),
+            return {"host": h, "name": p.get("name") or h, "said": p.get("said", ""), "waiting": bool(p.get("pending")),
+                    "text": permission_text(p, h) or "", "asking": bool(open_ask(asks, h)),
                     "package": FROM % ("%s/<session>:<tab>" % h, "<their message>") + wrap("%s/<session>:<tab>" % h, p)}
-        shown = [(h, p) for h, p in peers if permission_text(p, h) is not None or p.get("pending")]
+        # Everyone is listed the same way, the owner's own machines included. Whether a machine is his own still decides, here,
+        # whether a note to its owner crosses: the page just does not mark it (the owner's call, 11-05).
         return {"host": self.host,
                 "requests": [{"host": h, "name": r["name"], "say": r.get("say", ""), "at": r["at"]} for h, r in by(keys.get("requests"))],
-                "granted": [row(h, p) for h, p in shown if "asked_by" not in p],
-                "reach": [row(h, p) for h, p in shown if "asked_by" in p],
-                "ended": sorted(h for h in keys.get("revoked", {}) if h not in dict(peers)),
-                "paired": [h for h, p in peers if permission_text(p, h) is None and not p.get("pending")]}
+                "granted": [row(h, p) for h, p in peers if "asked_by" not in p],
+                "reach": [row(h, p) for h, p in peers if "asked_by" in p],
+                "ended": sorted(h for h in keys.get("revoked", {}) if h not in dict(peers))}
 
     # -- one pass: fetch and deliver, send what the queue holds for peers, settle receipts
     def step(self):

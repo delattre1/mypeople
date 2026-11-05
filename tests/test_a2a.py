@@ -332,7 +332,7 @@ class A2ATest(unittest.TestCase):
         asker, owner = self.beta.access_state(), self.alpha.access_state()
         self.assertEqual([(r["host"], r["waiting"]) for r in asker["reach"]], [("alpha", False)])
         self.assertEqual(asker["granted"], [])
-        self.assertEqual([(r["host"], r["name"], r["waiting"], r["own"]) for r in owner["granted"]], [("beta", "Sam", False, False)])
+        self.assertEqual([(r["host"], r["name"], r["waiting"]) for r in owner["granted"]], [("beta", "Sam", False)])
         self.assertEqual(owner["reach"], [])
         self.assertIn("alpha's agent", asker["reach"][0]["text"])
         # and when it ends, both sides say so
@@ -353,7 +353,10 @@ class A2ATest(unittest.TestCase):
         self.alpha.set_own("beta", "test")
         self.assertEqual(self.package("hi"), "[from beta/main:Boss, on another MyPlow] hi")
         self.assertIn("no permission message here", self.alpha.wrap_says("beta"))   # own, none: stamp alone, nothing to contradict
-        self.assertEqual(self.alpha.access_state()["paired"], ["beta"])
+        state = self.alpha.access_state()
+        self.assertEqual([(g["host"], g["text"]) for g in state["granted"]], [("beta", "")], "listed like anyone, with no text yet")
+        self.assertNotIn("own", state["granted"][0], "the page gets no mark to show")
+        self.assertNotIn("paired", state)
 
     def test_send_reply_and_receipt(self):
         self.pair()
