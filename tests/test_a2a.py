@@ -323,8 +323,14 @@ class A2ATest(unittest.TestCase):
         self.pair()
         self.alpha.change_keys(lambda k: (k["peers"]["beta"].pop("wrap"), k["peers"]["beta"].pop("kind")))
         self.assertIn("It is not your owner.", self.package("hi"))          # no kind recorded: treated as another person
+        # and the check that wrap names says the same thing, or a careful agent reads the wrap as forged
+        says = self.alpha.wrap_says("beta")
+        self.assertIn(self.a2a.first_text("beta"), says)
+        self.assertNotIn("granted it nothing", says)
+        self.assertEqual([g["text"] for g in self.alpha.access_state()["granted"]], [self.a2a.first_text("beta")])
         self.alpha.set_own("beta", "test")
         self.assertEqual(self.package("hi"), "[from beta/main:Boss, on another MyPlow] hi")
+        self.assertIn("no permission message here", self.alpha.wrap_says("beta"))   # own, none: stamp alone, nothing to contradict
         self.assertEqual(self.alpha.access_state()["paired"], ["beta"])
 
     def test_send_reply_and_receipt(self):
