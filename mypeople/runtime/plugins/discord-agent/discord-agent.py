@@ -525,7 +525,8 @@ def main(argv):
     if cmd == "serve":
         serve()
     elif cmd == "message":   # the board's Plugins page shows this
-        print(ALERT % ("<what>", "<detail>", AID))
+        print("[DISCORD] msg=<message id> channel=<channel> from=<who>: <their message>\n\nTo the Boss, when it needs a look:\n"
+              + ALERT % ("<what>", "<detail>", AID))
     elif cmd == "status":
         st = read_state()
         print(json.dumps({"off": OFF.exists(), "channels": channels(), "cursor": st.get("cursor"),

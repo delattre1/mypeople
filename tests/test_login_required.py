@@ -14,6 +14,7 @@ native install keeps refusing cleanly, which was never the bug.
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -82,7 +83,7 @@ class EnsureWithoutLoginTests(unittest.TestCase):
         self.assertTrue(os.path.exists(firstrun.CONFIG_PATH),
                         "the daemons need QUEUE_SECRET/HOST_ID even with nobody logged in")
 
-    def test_desktop_app_comes_up_and_points_at_its_own_terminal(self):
+    def test_desktop_app_comes_up_and_names_a_terminal_that_exists(self):
         """A double-clicked .app has no terminal to refuse into: exiting is a window that never
         opens. It must come up like the container does, and must not tell a Mac user to run
         `docker compose exec`."""
@@ -93,6 +94,27 @@ class EnsureWithoutLoginTests(unittest.TestCase):
         howto = self._state()["howto"]
         self.assertTrue(any("auth login" in line for line in howto))
         self.assertFalse(any("docker" in line for line in howto), howto)
+        self.assertEqual("claude auth login", howto[0], "the banner says where: the app has no terminal tab")
+
+    def test_no_way_of_running_names_a_terminal_tab(self):
+        for env in ({"MYPEOPLE_DESKTOP": "1"}, {"MYPEOPLE_CONTAINER": "1"}, {}):
+            with mock.patch.dict(os.environ, env):
+                self.assertFalse([l for l in firstrun.login_howto() if "terminal tab" in l], env)
+
+    @unittest.skipUnless(shutil.which("node"), "node not installed")
+    def test_with_no_login_the_boss_card_says_so_and_offers_nothing(self):
+        html = (Path(firstrun.__file__).parent / "runtime" / "bin" / "todos.html").read_text()
+        fn = html[html.index("function renderBoss(boss){"):html.index("function bossMsg(")]
+        js = """const els={};const el=i=>els[i]||(els[i]={dataset:{},textContent:"",disabled:false});
+let banner;const document={getElementById:i=>i==="mp-login-banner"?banner:el(i),querySelector:i=>el(i)};const $=el;
+const ENGINE_NAMES={claude:"Claude"},BOSS_ENGINES=[["new","claude"]];let bossBusy=false;
+%s
+const see=()=>[el("bossState").textContent,el(".boss-down").textContent,el("bossRevive").disabled,el("new").disabled,el("bossKill").disabled];
+const out=[];banner={};renderBoss(null);out.push(see());renderBoss({backend:"claude"});out.push(see());banner=null;renderBoss(null);out.push(see());console.log(JSON.stringify(out))""" % fn
+        no, on, down = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=30, check=True).stdout)
+        self.assertEqual(no, ["Waiting for your login", "It starts by itself once you log in.", True, True, True])
+        self.assertEqual(on[0], "Claude · online", "once it is up the banner no longer matters")
+        self.assertEqual(down, ["Down", "Revive it to resume its memory, or start a new one.", False, False, True])
 
     def test_native_install_still_refuses_cleanly(self):
         """An installer has a human reading stderr and no restart policy. Unchanged on purpose."""
@@ -180,7 +202,7 @@ class LoginBannerTests(unittest.TestCase):
         C = load_mpcommon(self.install)
         out = C.render_page(open(os.path.join(self.install, "bin", "todos.html"),
                                  encoding="utf-8").read())
-        self.assertNotIn("mp-login-banner", out)
+        self.assertNotIn('id="mp-login-banner"', out)
 
     def test_no_banner_when_the_state_file_is_absent(self):
         """An install predating the file must not grow a scary banner it cannot justify."""

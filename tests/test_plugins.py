@@ -74,8 +74,8 @@ class EveryPathCarriesTheOwnersText(unittest.TestCase):
     def test_a_plugin_that_skips_mp_send_adds_it(self):
         for script in list(PLUGINS.glob("*/*.py")) + list(PLUGINS.glob("*/*.mjs")):
             conf = script.parent / "plugin.conf"
-            if not conf.exists() or "message=yes" not in conf.read_text():
-                continue        # it hands an agent nothing the page shows
+            if not conf.exists() or "message=" not in conf.read_text() or "message=access" in conf.read_text():
+                continue        # it hands an agent nothing the page shows, or Access owns the text, one per person
             src = script.read_text()
             with self.subTest(script=script.name):
                 if "paste-buffer" in src:
@@ -309,11 +309,76 @@ class Switch(unittest.TestCase):
         write_plugin(self.plugins, "says", "run=python3 p.py", "message=yes").joinpath("p.py").write_text("print('[says] <text>')")
         write_plugin(self.plugins, "silent", "run=python3 p.py").joinpath("p.py").write_text("print('never asked')")
         write_plugin(self.plugins, "broken", "run=python3 p.py", "message=yes").joinpath("p.py").write_text("raise SystemExit(2)")
-        self.assertEqual({"says": "[says] <text>"}, self.m.messages())
+        self.assertEqual({"says": {"kind": "yes", "default": "[says] <text>", "text": "[says] <text>", "required": [], "warned": []}}, self.m.messages())
+
+    def template_plugin(self, name="t"):
+        write_plugin(self.plugins, name, "run=python3 p.py", "message=template").joinpath("p.py").write_text(
+            "print('{trust_stamp} {their_message}\\nRun {reply_command}. {safety_line} {other}')")
+        return "{trust_stamp} {their_message}\nRun {reply_command}. {safety_line} {other}"
+
+    def test_a_message_cannot_lose_a_variable_by_any_way_in_and_its_own_words_store_nothing(self):
+        words, C = self.template_plugin(), self.m.C
+        values = {"trust_stamp": "[t] from Ana:", "their_message": "{reply_command} and {other}", "reply_command": "mp say", "safety_line": "Careful.", "other": "x"}
+        self.assertEqual(C.plugin_text("t", words, values), "[t] from Ana: {reply_command} and {other}\nRun mp say. Careful. x", "what they said is never read as a variable")
+        row = self.m.messages()["t"]
+        self.assertEqual((row["kind"], row["text"]), ("template", words))
+        self.assertEqual((row["required"], row["warned"]), (["their_message", "trust_stamp", "reply_command"], ["safety_line"]))
+        for lost in ("{their_message}", "{trust_stamp}", "{reply_command}"):
+            with self.assertRaises(self.m.PluginError):
+                self.m.save_rule("t", words.replace(lost, ""))
+        self.assertEqual("", C.saved_template("t"), "nothing was written")
+        self.m.save_rule("t", words.replace("{safety_line} ", "Keep it short. "))   # only warned about, in the page
+        self.assertEqual(C.plugin_text("t", words, values), "[t] from Ana: {reply_command} and {other}\nRun mp say. Keep it short. x", "applies to the next message")
+        self.assertEqual(self.row("t")["custom"], C.saved_template("t"))
+        self.m.save_rule("t", words)                                                 # today's words again
+        self.assertEqual("", C.saved_template("t"))
+
+    def test_an_agents_rewrite_needs_the_ask_keeps_the_variables_and_applies_at_once(self):
+        words, said = self.template_plugin(), []
+        self.m.rule_ask("t", "be shorter", lambda text, asked: said.append(text))
+        self.assertIn(words, said[0], "the whole message, with its variables")
+        code = re.search(r"mp plugins wrap t (\w+) ", said[0]).group(1)
+        with self.assertRaises(self.m.PluginError):
+            self.m.agent_rule("t", "guess", "{trust_stamp} {their_message} {reply_command}")
+        with self.assertRaises(self.m.PluginError):
+            self.m.agent_rule("t", code, "lost them all")
+        self.m.agent_rule("t", code, "{trust_stamp} {their_message} Shorter. {reply_command}")
+        self.assertIn("Shorter.", self.m.C.plugin_text("t", words, {}))
+        with self.assertRaises(self.m.PluginError):
+            self.m.agent_rule("t", code, "{trust_stamp} {their_message} spent {reply_command}")
+
+    def test_text_added_before_templates_is_kept_inside_the_message_when_it_is_saved(self):
+        words = self.template_plugin()
+        os.makedirs(os.path.join(self.m.INSTALL, "state", "t"), exist_ok=True)
+        Path(self.m.INSTALL, "state", "t", "wrap.txt").write_text("Only English.")
+        text = self.m.messages()["t"]["text"]
+        self.assertTrue(text.startswith(words) and "Only English." in text)
+        self.m.save_rule("t", text)
+        self.assertEqual("", self.m.C.owner_rule("t"), "not added twice")
+        self.assertIn("Only English.", self.m.C.saved_template("t"))
+
+    def test_access_owns_a_peers_message(self):
+        write_plugin(self.plugins, "a", "run=python3 p.py", "message=access").joinpath("p.py").write_text("print('{trust_stamp} words')")
+        self.assertEqual("access", self.m.messages()["a"]["kind"])
+        with self.assertRaises(self.m.PluginError):
+            self.m.save_rule("a", "anything")
+        with self.assertRaises(self.m.PluginError):
+            self.m.rule_ask("a", "anything", lambda text, words: None)
+
+    def test_every_shipped_template_plugin_prints_its_template_and_sends_through_the_seam(self):
+        for conf in PLUGINS.glob("*/plugin.conf"):
+            if "message=template" not in conf.read_text():
+                continue
+            script = next(p for p in conf.parent.iterdir() if p.suffix in (".py", ".mjs") and p.stem == conf.parent.name)
+            src = script.read_text()
+            with self.subTest(script=script.name):
+                self.assertTrue("{trust_stamp}" in src and "{their_message}" in src)
+                self.assertRegex(src, r"print\(TEMPLATE\)|console\.log\(TEMPLATE\)")
+                self.assertTrue("plugin_text(" in src or "template.txt" in src)
 
     def test_every_real_plugin_that_declares_a_message_prints_it(self):
         """A conf that says message=yes while the script has no such verb would show an empty block on the page."""
-        declared = [c.parent for c in PLUGINS.glob("*/plugin.conf") if "message=yes" in c.read_text()]
+        declared = [c.parent for c in PLUGINS.glob("*/plugin.conf") if "message=" in c.read_text()]
         self.assertGreater(len(declared), 5)
         for d in declared:
             run = dict(x.split("=", 1) for x in (d / "plugin.conf").read_text().splitlines() if "=" in x)["run"].split()
@@ -322,7 +387,7 @@ class Switch(unittest.TestCase):
             r = subprocess.run(run[:-1] + [str(d / run[-1]), "message"], capture_output=True, text=True, timeout=120,
                                env=dict(os.environ, INSTALL_DIR=self.install_dir, HOST_ID="h"))
             self.assertEqual(0, r.returncode, (d.name, r.stderr[-400:]))
-            self.assertIn("<", r.stdout, d.name)
+            self.assertRegex(r.stdout, "[<{]", d.name)
 
     def test_the_owner_rule_is_one_sentence_in_every_plugin_that_carries_it(self):
         found = {re.search(r'^OWNER_RULE = \((.*?)\)$', (PLUGINS / n / f"{n}.py").read_text(), re.S | re.M).group(1)

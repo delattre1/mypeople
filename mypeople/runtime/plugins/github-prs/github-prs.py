@@ -45,6 +45,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
+from mpcommon import plugin_text  # noqa: E402
+
 INSTALL = Path(os.environ.get("INSTALL_DIR") or os.environ.get("MYPEOPLE_HOME")
                or Path.home() / ".local/share/mypeople")
 STATE = Path(os.environ.get("GITHUB_PRS_STATE_DIR") or INSTALL / "state" / "github-prs") / "state.json"
@@ -248,6 +251,9 @@ def owner_for_card_mention(board, text):
     return ""
 
 
+TEMPLATE = "{trust_stamp}: {their_message}{link}{no_owner_note}"
+
+
 def format_event(repo, n, event, owned, orphan=False):
     body = " ".join(HTML_COMMENT.sub("", event["body"]).split())
     if len(body) > SNIPPET:
@@ -268,9 +274,8 @@ def format_event(repo, n, event, owned, orphan=False):
         # one more line among everything else the Boss is told. Say what to do with it: the Boss routes
         # work, he does not do it (the owner, 10-21), so it goes to an agent.
         tail = " — no card on the board links this %s, so nobody owns it: give it to an agent." % noun
-    if event["kind"] in ("merged", "closed"):
-        return "%s: %s%s" % (head, event["url"], tail)
-    return "%s: %s %s%s" % (head, body or "(no text)", event["url"], tail)
+    said = "" if event["kind"] in ("merged", "closed") else (body or "(no text)") + " "
+    return plugin_text("github-prs", TEMPLATE, {"trust_stamp": head, "their_message": said, "link": event["url"], "no_owner_note": tail})
 
 
 # ---------------------------------------------------------------- the fleet
@@ -509,8 +514,7 @@ def main(argv):
     # No default: a bare run started a second, unsupervised serve beside supervise.sh's (discord-chat, Mac 2, 10-30).
     cmd = argv[1] if len(argv) > 1 else ""
     if cmd == "message":   # the board's Plugins page shows this
-        print(format_event("<repo>", 1, {"kind": "review", "state": "CHANGES_REQUESTED", "user": "<who>",
-                                         "body": "<their review>", "url": "<link>"}, True))
+        print(TEMPLATE)
         return 0
     if cmd == "watch" and len(argv) > 2:
         key = watch_pr(argv[2], argv[3] if len(argv) > 3 else os.environ.get("AGENT_ID", ""))

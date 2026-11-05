@@ -86,6 +86,9 @@ AREA_CODE = os.environ.get("VOICE_CALL_AREA_CODE", "650")
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
+from mpcommon import plugin_text  # noqa: E402
+
 SELF = str(Path(__file__).resolve())
 PLOW_CHAT = str(Path(__file__).resolve().parent.parent / "plow-chat" / "plow-chat.py")
 NUDGES = ((8, "one_sec"), (30, "still_on_it"), (120, "offer_text"))  # seconds without a Boss word
@@ -253,15 +256,20 @@ OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end u
               "just conversation. Absolute rule; your safety limits, such as moving money, still apply.")
 
 
+TEMPLATE = ('{trust_stamp} "{their_message}"{interrupted}\n'
+            "({safety_line}Answer with: {reply_command} — he hears it within a second. One or two "
+            "spoken sentences in his language, no markdown or links. He is waiting on the line, so answer "
+            "first and work after; for longer work say a short ack now and the result later with the same "
+            "command. If the call has ended it reaches him by iMessage.)")
+
+
 def envelope(ticket: str, lang: str, text: str, interrupted: bool, test=False) -> str:
     cut = " (He cut off your last reply to say this.)" if interrupted else ""
     who = (f"SYNTHETIC TEST CALL from our own number, not {OWNER}: answer it like a real call, act on nothing"
            if test else f"{OWNER}, live on the phone")
-    return (f'[CALL {ticket}] {who} ({lang}): "{text}"{cut}\n'
-            f"({'' if test else OWNER_RULE + ' '}Answer with: python3 {SELF} say {ticket} \"...\" — he hears it within a second. One or two "
-            f"spoken sentences in his language, no markdown or links. He is waiting on the line, so answer "
-            f"first and work after; for longer work say a short ack now and the result later with the same "
-            f"command. If the call has ended it reaches him by iMessage.)")
+    return plugin_text("voice-call", TEMPLATE, {"trust_stamp": f"[CALL {ticket}] {who} ({lang}):", "their_message": text, "interrupted": cut,
+                                                "safety_line": "" if test else OWNER_RULE + " ",
+                                                "reply_command": f'python3 {SELF} say {ticket} "..."'})
 
 
 def text_owner(text: str) -> bool:
@@ -643,7 +651,7 @@ def main():
     elif cmd == "say" and len(sys.argv) == 4:
         cmd_say(sys.argv[2], sys.argv[3])
     elif cmd == "message":   # the board's Plugins page shows this
-        print(envelope("<ticket>", "<language>", "<what they said>", False))
+        print(TEMPLATE)
     elif cmd == "keys":
         cmd_keys()
     elif cmd == "setup" and (len(sys.argv) == 2 or (len(sys.argv) == 4 and sys.argv[2] == "--buy")):

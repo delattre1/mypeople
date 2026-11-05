@@ -1021,14 +1021,17 @@ let bossBusy=false;
 function renderBoss(boss){
   const st=document.getElementById("bossState"); if(!st) return;
   const up=!!boss;
-  st.textContent = up ? (ENGINE_NAMES[boss.backend]||boss.backend||"Boss")+" · online" : "Down";
+  // No AI login yet, which the page's banner says: nothing here can bring a Boss up, and it starts by itself once the login lands.
+  const noLogin=!up&&!!document.getElementById("mp-login-banner");
+  st.textContent = up ? (ENGINE_NAMES[boss.backend]||boss.backend||"Boss")+" · online" : noLogin ? "Waiting for your login" : "Down";
+  document.querySelector(".boss-down").textContent = noLogin ? "It starts by itself once you log in." : "Revive it to resume its memory, or start a new one.";
   st.className = "boss-state "+(up?"up":"down");
   $("#bossHero").dataset.state = bossBusy ? "busy" : (up ? "up" : "down");
   // Kill only while up; Revive and Spawn only while down. Mutually exclusive by construction,
   // so the UI can never ask for a second Boss. A disabled control is not drawn at all.
   document.getElementById("bossKill").disabled = bossBusy || !up;
-  document.getElementById("bossRevive").disabled = bossBusy || up;
-  BOSS_ENGINES.forEach(([id])=>{ document.getElementById(id).disabled = bossBusy || up; });
+  document.getElementById("bossRevive").disabled = bossBusy || up || noLogin;
+  BOSS_ENGINES.forEach(([id])=>{ document.getElementById(id).disabled = bossBusy || up || noLogin; });
 }
 function bossMsg(t,bad){
   const m=document.getElementById("bossMsg"); if(!m) return;

@@ -31,11 +31,12 @@ RT_ENV = env -i HOME="$$HOME" USER="$$USER" LOGNAME="$$LOGNAME" SHELL="$$SHELL" 
 # in both orders, then the plugins' node tests; only exit codes count. 5.22.112/113 shipped tests that
 # failed whenever another module ran before them in the same process (one leaked env, four stubbed
 # time.sleep for the whole process): a per-module run hid them, and a `| tail` hid the exit code.
+# INSTALL_DIR: an empty one, so text the owner saved on this machine is not what the tests read as a plugin's own words.
 # TERM: the tmux tests need it. A Mac without node skips the .test.mjs files, as tmux tests skip without tmux.
 test:
-	cd tests && mods="$$(ls test_*.py | sed 's/\.py$$//')" && \
-	  $(RT_ENV) TERM=xterm-256color PYTHONPATH="$(CURDIR)" python3 -m unittest -q $$mods && \
-	  $(RT_ENV) TERM=xterm-256color PYTHONPATH="$(CURDIR)" python3 -m unittest -q $$(printf '%s\n' $$mods | sort -r)
+	cd tests && mods="$$(ls test_*.py | sed 's/\.py$$//')" && none="$$(mktemp -d)" && \
+	  $(RT_ENV) INSTALL_DIR="$$none" TERM=xterm-256color PYTHONPATH="$(CURDIR)" python3 -m unittest -q $$mods && \
+	  $(RT_ENV) INSTALL_DIR="$$none" TERM=xterm-256color PYTHONPATH="$(CURDIR)" python3 -m unittest -q $$(printf '%s\n' $$mods | sort -r)
 	@command -v node >/dev/null || { echo "make test: no node, plugin .test.mjs files skipped"; exit 0; }; \
 	for t in mypeople/runtime/plugins/*/*.test.mjs; do node --test "$$t" || exit 1; done
 # boss-supervisor's login gate runs the `mypeople` on PATH, a separate `uv tool` install that no

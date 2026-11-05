@@ -48,8 +48,8 @@ fn python(res: &Path) -> Command {
     // Resources/ inside an installed .app is not writable by the user running it.
     .env("PYTHONDONTWRITEBYTECODE", "1")
     // Take the degraded "board + HUD only, no login yet" path instead of sys.exit(2): a
-    // double-clicked app has no terminal to refuse into, and the login it wants is reachable
-    // from the terminal tab inside the window. See firstrun.ensure().
+    // double-clicked app has no terminal to refuse into, so its window says what to run in a
+    // terminal of the user's own. See firstrun.ensure().
     .env("MYPEOPLE_DESKTOP", "1")
     .stdin(Stdio::null());
     cmd

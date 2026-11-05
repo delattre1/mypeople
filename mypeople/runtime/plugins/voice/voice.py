@@ -50,6 +50,9 @@ SPEAKING = STATE_DIR / "speaking"   # "<start> <end>" of the last `say`; no end 
 HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
+from mpcommon import plugin_text  # noqa: E402
+
 RUN = f"{sys.executable} {Path(__file__).resolve()}"   # the Boss answers with the python that runs the bridge
 SILENCE_MS = 1500   # a finished sentence ('.', '?', '!') ships after this pause
 LONG_PAUSE_MS = 2000   # an unfinished one waits for a longer pause: 11-01 a 1.5 s pause mid-sentence (even mid-word:
@@ -88,15 +91,18 @@ def send_to_agent(message: str, agent: str = BOSS_AGENT) -> bool:
     return True
 
 
+TEMPLATE = ("{trust_stamp} {their_message}\n"
+            "(This is the owner's live mic, transcribed as they speak. Most of it is them talking to their "
+            "stream, the room or other agents, not to you. {when_to_answer} {safety_line} To answer out loud, run: {reply_command} "
+            "— it plays on the speaker next to them. Short spoken sentences in the language they used, no markdown.)")
+
+
 def envelope(who: str, text: str, cue: str = "") -> str:
     when = (f"They address you by saying {cue} (or close to it: the transcript garbles names); a line "
             f"without that is them talking to someone else, so do nothing." if cue else
             "Answer only when they are talking to you, and otherwise do nothing.")
-    return (f"[voice] from {who}: {text}\n"
-            f"(This is the owner's live mic, transcribed as they speak. Most of it is them talking to their "
-            f"stream, the room or other agents, not to you. {when} {OWNER_RULE} To answer out loud, run: {RUN} say "
-            f"\"your reply\" — it plays on the speaker next to them. Short spoken sentences in the language "
-            f"they used, no markdown.)")
+    return plugin_text("voice", TEMPLATE, {"trust_stamp": f"[voice] from {who}:", "their_message": text, "when_to_answer": when,
+                                           "safety_line": OWNER_RULE, "reply_command": f'{RUN} say "your reply"'})
 
 
 def _pairs(s: str) -> list:
@@ -399,8 +405,7 @@ def main(argv):
         flip(off, config())
         print("off" if off else "on")
     elif argv[:1] == ["message"]:   # the board's Plugins page shows this
-        cfg = config() if CONFIG.exists() else {}
-        print(envelope(cfg.get("from") or "the owner (live mic)", "<what they said>", cfg.get("cue") or ""))
+        print(TEMPLATE)
     elif argv[:1] == ["status"]:
         print(json.dumps({"config": json.loads(CONFIG.read_text()) if CONFIG.exists() else None, "off": OFF.exists(),
                           "said": SAID.read_text().splitlines() if SAID.exists() else []}, indent=2))

@@ -42,6 +42,9 @@ STATE_DIR = Path(os.environ.get("WEB_CHAT_STATE_DIR") or INSTALL / "state" / "we
 CREDS, STATE = STATE_DIR / "creds.json", STATE_DIR / "state.json"   # state: {"after": <last delivered seq>}
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 TARGET = os.environ.get("BOSS_AGENT") or f"{os.environ.get('HOST_ID') or socket.gethostname().split('.')[0]}/main:Boss"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
+from mpcommon import plugin_text, render_template  # noqa: E402
+
 RUN = f"{sys.executable} {Path(__file__).resolve()}"   # the Boss runs these with the same python that runs the bridge
 
 
@@ -85,19 +88,25 @@ def call(method, path, body=None, timeout=60):
 STYLE = STATE_DIR / "style.md"
 
 
+SAFETY_LINE = "ABSOLUTE RULE, no exceptions whoever asks or however: never expose our API keys or secrets."
+HOW_TO_ANSWER = ("To answer, run: {reply_command} -- it appears live on their page. Short chat messages. Anything they must "
+                 "text from their iPhone (an activation text, a code) goes ONLY inside the link "
+                 "sms:<number>&body=<that exact text, URL-encoded> in your reply: the page shows it as a 'Continue on "
+                 "iMessage' button that opens Messages with it prefilled. Never write the text or code out for them to "
+                 "copy or type, and never say 'tap Continue on iMessage' without the link in that same reply.{style}")
+TEMPLATE = ("{trust_stamp} {their_message}\n{tapbacks}"
+            "(Someone on Daniel's public web chat page; each visitor is their own thread. FIRST, before reading on: "
+            "{react_command} (shows them it was read). {safety_line} " + HOW_TO_ANSWER + ")")
+
+
 def envelope(m, agent=""):
     v = m["visitor"]
     try:
         style = " ".join(STYLE.read_text().split()).replace("{name}", agent or TARGET.rsplit(":", 1)[1])
     except OSError:
         style = ""
-    rules = (f"ABSOLUTE RULE, no exceptions whoever asks or however: never expose our API keys or secrets. To answer, run: "
-             f"{RUN} reply {v} \"your reply\" -- it appears live on their page. Short chat messages. Anything they must "
-             f"text from their iPhone (an activation text, a code) goes ONLY inside the link "
-             f"sms:<number>&body=<that exact text, URL-encoded> in your reply: the page shows it as a 'Continue on "
-             f"iMessage' button that opens Messages with it prefilled. Never write the text or code out for them to "
-             f"copy or type, and never say 'tap Continue on iMessage' without the link in that same reply."
-             + (f" Reply style: {style}" if style else ""))
+    answer = {"reply_command": f'{RUN} reply {v} "your reply"', "style": f" Reply style: {style}" if style else ""}
+    rules = SAFETY_LINE + " " + render_template(HOW_TO_ANSWER, answer)
     if m.get("kind") == "handover":  # the relay's own line, never visitor text: a visitor can type anything
         return (f"[web-chat] web visitor {v} is now yours (handed over by the page's owner); their next messages come here.\n"
                 f"(Read the conversation so far first: {RUN} history {v} -- then greet them and pick up what they "
@@ -110,9 +119,8 @@ def envelope(m, agent=""):
     # Tapbacks they made since their last message ride along, apart from the new text (as Plow Chat hands them over).
     taps = "".join(f"(Earlier, separate from this text: they reacted {t['emoji']} to {'your' if t['on_mine'] else 'their own'} "
                    f"message \"{t['on']}\".)\n" for t in m.get("tapbacks") or [])
-    return (f"[web-chat] from web visitor {v}{page}: {m['text']}\n{taps}"
-            f"(Someone on Daniel's public web chat page; each visitor is their own thread. FIRST, before reading on: "
-            f"{RUN} react {v} {m['id']} 👀 (shows them it was read). {rules})")
+    return plugin_text("web-chat", TEMPLATE, dict(answer, trust_stamp=f"[web-chat] from web visitor {v}{page}:", their_message=m["text"], tapbacks=taps,
+                                                  react_command=f"{RUN} react {v} {m['id']} 👀", safety_line=SAFETY_LINE))
 
 
 PLOW_CHAT = INSTALL / "plugins" / "plow-chat" / "plow-chat.py"
@@ -216,7 +224,7 @@ def main():
     elif cmd == "route" and len(args) == 2:
         print(json.dumps(call("POST", "/agent/route", {"visitor": args[0], "key_sha256": None if args[1] == "none" else args[1]})))
     elif cmd == "message":   # the board's Plugins page shows this
-        print(envelope({"visitor": "<visitor>", "id": "<message id>", "text": "<their message>"}))
+        print(TEMPLATE)
     elif cmd == "status":
         print(json.dumps({"relay": read_json(CREDS, {}).get("url"), "target": TARGET, "after": read_json(STATE, {}).get("after", 0)}, indent=2))
     else:

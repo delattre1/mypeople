@@ -71,7 +71,7 @@ from pathlib import Path
 
 SELF = Path(__file__).resolve()
 sys.path.insert(0, str(SELF.parents[2] / "bin"))
-from mpcommon import Closed, WebSocket  # noqa: E402  (the one the plow-chat bridge holds too)
+from mpcommon import Closed, WebSocket, plugin_text  # noqa: E402  (the one the plow-chat bridge holds too)
 _loader = importlib.machinery.SourceFileLoader(
     "discord_agent", str(SELF.parent.parent / "discord-agent" / "discord-agent.py"))
 DA = importlib.util.module_from_spec(importlib.util.spec_from_loader("discord_agent", _loader))
@@ -272,6 +272,15 @@ def context(m):
     return "".join("\n(%s)" % line for line in lines)
 
 
+PUBLIC_CHANNEL = ("The channel is public: never write an account email, login, key, token or any other credential detail there, "
+                  "for anyone, full trust included; confirm only the outcome (\"done\").")
+TEMPLATE = ("FIRST, before reading on: {react_command} \U0001F440  (marks this message seen for the sender; then read, work and reply)\n"
+            "{trust_stamp} {their_message}{attachments}{context}\n"
+            "(Notes for you only. " + VOICE + " " + INTAKE + " {trust_rules}{engineer_note} {where_it_was_said} Everyone there reads your "
+            "answer, and people also talk to each other, so answer only what is addressed to you. {safety_line} {reply_command} "
+            "Plain text, posted as written; to attach a file, add --file <path> to that reply, up to {max_files}.)")
+
+
 def envelope(m, ch, who, thread=None):
     a = m["author"]
     uid = a["id"]
@@ -289,16 +298,11 @@ def envelope(m, ch, who, thread=None):
             " with --community added to your mp spawn" if trust == "community" else "", RUN, uid)
     # The owner's ask: the agent marks his message seen as its very first step. The agent does it, never
     # this plugin: a 👀 is his proof that the agent itself read it (as plow-chat's envelope).
-    return ("FIRST, before reading on: %s react %s %s \U0001F440  (marks this message seen for the sender; then "
-            "read, work and reply)\n"
-            "[discord user=%s trust=%s chan=%s msg=%s] %s: %s%s%s\n"
-            "(Notes for you only. %s %s %s%s %s Everyone there reads your answer, and people also talk to each "
-            "other, so answer only what is addressed to you. The channel is public: never write an account email, login, "
-            "key, token or any other credential detail there, for anyone, full trust included; confirm only the "
-            "outcome (\"done\"). %s "
-            "Plain text, posted as written; to attach a file, add --file <path> to that reply, up to %d.)"
-            % ((RUN, ch, m["id"], uid, trust, ch, m["id"], name, flat(m.get("content") or ""), files, context(m),
-                VOICE, INTAKE, RULES[trust], own) + where(ch, m["id"], thread) + (MAX_FILES,)))
+    said, answer = where(ch, m["id"], thread)
+    return plugin_text("discord-chat", TEMPLATE, {
+        "react_command": "%s react %s %s" % (RUN, ch, m["id"]), "trust_stamp": "[discord user=%s trust=%s chan=%s msg=%s] %s:" % (uid, trust, ch, m["id"], name),
+        "their_message": flat(m.get("content") or ""), "attachments": files, "context": context(m), "trust_rules": RULES[trust], "engineer_note": own,
+        "where_it_was_said": said, "safety_line": PUBLIC_CHANNEL, "reply_command": answer, "max_files": MAX_FILES})
 
 
 # The owner's ask (10-16): one topic, one thread, so the channel is not spammed and stays readable.
@@ -918,7 +922,7 @@ def main(argv):
             raise SystemExit("DISCORD_CHAT_COOKING is not set: no issue is followed")
         print("\n".join(cook_locked(args[1:]) or ["nothing to say"]) if args else cooking_list())
     elif cmd == "message":   # the board's Plugins page shows this
-        print(envelope({"author": {"id": "0", "username": "<who>"}, "id": "0", "content": "<their message>"}, "0", {}))
+        print(TEMPLATE)
     elif cmd == "status":
         print(json.dumps({"channels": channels(), "threads": read_json(STATE, {}).get("threads"), "users": users(),
                           "cursor": read_json(STATE, {}).get("cursor"),

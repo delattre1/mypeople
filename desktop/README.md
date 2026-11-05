@@ -26,7 +26,7 @@ so the next launch resumes them.
 
 `MYPEOPLE_DESKTOP=1` makes first run come up in "board + HUD, no login yet" mode instead of
 exiting, because a double-clicked app has no terminal to show the refusal in. The login is then
-done from the terminal tab inside the window.
+done in a terminal of your own, and the Boss starts by itself.
 
 ## Build (local, ad-hoc signed)
 

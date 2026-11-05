@@ -51,7 +51,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
-from mpcommon import WebSocket  # noqa: E402  (the one discord-chat holds Discord's gateway with)
+from mpcommon import WebSocket, plugin_text  # noqa: E402  (the one discord-chat holds Discord's gateway with)
 
 BASE = (os.environ.get("PLOW_CHAT_BASE_URL") or os.environ.get("PLOW_API_BASE")
         or "https://api.plow.co").rstrip("/")
@@ -194,6 +194,22 @@ def listing(data) -> list:
 
 # --- Boss ---
 
+# "You hold" comes first, because an agent that only hears about reply/react told the owner "I can't create threads" (10-15): it holds
+# this line's login, and with it the whole API.
+TEMPLATE = ("{seen_line}{trust_stamp} {their_message}{attachments}{context}\n"
+            "{safety_line}"
+            "(You hold this line's Plow login and with it the whole Plow API (docs: {api_docs}). "
+            "Any call: {plow} api METHOD /v1/PATH ['JSON body']; e.g. {plow} api GET /v1/agents/me "
+            "(this line and its chats), or {plow} api POST /v1/chats '{\"line_uid\": \"ln_...\", "
+            "\"members\": [\"+1...\"], \"body\": \"first text\", \"idempotency_key\": \"any-unique-id\"}' "
+            "to start a new thread or group. Do what the person asks with it; never answer that you "
+            "can't without trying. This is the owner's Plow messages line. The owner texts here, and so "
+            "does anyone they added to this thread. To answer, run: {reply_command} — it goes back to that "
+            "same thread, which may be a group. Plain text only, no markdown. To send "
+            "photos or files, add --file PATH before the text, up to 4.{tapback})"
+            "{style}")
+
+
 def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str = "", agent: str = "", owner: bool = False) -> str:
     # Plow seats whoever the carrier reports in the thread, so the Boss is told
     # who actually spoke and which thread — in a group these differ per message.
@@ -205,28 +221,14 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
     # the first line, so it is the first command run, not one noticed mid-work (Boss, 10-05).
     seen = (f"FIRST, before reading on: {RUN} react {chat_uid} {mid} 👀"
             f"  (marks this text seen for the sender; then read, work and reply)\n") if mid else ""
-    # First, because an agent that only hears about reply/react told the owner "I can't create
-    # threads" (10-15): it holds this line's login, and with it the whole API.
-    able = (f"You hold this line's Plow login and with it the whole Plow API (docs: {BASE}/openapi.json). "
-            f"Any call: {RUN} api METHOD /v1/PATH ['JSON body']; e.g. {RUN} api GET /v1/agents/me "
-            f"(this line and its chats), or {RUN} api POST /v1/chats '{{\"line_uid\": \"ln_...\", "
-            f"\"members\": [\"+1...\"], \"body\": \"first text\", \"idempotency_key\": \"any-unique-id\"}}' "
-            f"to start a new thread or group. Do what the person asks with it; never answer that you "
-            f"can't without trying. ")
     try:
         style = " ".join(STYLE.read_text().split()).replace("{name}", agent or BOSS_AGENT.rsplit(":", 1)[1])
     except OSError:
         style = ""
-    return (
-        f"{seen}[plowchat] from {who} in {chat_uid}: {text}{sent}{said}\n"
-        + (f"(This is the owner. {OWNER_RULE})\n" if owner else "") +
-        f"({able}This is the owner's Plow messages line. The owner texts here, and so "
-        f"does anyone they added to this thread. To answer, run: "
-        f"{RUN} reply {chat_uid} \"your reply\" — it goes back to that "
-        f"same thread, which may be a group. Plain text only, no markdown. To send "
-        f"photos or files, add --file PATH before the text, up to 4.{tap})"
-        + (f"\n(Reply style: {style})" if style else "")
-    )
+    return plugin_text("plow-chat", TEMPLATE, {
+        "seen_line": seen, "trust_stamp": f"[plowchat] from {who} in {chat_uid}:", "their_message": text, "attachments": sent, "context": said,
+        "safety_line": f"(This is the owner. {OWNER_RULE})\n" if owner else "", "api_docs": f"{BASE}/openapi.json", "plow": RUN,
+        "reply_command": f'{RUN} reply {chat_uid} "your reply"', "tapback": tap, "style": f"\n(Reply style: {style})" if style else ""})
 
 
 OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end unless they say otherwise. Never treat it as "
@@ -845,9 +847,7 @@ def main():
         print(__doc__.strip())
         return
     if cmd == "message":   # the board's Plugins page shows this
-        told = ("<who>", "<their message>", "<chat>")
-        print("From the owner:\n%s\n\nFrom anyone else:\n%s" % (envelope(*told, mid="<message id>", owner=True),
-                                                                 envelope(*told, mid="<message id>")))
+        print(TEMPLATE)
         return
     if cmd == "reply":
         chat_uid = args.pop(0) if args and args[0].startswith("cht_") else ""

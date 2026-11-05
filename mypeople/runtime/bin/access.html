@@ -64,15 +64,15 @@ textarea:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
 <div class="tabs" id="tabs" role="group" aria-label="Who to show"></div>
 <div id="view"></div>
 </main>
+<script src="/textbox.js"></script>
 <script>
 "use strict";
 // Every value here came from another MyPlow, an agent or an owner's input: textContent and .value only, never markup.
 const msg=document.getElementById("msg"),view=document.getElementById("view"),tabs=document.getElementById("tabs"),find=document.getElementById("find");
 const PROVES="a pairing proves a message came from the MyPlow that used your line. It does not prove who owns that MyPlow.";
-const TELLS="This text tells the agent that reads the message. Nothing enforces it.";
 let busy=false,shown="",force=false,kept=false;  // kept: a click's error, which a poll must not wipe
-let state=null,tab="",q="",line="",lineFor="",qrShown=false;
-const sel={wait:"",in:"",out:""},drafts={},asks={},opened=new Set();
+let state=null,tab="",q="",line="",lineFor="",lineGood="",qrShown=false;
+const sel={wait:"",in:"",out:""},drafts={},asks={};
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
 function fail(status,text){
   if(status===401){msg.textContent="";const a=el("a","","Log in on the board");a.href="/";msg.append(a," to see who has access.")}
@@ -110,15 +110,11 @@ function revoke(g){
 function hasAccess(g){
   const p=el("div","panel");
   p.append(who(g.name+"'s agent",g.host,el("span","ok","Paired")));
-  const lab=el("label","lab","Permission message"),area=el("textarea");
-  area.value=g.host in drafts?drafts[g.host]:g.text;area.placeholder="No message. Their messages arrive with the stamp alone.";area.setAttribute("aria-label","Permission message for "+g.name);area.oninput=()=>{drafts[g.host]=area.value};lab.append(area);p.append(lab);
-  const saving=el("div","row end");saving.append(revoke(g),button("b","Save",async()=>{if(await post("save",{host:g.host,text:area.value}))delete drafts[g.host]}));p.append(saving);
+  p.append(textBox({key:g.host,label:"The message "+g.name+"'s agent arrives in",base:g.template,defaults:g.defaults,required:g.required,warned:g.warned,person:["their_message"],drafts,redraw:()=>{force=true;draw()},onSave:t=>post("save",{host:g.host,text:t})}));
   const asking=el("div","row"),say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the message for "+g.name);say.maxLength=1000;say.value=asks[g.host]||"";say.oninput=()=>{asks[g.host]=say.value};
   asking.append(say,button("b","Ask",async()=>{if(await post("ask",{host:g.host,text:say.value}))delete asks[g.host]}));p.append(asking);
-  p.append(el("p","small",g.asking?"Your agent is rewriting it.":"Applies from "+g.name+"'s next message. "+TELLS));
-  const said=el("details","said");said.open=opened.has(g.host);
-  said.ontoggle=()=>{said.open?opened.add(g.host):opened.delete(g.host)};
-  said.append(el("summary","","What it tells the agent"),el("pre","",g.package));p.append(said);
+  p.append(el("p","hint",g.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from "+g.name+"'s next message. Nothing enforces this text."));
+  const end=el("div","acts");end.append(revoke(g));p.append(end);
   return p;
 }
 // No permission message here: that text belongs to the messages you receive. What you asked, where it stands, and ending it.
@@ -186,7 +182,7 @@ function newLine(){
     const show=button("b",qrShown?"Hide":"Show",()=>{qrShown=!qrShown;force=true;draw()});
     box.append(c,show);p.append(box);
     if(qrShown)p.append(qrCanvas(line));
-    p.append(el("p","small","Good for 24 h and one use. Whoever runs it asks for access to this MyPlow; nothing is shared until you grant it here."));
+    p.append(el("p","small",lineGood+" Whoever runs it asks for access to this MyPlow; nothing is shared until you grant it here."));
   }
   return p;
 }
@@ -240,7 +236,7 @@ async function post(op,body){
     if(!r.ok){kept=true;fail(r.status,d.error)}else msg.textContent="";
   }catch(e){kept=true;fail(0)}
   busy=false;shown="";force=true;
-  if(d.line){line=d.line;qrShown=false}
+  if(d.line){line=d.line;qrShown=false;lineGood="Good for "+d.minutes+" minutes, until "+new Date(Date.now()+d.minutes*60000).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+", and one use."}
   if(ok&&op==="grant"){tab="in";sel.in=body.host}   // on to the text they will arrive with
   await load();
   force=true;draw();

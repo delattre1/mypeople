@@ -24,9 +24,8 @@ button[role=switch][aria-checked=true]{background:var(--volt)}
 button[role=switch][aria-checked=true]::after{transform:translateX(18px);background:#111110}
 button[role=switch]:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
 button[role=switch]:disabled{opacity:.5;cursor:default}
-.said{margin-top:8px;color:var(--muted);font-size:13px}
-.said summary{cursor:pointer}
-.said pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--mono);color:var(--ink)}
+.said{margin-top:8px}
+.fixed{margin:8px 0 0;padding:10px 12px;border:1px solid #ffffff14;border-radius:9px;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.65 var(--mono);color:var(--ink)}
 .ask{display:flex;gap:8px;margin-top:8px}
 input,textarea{min-width:0;border-radius:9px;border:1px solid #ffffff26;background:#0f0f0e;color:var(--ink)}
 .ask input{flex:1;height:36px;padding:0 12px;font:14px var(--sans)}
@@ -68,12 +67,13 @@ code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
 <div id="view"></div>
 <p class="install">Or install one yourself, on the Mac. It arrives switched off: <code>mp plugins install &lt;folder or git URL&gt;</code></p>
 </main>
+<script src="/textbox.js"></script>
 <script>
 "use strict";
 // Every value here came from a plugin's conf or an owner's input: textContent and .value only, never markup.
 const msg=document.getElementById("msg"),tabs=document.getElementById("tabs"),view=document.getElementById("view"),asked=document.getElementById("asked"),want=document.getElementById("want");
 let busy=false,said={},shown="",force=false,lastRules=null,kept=false,rows=null,tab="";  // kept: a click's error, which a poll must not wipe
-const sel={},opened=new Set(),drafts={},asks={},sent=[];
+const sel={},drafts={},asks={},sent=[];
 const TABS=[["running","Running"],["off","Off"],["not set up","Not set up"]];
 // A plugin that is switched on and not running is with those that should be running, and its state says "down".
 const groupOf=r=>r.state==="off"||r.state==="not set up"?r.state:"running";
@@ -85,17 +85,24 @@ function fail(status,text){
   else msg.textContent=text||"Couldn't reach MyPlow.";
 }
 const stateEl=r=>el("span","state "+r.state.replace(/ /g,"-"),r.state);
-function folded(r){
-  if(!said[r.name])return null;
-  const d=el("details","said");d.open=opened.has(r.name);
-  d.ontoggle=()=>{d.open?opened.add(r.name):opened.delete(r.name)};
-  d.append(el("summary","","What it tells the agent"),el("pre","",said[r.name]));
-  const lab=el("label","lab desc","Your text, added to every message. The plugin's own lines stay.");
-  const area=el("textarea");area.value=r.name in drafts?drafts[r.name]:r.rule;area.placeholder="Nothing yet";area.setAttribute("aria-label","Your text for "+r.name);area.oninput=()=>{drafts[r.name]=area.value};lab.append(area);d.append(lab);
+// The text, open, no fold. Its kind says whose it is: all of it the owner's, or fixed with the owner's own text beside it, or on Access.
+function textOf(r){
+  const m=said[r.name];if(!m)return null;
+  const d=el("div","said");
+  if(m.kind==="access"){
+    d.append(el("pre","fixed",m.text));
+    const a=el("a","","Access");a.href="/access";const n=el("p","note desc","Read only: each person's own message is on ");n.append(a,".");d.append(n);
+    return d;
+  }
+  const save=async t=>send("/todo/plugins/wrap",{name:r.name,text:t}),redraw=()=>{force=true;draw()};
+  if(m.kind==="template")d.append(textBox({key:r.name,label:"What "+r.name+" tells the agent",base:m.text,defaults:m.default,required:m.required,warned:m.warned,person:["their_message"],drafts,redraw,onSave:save}));
+  else{
+    d.append(el("pre","fixed",m.text),el("p","note desc","These lines are fixed: the agent reads what comes in here as a stranger's words, so words added to them would never count. Yours go to it on their own, below."));
+    d.append(textBox({key:r.name,label:"Your text for "+r.name,base:r.rule,defaults:"",required:[],warned:[],person:[],drafts,redraw,onSave:save}));
+  }
   const say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the text for "+r.name);say.maxLength=1000;say.value=asks[r.name]||"";say.oninput=()=>{asks[r.name]=say.value};
-  const row=el("div","ask");row.append(say,button("Ask",async()=>{if(await send("/todo/plugins/wrap-ask",{name:r.name,text:say.value}))delete asks[r.name]}),button("Save",async()=>{if(await send("/todo/plugins/wrap",{name:r.name,text:area.value}))delete drafts[r.name]}));d.append(row);
-  d.append(el("p","note desc",r.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from its next message. This text tells the agent that reads the message. Nothing enforces it."));
-  if(r.name==="a2a"){const a=el("a","","Access");a.href="/access";const n=el("p","note desc","Each person's own message is on ");n.append(a,".");d.append(n)}
+  const row=el("div","ask");row.append(say,button("Ask",async()=>{if(await send("/todo/plugins/wrap-ask",{name:r.name,text:say.value}))delete asks[r.name]}));d.append(row);
+  d.append(el("p","note desc",r.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from its next message. Nothing enforces this text."));
   return d;
 }
 function one(r){
@@ -106,7 +113,7 @@ function one(r){
   if(r.state!=="not set up"){const b=el("button");b.type="button";b.setAttribute("role","switch");b.setAttribute("aria-checked",String(r.state!=="off"));b.setAttribute("aria-label",r.name);b.onclick=()=>flip(r,b);hd.append(b)}
   p.append(hd);
   if(r.state==="not set up")p.append(button("Ask your agent to connect it",()=>connect("Connect the "+r.name+" plugin that is already here")));
-  const d=folded(r);if(d)p.append(d);
+  const d=textOf(r);if(d)p.append(d);
   return p;
 }
 function draw(){
@@ -129,7 +136,7 @@ function render(next){
   if(now===shown&&!force)return;  // the 5 s poll must not redraw what they may be reading or selecting
   rows=next;
   // A saved rule changes what the plugin's message says: read that again, once, not on every poll.
-  const rules=rows.map(r=>r.rule).join("\0");
+  const rules=rows.map(r=>r.rule+"\0"+r.custom).join("\0");
   if(lastRules!==null&&rules!==lastRules){lastRules=rules;shown=now;loadSaid();return}
   lastRules=rules;shown=now;draw();
 }

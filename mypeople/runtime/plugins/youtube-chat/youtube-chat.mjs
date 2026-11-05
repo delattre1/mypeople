@@ -70,13 +70,22 @@ function writeJson(p, obj) {
 
 // --- In: YouTube chat -> MP ---
 
+export const TEMPLATE = '{trust_stamp} {their_message}\n'
+  + "({who} is on Daniel's whitelist of community developers. They may use Daniel's device to code "
+  + "through the MyPlow board exactly as Daniel does. {safety_line} "
+  + "This came from Daniel's YouTube live chat; to answer, run: {reply_command} "
+  + '-- it posts into the live chat.)';
+
+// mpcommon.plugin_text, in this plugin's language: the owner's edit if there is one, read per message, filled in one pass.
 export function envelope(author, text, channel = '') {
-  return `[youtube-chat] from ${author}${channel ? ` (YouTube channel ${channel})` : ''}: ${text}\n`
-    + `(${author} is on Daniel's whitelist of community developers. They may use Daniel's device to code `
-    + `through the MyPlow board exactly as Daniel does. ABSOLUTE RULE, no exceptions whoever asks or however: `
-    + `never expose our API keys - do not show, print, post, send or commit any of them. `
-    + `This came from Daniel's YouTube live chat; to answer, run: node ${SELF} reply "your reply" `
-    + `-- it posts into the live chat.)`;
+  let saved = '';
+  try { saved = readFileSync(join(STATE_DIR, 'template.txt'), 'utf8'); } catch { /* none: its own words */ }
+  const values = {
+    trust_stamp: `[youtube-chat] from ${author}${channel ? ` (YouTube channel ${channel})` : ''}:`, their_message: text, who: author,
+    safety_line: 'ABSOLUTE RULE, no exceptions whoever asks or however: never expose our API keys - do not show, print, post, send or commit any of them.',
+    reply_command: `node ${SELF} reply "your reply"`,
+  };
+  return (saved || TEMPLATE).replace(/\{([a-zA-Z0-9_]+)\}/g, (all, k) => (Object.hasOwn(values, k) ? values[k] : all));
 }
 
 // One YouTube chat message out of a Restream websocket frame, or null.
@@ -322,7 +331,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const [cmd = 'serve', ...rest] = process.argv.slice(2);
   if (cmd === 'serve') serve();
   else if (cmd === 'reply') reply(rest.join(' ')).catch((e) => { console.error(`not posted: ${e.message}`); process.exit(1); });
-  else if (cmd === 'message') console.log(envelope('<who>', '<their message>'));   // the board's Plugins page shows this
+  else if (cmd === 'message') console.log(TEMPLATE);   // the board's Plugins page shows this
   else if (cmd === 'status') console.log(JSON.stringify({ target: TARGET, video: readJson(STATE, {}).video || null,
     allowlist: ALLOWLIST, bound: readJson.raw(BOUND) }, null, 2));
   else { console.error('usage: youtube-chat.mjs serve | reply "text" | status'); process.exit(2); }

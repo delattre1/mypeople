@@ -37,6 +37,10 @@ try {
   assert.ok(envelope('Ana', 'oi').startsWith('[youtube-chat] from Ana: oi\n'));
   assert.ok(envelope('Ana', 'oi', ANA).startsWith(`[youtube-chat] from Ana (YouTube channel ${ANA}): oi\n`), 'verified channel id next to the name');
   assert.match(envelope('Ana', 'oi'), /youtube-chat\.mjs reply "your reply"/);
+  // The owner's edit applies to the next message, and what a viewer wrote is never read as a variable.
+  writeFileSync(join(dir, 'template.txt'), '{trust_stamp} {their_message} short. {reply_command}');
+  assert.match(envelope('Ana', '{reply_command}'), /^\[youtube-chat\] from Ana: \{reply_command\} short\. node .*reply "your reply"$/);
+  rmSync(join(dir, 'template.txt'));
   // Allowlist: missing file = nobody (and it is created for him to edit).
   assert.equal(await admitted(ANA), false);
   assert.match(readFileSync(LIST, 'utf8'), /@handle or channel id/);

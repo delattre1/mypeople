@@ -219,7 +219,7 @@ _LOGIN_BANNER_TMPL = """
 </style>
 <div id="mp-login-banner" data-mp-banner>
   <b>Login required.</b> This node has no AI login yet, so no agent can run.
-  Run it inside this node: __MP_LOGIN_STEPS__
+  Open a terminal on this machine and run: __MP_LOGIN_STEPS__
   <span style="opacity:.8">The Boss starts by itself ~15s after login — no restart needed.</span>
 </div>
 """
@@ -445,6 +445,51 @@ ROUTE_TTL = 24 * 3600  # a reply nobody claimed within a day was never coming
 
 def _route_head(message):
     return " ".join((message or "").split())[:160]
+
+
+_VARIABLE = re.compile(r"\{([a-zA-Z0-9_]+)\}")
+
+
+def render_template(template, values):
+    """Fill a message's variables, in one pass, so words a sender wrote are never read as a variable. A name that is not a
+    variable goes out as written."""
+    return _VARIABLE.sub(lambda m: str(values[m.group(1)]) if m.group(1) in values else m.group(0), template)
+
+
+def saved_template(plugin):
+    """The owner's edited message for a plugin, or "": then the plugin's own words go out, unchanged. Read per message."""
+    try:
+        with open(os.path.join(CFG["INSTALL_DIR"], "state", plugin, "template.txt")) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def plugin_text(plugin, template, values):
+    """What a plugin hands an agent: its own words, or the owner's edit of them, with this message's values filled in."""
+    return render_template(saved_template(plugin) or template, values)
+
+
+# The variables a message cannot lose: the agent would get none of what was said, could not tell who sent it, or could not answer.
+REQUIRED_VARIABLES = ("their_message", "trust_stamp", "reply_command")
+# These only warn, in the page: the owner may mean to drop them.
+WARNED_VARIABLES = ("safety_line", "trust_rules", "confirm_command")
+
+
+def in_template(names, template):
+    return [v for v in names if "{%s}" % v in template]
+
+
+def checked_template(default, text):
+    """A message as written, or ValueError. Every way of saving one comes through here, so none can lose a variable."""
+    text = "".join(c if c == "\n" or c.isprintable() else " " for c in str(text or "")).strip()[:8000]
+    if not text:
+        raise ValueError("a message cannot be empty")
+    lost = [v for v in in_template(REQUIRED_VARIABLES, default) if "{%s}" % v not in text]
+    if lost:
+        raise ValueError("not saved: without %s the agent cannot be told who this is, what they said, or how to answer"
+                         % ", ".join("{%s}" % v for v in lost))
+    return text
 
 
 def _rule_text(plugin):

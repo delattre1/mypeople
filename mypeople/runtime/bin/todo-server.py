@@ -696,6 +696,9 @@ class Handler(C.JSONHandler):
         if p == "/favicon.ico":
             return self._send(204, raw=b"")
         # Brand fonts (bin/fonts, SIL OFL). Public like the pages that link them; basename only.
+        if p == "/textbox.js":   # the text box Access and Plugins share. No login: it holds no data.
+            with open(os.path.join(HTML_DIR, "textbox.js"), "rb") as f:
+                return self._send(200, raw=f.read(), ctype="text/javascript; charset=utf-8")
         if p.startswith("/fonts/"):
             name = os.path.basename(p)
             fp = os.path.join(HTML_DIR, "fonts", name)

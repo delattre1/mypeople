@@ -398,11 +398,10 @@ def login_howto():
     instruction instead of three copies drifting apart.
     """
     if os.environ.get("MYPEOPLE_DESKTOP") == "1":
-        return ["open the terminal tab above and run:  claude auth login",
+        return ["claude auth login",
                 "(`codex login` / `grok login` work too)"]
     if os.environ.get("MYPEOPLE_CONTAINER") == "1":
         return ["docker compose exec -it mypeople claude auth login",
-                "or open the terminal tab above and run:  claude auth login",
                 "(`codex login` / `grok login` work too)"]
     return ["claude auth login",
             "(`codex login` / `grok login` work too)",
@@ -732,8 +731,8 @@ def ensure(preferred_backend=None, allow_unauthenticated=None):
         # `mypeople up` still refuses cleanly and starts nothing -- that behaviour is the
         # reference, not the bug. The desktop app joins the container here because sys.exit(2)
         # in a double-clicked .app is a window that never opens and says nothing: it has no
-        # terminal to print to, and the login it is asking for is reachable only from the
-        # terminal tab inside the window it just refused to show.
+        # terminal to print to, so the window it just refused to show is the only place to say
+        # that a login is missing and which command to run in a terminal of the user's own.
         allow_unauthenticated = (os.environ.get("MYPEOPLE_CONTAINER") == "1" or
                                  os.environ.get("MYPEOPLE_DESKTOP") == "1")
     # Backend config seeding happens BEFORE the auth gate on purpose (card 293fc81898). It writes
