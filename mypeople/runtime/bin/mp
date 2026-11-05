@@ -749,8 +749,9 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
         })
         print(result)
         return 0 if ok else 1
-    if not shutil.which(backend):
-        print("ERROR: %s CLI is not installed on this node" % backend, file=sys.stderr)
+    why = C.backend_unready(backend)
+    if why:
+        print("ERROR: mp spawn: " + why, file=sys.stderr)
         return 2
     _, sess, tab = C.parse_agent_id(aid)
     if cwd is None:

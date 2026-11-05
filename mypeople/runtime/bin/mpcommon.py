@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """MyPlow shared helpers: config, auth/session, json io, tmux delivery, http proxy.
 Python 3 stdlib only."""
-import os, json, hmac, hashlib, base64, html, time, socket, ssl, subprocess, urllib.request, urllib.parse
+import os, sys, json, hmac, hashlib, base64, html, time, socket, ssl, subprocess, shutil, urllib.request, urllib.parse
+import errno
 import re
 import mimetypes
 import shlex, signal
@@ -500,6 +501,25 @@ def checked_template(default, text):
     return text
 
 
+def backend_unready(backend):
+    """Why an agent on this backend cannot run on this machine, or "". Started anyway, its window runs nothing and the page says Down
+    with no reason (a Codex Boss chosen on a Mac whose one-liner installed Claude only, 11-05). Claude's login is the node's login
+    gate's job; Codex's is checked here, as it is the one a person picks on its own."""
+    name = {"claude": "Claude", "codex": "Codex", "grok": "Grok"}.get(backend, backend)
+    if not shutil.which(backend):
+        how = {"claude": "curl -fsSL https://claude.ai/install.sh | bash && claude auth login",
+               "codex": "brew install --cask codex && codex login" if sys.platform == "darwin" else "npm install -g @openai/codex && codex login",
+               "grok": "install the Grok CLI, then grok login"}.get(backend, "install it")
+        return "%s is not installed on this machine. In a terminal, run: %s" % (name, how)
+    if backend == "codex":
+        try:
+            if subprocess.run(["codex", "login", "status"], capture_output=True, timeout=15).returncode != 0:
+                return "Codex is installed but not signed in. In a terminal, run: codex login"
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return ""
+
+
 def without_old_name(saved, default):
     """Text saved on 5.22.167 says {trust_stamp}, its one name for the words that say who sent it, {who} for the sender on YouTube and
     {safety_line} for Plow Chat's line that says it is the owner. Read in today's words, so it delivers right and the page can show and
@@ -871,10 +891,11 @@ def tmux_refused(r):
 
 
 def tmux_server_gone(env=None):
-    """True when no server can be behind the socket, False when it may only be stalled.
+    """True when no server can be behind the default socket, False when it may only be stalled.
 
-    ponytail: any daemonized tmux counts, so a private `tmux -L` server beside a crashed default one
-    holds recovery back until it exits. Naming the socket's owner needs lsof, not on every node.
+    A server that takes the connection is there. A refusal on Linux means nothing listens: a full queue makes a client wait there
+    instead. macOS refuses a full queue too, so there the server counts as there only if a tmux process holds this very socket. Any
+    daemonized tmux used to count, and a builder's private `tmux -L` server held a crashed default one's recovery back (11-05).
     """
     if not hasattr(os, "getuid"):
         return True  # no uid, no tmux-<uid> directory, no ps (a Windows port on psmux): it cannot tell a stalled server from a gone one, so a refused command is final
@@ -882,17 +903,23 @@ def tmux_server_gone(env=None):
     path = os.path.join(env.get("TMUX_TMPDIR") or "/tmp", "tmux-%d" % os.getuid(), "default")
     if not os.path.exists(path):
         return True
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(2)
     try:
-        ps = subprocess.run(["ps", "-axo", "ppid=,comm="], capture_output=True, text=True, timeout=5).stdout
-    except subprocess.TimeoutExpired:
+        s.connect(path)
         return False
-    except OSError:
+    except OSError as e:
+        if e.errno not in (errno.ECONNREFUSED, errno.ENOENT, errno.ENOTSOCK):
+            return False    # a timeout, Linux's full queue, no permission: there is a server, maybe stalled
+    finally:
+        s.close()
+    if sys.platform != "darwin":
         return True
-    for line in ps.splitlines():
-        ppid, _, comm = line.strip().partition(" ")
-        if ppid == "1" and os.path.basename(comm.strip()).startswith("tmux"):
-            return False
-    return True
+    try:
+        held = subprocess.run(["lsof", "-U", "-a", "-c", "tmux", "-Fn"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return not {path, os.path.realpath(path)} & {line[1:] for line in held.splitlines() if line.startswith("n")}
 
 
 def tmux_run(*args, env=None, wait=None, **kw):

@@ -95,6 +95,7 @@ class EnsureWithoutLoginTests(unittest.TestCase):
         self.assertTrue(any("auth login" in line for line in howto))
         self.assertFalse(any("docker" in line for line in howto), howto)
         self.assertEqual("claude auth login", howto[0], "the banner says where: the app has no terminal tab")
+        self.assertIn("codex login", howto[1], "Codex has to be installed first: the one-liner installs Claude only")
 
     def test_no_way_of_running_names_a_terminal_tab(self):
         for env in ({"MYPEOPLE_DESKTOP": "1"}, {"MYPEOPLE_CONTAINER": "1"}, {}):

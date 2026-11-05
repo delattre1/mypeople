@@ -921,6 +921,9 @@ class Handler(C.JSONHandler):
                 return self._send(409, {"ok": False, "error": "boss_already_alive",
                                         "agent_id": live_id,
                                         "detail": "kill the running Boss before spawning another"})
+            why = C.backend_unready(backend)
+            if why:     # said here, on the card: queued, mp spawn's refusal reached only a log and the page said Down
+                return self._send(409, {"ok": False, "error": "backend_not_ready", "detail": why})
             # role:boss is required or do_spawn refuses a bundle-less Boss; queue-client also
             # defaults it for any master spawn, but state it explicitly here (card f6339b85a2).
             payload = {"backend": backend, "is_master": True, "role": "boss"}
@@ -930,6 +933,12 @@ class Handler(C.JSONHandler):
                 return self._send(409, {"ok": False, "error": "boss_already_alive",
                                         "agent_id": live_id,
                                         "detail": "the Boss is already up; nothing to revive"})
+            rc, roster = C.http_json("GET", CFG["QUEUE_URL"] + "/roster", None, {"X-Queue-Secret": SECRET}, timeout=6)
+            was = next((r.get("backend") for r in (roster if rc == 200 and isinstance(roster, list) else [])
+                        if r.get("agent_id") == BOSS_AGENT), "")
+            why = C.backend_unready(was) if was in BOSS_BACKENDS else ""
+            if why:
+                return self._send(409, {"ok": False, "error": "backend_not_ready", "detail": why + ". Or start a new Boss on another one."})
             payload = {}
             target = BOSS_AGENT
         else:

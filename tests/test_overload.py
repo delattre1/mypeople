@@ -197,12 +197,19 @@ class ServerGoneTests(unittest.TestCase):
         self.dir = tmp.name
         self.C = sandbox.load(tmp.name, "mpcommon.py")
 
-    def gone(self, ps):
+    def gone(self, lsof, platform="darwin"):
         sock = Path(self.dir) / ("tmux-%d" % os.getuid()) / "default"
         sock.parent.mkdir(exist_ok=True)
-        sock.touch()
-        with mock.patch.object(self.C.subprocess, "run", return_value=mock.Mock(stdout=ps)):
-            return self.C.tmux_server_gone({"TMUX_TMPDIR": self.dir})
+        if not sock.exists():
+            left = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            left.bind(str(sock))        # what a crash leaves: the socket's file, and nothing listening on it
+            left.close()
+        with mock.patch.object(self.C.subprocess, "run", return_value=mock.Mock(stdout=lsof)) as run, \
+                mock.patch.object(self.C.sys, "platform", platform):
+            self.ran = run.called or None
+            gone = self.C.tmux_server_gone({"TMUX_TMPDIR": self.dir})
+            self.ran = run.called
+            return gone
 
     def test_no_socket_means_gone(self):
         self.assertTrue(self.C.tmux_server_gone({"TMUX_TMPDIR": self.dir}))
@@ -215,10 +222,49 @@ class ServerGoneTests(unittest.TestCase):
             self.assertTrue(self.C.tmux_server_gone({"TMUX_TMPDIR": self.dir}))
 
     def test_a_stale_socket_after_a_crash_means_gone_so_the_fleet_recovers(self):
-        self.assertTrue(self.gone("  1 launchd\n 900 tmux\n"))
+        self.assertTrue(self.gone("p900\nf5\nn/private/tmp/tmux-501/other\n"))
 
-    def test_a_daemonized_tmux_process_means_it_may_only_be_stalled(self):
-        self.assertFalse(self.gone("  1 launchd\n  1 /Applications/MyPlow.app/Contents/Resources/runtime/bin/tmux\n"))
+    def test_a_tmux_holding_this_very_socket_means_it_may_only_be_stalled(self):
+        own = os.path.join(self.dir, "tmux-%d" % os.getuid(), "default")
+        self.assertFalse(self.gone("p900\nf5\nn%s\n" % own))
+        self.assertFalse(self.gone("p900\nf5\nn%s\n" % os.path.realpath(own)), "macOS names /tmp as /private/tmp")
+
+    def test_a_server_for_a_private_socket_never_counts_as_the_default_one(self):
+        private = os.path.join(self.dir, "tmux-%d" % os.getuid(), "ck-swarm-swarm0")
+        self.assertTrue(self.gone("p900\nf5\nn%s\n" % private))
+
+    def test_on_linux_a_refusal_is_final_and_nothing_else_is_asked(self):
+        self.assertTrue(self.gone("anything", platform="linux"))
+        self.assertFalse(self.ran)
+
+
+@unittest.skipUnless(shutil.which("tmux") and hasattr(os, "getuid"), "needs tmux")
+class RealPrivateServerTests(unittest.TestCase):
+    """A real private server running and the default socket dead: what a builder's Mac had (11-05)."""
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(dir="/tmp")
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.env = {k: v for k, v in os.environ.items() if k != "TMUX"}   # $TMUX would point tmux at the server this runs in
+        self.env["TMUX_TMPDIR"] = self.dir
+        self.C = sandbox.load(tmp.name, "mpcommon.py")
+
+    def server(self, *private):
+        subprocess.run(["tmux", *private, "-f", "/dev/null", "new-session", "-d", "-s", "t"], env=self.env, check=True)
+        self.addCleanup(subprocess.run, ["tmux", *private, "kill-server"], env=self.env, capture_output=True)
+
+    def test_a_private_server_with_the_default_socket_dead_reads_as_gone(self):
+        self.server("-L", "mp-private-test")
+        sock = os.path.join(self.dir, "tmux-%d" % os.getuid(), "default")
+        left = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        left.bind(sock)
+        left.close()
+        self.assertTrue(self.C.tmux_server_gone(self.env))
+
+    def test_a_live_default_server_beside_it_reads_as_there(self):
+        self.server("-L", "mp-private-test")
+        self.server()
+        self.assertFalse(self.C.tmux_server_gone(self.env))
 
 
 class ReaperTests(unittest.TestCase):
