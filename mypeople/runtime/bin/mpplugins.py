@@ -146,6 +146,12 @@ def _words(p):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def saved_text(name):
+    """The owner's edit of a plugin's message in today's words, or "". Every read comes through here."""
+    saved = C.saved_template(name)
+    return C.without_old_name(saved, _words(_get(name))) if saved else ""
+
+
 def messages():
     """{plugin: its message and what the page may do with it}. It starts a process per plugin, so the page asks once per open, not on
     its 5 s poll. kind: template, the words are the owner's to edit around variables only the plugin fills; yes, its words are fixed and
@@ -156,7 +162,7 @@ def messages():
         if kind in ("template", "yes"):
             words = _words(p)
         if words:
-            out[name] = {"kind": kind, "default": words, "text": (C.saved_template(name) or words) + C.owner_rule(name),
+            out[name] = {"kind": kind, "default": words, "text": (saved_text(name) or words) + C.owner_rule(name),
                          "required": C.in_template(C.REQUIRED_VARIABLES, words), "warned": C.in_template(C.WARNED_VARIABLES, words),
                          "identity": C.in_template(C.IDENTITY_VARIABLES, words)}
     return out
@@ -246,7 +252,7 @@ def rule_ask(name, words, send):
     if kind == "access":
         raise PluginError("each person's message is on the Access page")
     if kind == "template":
-        send(TEMPLATE_ASK % {"name": name, "words": words, "text": (C.saved_template(name) or said) + C.owner_rule(name), "code": code,
+        send(TEMPLATE_ASK % {"name": name, "words": words, "text": (saved_text(name) or said) + C.owner_rule(name), "code": code,
                              "keep": ", ".join("{%s}" % v for v in C.in_template(C.REQUIRED_VARIABLES, said))}, words)
     else:
         send(RULE_ASK % {"name": name, "words": words, "said": said, "text": rule(name), "code": code}, words)

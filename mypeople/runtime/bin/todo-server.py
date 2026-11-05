@@ -842,6 +842,8 @@ class Handler(C.JSONHandler):
             op, host = p.rsplit("/", 1)[1], str(body.get("host") or "")
             if op == "line":
                 return self._access("line", str(body.get("name") or ""))
+            if op == "grant" and body.get("both") is False:
+                return self._access(op, host, "one-way")
             if op in ("grant", "decline", "remove"):
                 return self._access(op, host)
             if op in ("save", "ask"):

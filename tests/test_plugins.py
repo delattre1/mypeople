@@ -334,7 +334,12 @@ class Switch(unittest.TestCase):
         self.m.save_rule("t", words.replace("[t] from {sender}:", "Sent by {sender}:"))     # the words around it are the owner's
         self.assertIn("Sent by Ana:", C.plugin_text("t", words, values))
         C.atomic_write(os.path.join(self.m.INSTALL, "state", "t", "template.txt"), b"{trust_stamp} {their_message}")   # saved on 5.22.167
-        self.assertEqual("[t] from Ana: {reply_command} and {other}", C.plugin_text("t", words, values, "[t] from {sender}:"))
+        self.assertEqual("[t] from Ana: {reply_command} and {other}", C.plugin_text("t", words, values))
+        self.assertEqual("[t] from {sender}: {their_message}", self.m.messages()["t"]["text"], "the page reads it in today's words")
+        self.assertEqual("[t] from {sender}: {their_message}", self.m.saved_text("t"), "and so does mp plugins wrap")
+        self.assertEqual("[g] by {sender}: {their_message}", C.without_old_name("{trust_stamp}: {their_message}", "[g] by {sender}: {their_message}"))
+        self.assertEqual('[c] {sender}: "{their_message}"', C.without_old_name('{trust_stamp} "{their_message}"', '[c] {sender}: "{their_message}"\n(x)'))
+        self.assertEqual("[p] {sender}: {their_message}", C.without_old_name("{trust_stamp} {their_message}", "{seen_line}[p] {sender}: {their_message}"))
         self.m.save_rule("t", words.replace("{safety_line} ", "Keep it short. "))   # only warned about, in the page
         self.assertEqual(C.plugin_text("t", words, values), "[t] from Ana: {reply_command} and {other}\nRun mp say. Keep it short. x", "applies to the next message")
         self.assertEqual(self.row("t")["custom"], C.saved_template("t"))
@@ -403,7 +408,13 @@ class Switch(unittest.TestCase):
             self.assertEqual(0, r.returncode, (d.name, r.stderr[-400:]))
             self.assertRegex(r.stdout, "[<{]", d.name)
             if "message=template" in (d / "plugin.conf").read_text():
-                self.m.C.checked_template(r.stdout.strip(), r.stdout.strip())   # its own words pass its own rules
+                words = r.stdout.strip()
+                self.m.C.checked_template(words, words)   # its own words pass its own rules
+                # What 5.22.167 would have saved for it, the stamp under its one old name, reads back as exactly these words.
+                stamp = re.search(r"""STAMP = (["'])(.+?)\1""", (d / run[-1]).read_text()).group(2)
+                self.assertIn(stamp, words, d.name)
+                old = words.replace(stamp, "{trust_stamp}").replace("{sender}", "{who}").replace("{owner_line}", "{safety_line}")
+                self.assertEqual(words, self.m.C.without_old_name(old, words), d.name)
 
     def test_the_owner_rule_is_one_sentence_in_every_plugin_that_carries_it(self):
         found = {re.search(r'^OWNER_RULE = \((.*?)\)$', (PLUGINS / n / f"{n}.py").read_text(), re.S | re.M).group(1)

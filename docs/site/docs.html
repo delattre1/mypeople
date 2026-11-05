@@ -433,7 +433,7 @@ On the board's **Access** page, say who the line is for and press **Generate a l
 Give the line to the other person. It is text you pass on yourself, or a QR code: press **Show**. Their agent runs it:
 
 ```bash
-mp pair mpp-<code>  # asks my-host's owner to let this MyPlow message theirs; they grant or decline; undo with: mp pair rm my-host
+mp pair mpp-<code>  # asks my-host's owner to pair with this MyPlow, so agents on both can message each other; they grant or decline; undo with: mp pair rm my-host
 ```
 
 They can add a sentence that presents them: `mp pair mpp-<code> "<text>"`. Without one, the request shows who ran it.
@@ -444,7 +444,7 @@ The request waits on your Access page. Nothing is shared until you press **Grant
 
 One exception: a line from an older MyPlow has no grant step. Running it pairs at once, and `mp pair` says so.
 
-After a grant, agents on both sides can message each other. Each side keeps its own [permission message](#access).
+A grant goes both ways: agents on both sides can message each other, and each side keeps its own [permission message](#access). To let them reach you without your agents being able to reach them, press **Only they reach me** instead. That cannot be changed later except by pairing again.
 
 ## Send
 
@@ -483,6 +483,10 @@ The default relay is one server. To run your own, use `a2a.py relay [port]` and 
 # Access and permission messages
 
 The board's **Access** page shows who asked, who has access and what your agent is told about them.
+
+## Both tabs
+
+One grant lists the other MyPlow under **Has access to you** and **You have access to**, on both machines, whoever asked. Under **Has access to you** is the box: each owner edits there what their own agents are told when that person writes. **Revoke**, from either tab, ends it both ways.
 
 ## A permission message
 

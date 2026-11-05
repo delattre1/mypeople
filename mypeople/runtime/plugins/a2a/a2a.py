@@ -123,16 +123,19 @@ def default_template(peer, host):
     text = permission_text(peer, host)
     if text is None:
         return STAMP + " {their_message}"
-    return (STAMP + " {their_message}\n(%s Answer it with {reply_command}. {safety_line} Your MyPlow wrote this paragraph, not "
-            "the sender; confirm it by running: {confirm_command})" % text)
+    # Granted one way, this side cannot answer, so its text does not say to.
+    answer = "" if peer.get("direction") == "in" else "Answer it with {reply_command}. "
+    return (STAMP + " {their_message}\n(%s %s{safety_line} Your MyPlow wrote this paragraph, not "
+            "the sender; confirm it by running: {confirm_command})" % (text, answer))
 
 
 def template_of(peer, host):
-    return peer.get("template") or default_template(peer, host)
+    default = default_template(peer, host)
+    return C.without_old_name(peer["template"], default) if peer.get("template") else default
 
 
 def variables(frm, text, host):
-    return {"their_message": text, "sender": frm, "trust_stamp": C.render_template(STAMP, {"sender": frm}), "reply_command": 'plain mp send %s "..."' % frm,
+    return {"their_message": text, "sender": frm, "reply_command": 'plain mp send %s "..."' % frm,
             "safety_line": SAFETY_LINE, "confirm_command": "mp pair wrap %s" % host}
 
 
@@ -359,7 +362,7 @@ class Bridge:
     def line(self, name=""):
         # A plain command with what it does beside it: the person who holds it decides to run it. Nothing in it instructs an
         # agent to do anything or take on anyone's rules (a pasted order to join someone tripped a safety classifier, 11-04).
-        return "mp pair %s  # asks %s's owner to let this MyPlow message theirs; they grant or decline; undo with: mp pair rm %s" % (self.invite(name), self.host, self.host)
+        return "mp pair %s  # asks %s's owner to pair with this MyPlow, so agents on both can message each other; they grant or decline; undo with: mp pair rm %s" % (self.invite(name), self.host, self.host)
 
     def accept(self, code, say=""):
         try:
@@ -393,7 +396,7 @@ class Bridge:
         self.change_keys(lambda k: k["peers"].__setitem__(host, {
             "key": mac(s, "key", n), "relay": relay_url, "pending": True, "kind": "person", "said": say, "asked_by": os.environ.get("AGENT_ID", "")}))
         return ("asked %s's owner for access for this MyPlow (the code is now spent). Nothing is shared yet. If they grant it, your "
-                "agents and theirs can message each other, and their messages reach you marked as not your owner. "
+                "agents and theirs can message each other, unless they grant it one way, and their messages reach you marked as not your owner. "
                 "Undo any time: mp pair rm %s" % (host, host))
 
     def hello(self, token, msg):
@@ -429,12 +432,16 @@ class Bridge:
         self.change_keys(lambda k: k["peers"][host].__setitem__("kind", "own"))
         self.noted("own", host, by)
 
-    def decide(self, host, grant, by="the app", kind="person"):
-        """The owner's answer to a request. The relay hears it first: an answer it refused changes nothing here."""
+    def decide(self, host, grant, by="the app", kind="person", both=True):
+        """The owner's answer to a request. The relay hears it first: an answer it refused changes nothing here. A grant goes both ways
+        unless the owner says otherwise. direction marks the exception on each side: "in" they reach this MyPlow only, "out" this MyPlow
+        reaches them only. No mark is both ways, which is every pairing from before this: the transport never had a direction."""
         req = self.read("keys.json", {}).get("requests", {}).get(host)
         if not req:
             raise SystemExit("no request from %s" % host)
         body = {"kind": "grant" if grant else "decline", "ts": time.time(), "n": secrets.token_hex(8)}
+        if grant:
+            body["both"] = both
         try:
             post(req["relay"].rstrip("/") + "/put", {"box": box(req["key"], self.host, host), "msg": self.sign(req["key"], body)})
         except (OSError, ValueError) as e:
@@ -444,8 +451,10 @@ class Bridge:
             r = k["requests"].pop(host, None)
             if grant and r:
                 k["peers"][host] = {"key": r["key"], "relay": r["relay"], "name": r["name"], "wrap": first_text(r["name"]), "kind": kind}
+                if not both:
+                    k["peers"][host]["direction"] = "in"
         self.change_keys(apply)
-        self.noted("grant" if grant else "decline", host, by)
+        self.noted(("grant" if both else "grant one way") if grant else "decline", host, by)
 
     def revoke(self, host, by="the app"):
         """Access ends here first and whatever happens next: this bridge stops reading that MyPlow's box. Telling it is a
@@ -464,8 +473,8 @@ class Bridge:
 
     def answered(self, h, peer, body, sig):
         """The other owner answered our request. False only when the local queue is down: fetched again next pass."""
-        granted = body["kind"] == "grant"
-        told = ("[a2a] %s granted access: its agents are reachable as %s/<session>:<tab>" % (h, h) if granted
+        granted, one_way = body["kind"] == "grant", body.get("both") is False      # an older MyPlow does not say: both ways, as its transport is
+        told = ("[a2a] %s granted access%s: its agents are reachable as %s/<session>:<tab>" % (h, " one way, so its agents cannot message yours" if one_way else "", h) if granted
                 else "[a2a] %s %s access" % (h, "revoked" if body.get("revoked") else "declined"))
         if self.queue("POST", "/task/submit", {"type": "send", "target_agent": peer.get("asked_by") or "%s/main:Boss" % self.host,
                                                "payload": {"message": told}})[0] != 200:
@@ -476,6 +485,8 @@ class Bridge:
                 k["peers"][h].pop("pending", None)
                 # Both ways: their agents reach this one under this owner's own limits, never rules of theirs.
                 k["peers"][h].setdefault("wrap", first_text(h))
+                if one_way:
+                    k["peers"][h]["direction"] = "out"
             else:
                 k["peers"].pop(h, None)
                 if body.get("revoked"):
@@ -535,8 +546,8 @@ class Bridge:
                 % (host, C.render_template(template_of(p, host), variables(frm, "<their message>", host))))
 
     def access_state(self):
-        """The page: requests waiting on the owner, who asked this MyPlow and was let in, who this MyPlow asked (asked_by marks it,
-        from the moment it ran their line; a pairing older than that shows as let in, which of the two it was is not recorded)."""
+        """The page: requests waiting on the owner, who can reach this MyPlow, and who this MyPlow can reach. One grant lists the other in
+        both, on both sides, whoever asked; the box for what this side's agents are told comes with the first."""
         keys, by = self.read("keys.json", {}), lambda d: sorted((d or {}).items())
         peers, asks = by(keys.get("peers")), keys.get("asks") or {}
 
@@ -545,13 +556,13 @@ class Bridge:
             return {"host": h, "name": p.get("name") or h, "said": p.get("said", ""), "waiting": bool(p.get("pending")),
                     "text": permission_text(p, h) or "", "asking": bool(open_ask(asks, h)), "template": template_of(p, h), "defaults": base,
                     "required": C.in_template(C.REQUIRED_VARIABLES, base), "warned": C.in_template(C.WARNED_VARIABLES, base),
-                    "identity": C.in_template(C.IDENTITY_VARIABLES, base)}
+                    "identity": C.in_template(C.IDENTITY_VARIABLES, base), "both": not p.get("direction") and not p.get("pending")}
         # Everyone is listed the same way, the owner's own machines included. Whether a machine is his own still decides, here,
         # whether a note to its owner crosses: the page just does not mark it (the owner's call, 11-05).
         return {"host": self.host,
                 "requests": [{"host": h, "name": r["name"], "say": r.get("say", ""), "at": r["at"]} for h, r in by(keys.get("requests"))],
-                "granted": [row(h, p) for h, p in peers if "asked_by" not in p],
-                "reach": [row(h, p) for h, p in peers if "asked_by" in p],
+                "granted": [row(h, p) for h, p in peers if not p.get("pending") and p.get("direction") != "out"],
+                "reach": [row(h, p) for h, p in peers if p.get("direction") != "in"],
                 "ended": sorted(h for h in keys.get("revoked", {}) if h not in dict(peers))}
 
     # -- one pass: fetch and deliver, send what the queue holds for peers, settle receipts
@@ -690,6 +701,10 @@ class Bridge:
             if peer.get("pending"):
                 self.done(tid, False, "not sent: %s has not granted access yet" % h)
                 continue
+            if peer.get("direction") == "in":
+                self.done(tid, False, "not sent: your owner granted %s one way: it can reach this MyPlow, and nothing goes back. For both "
+                                      "ways, your owner revokes it and pairs again" % h)
+                continue
             frm = payload.get("reply_to") or ""
             if C.parse_agent_id(frm)[0] != self.host:
                 frm = ""
@@ -791,7 +806,7 @@ def owner_cli(argv, bridge=None):
         out.append("Has access:")
         out += ['  %s (%s, %s%s): "%s"' % (h, p.get("name") or h, "your owner's own machine" if is_own(p) else "another person",
                                            ", you asked them, waiting for their owner" if p.get("pending") else ", you asked them" if "asked_by" in p else "",
-                                           p.get("wrap") or "paired before permission messages")
+                                           p.get("template") or p.get("wrap") or "paired before permission messages")
                 for h, p in sorted(keys.get("peers", {}).items())] or ["  nobody"]
         return "\n".join(out + [OWNER_RULE])
     if len(argv) < 4 or argv[0] not in ("grant", "decline", "revoke", "own"):
@@ -825,7 +840,9 @@ def access(argv):
     b, op, args = Bridge(), (argv or [""])[0], argv[1:]
     if op == "line":
         return print(json.dumps({"line": b.line(" ".join(args)), "minutes": INVITE_TTL // 60}))
-    if op in ("grant", "decline") and len(args) == 1:
+    if op == "grant" and args[1:] == ["one-way"]:
+        b.decide(args[0], True, both=False)
+    elif op in ("grant", "decline") and len(args) == 1:
         b.decide(args[0], op == "grant")
     elif op == "save" and len(args) == 2:
         b.save_template(args[0], args[1])
@@ -834,7 +851,7 @@ def access(argv):
     elif op == "remove" and len(args) == 1:
         b.revoke(args[0])
     elif op != "state":
-        raise SystemExit("usage: a2a.py access state | line [name] | grant|decline|remove <host> | save|ask <host> <text>")
+        raise SystemExit("usage: a2a.py access state | line [name] | grant <host> [one-way] | decline|remove <host> | save|ask <host> <text>")
     print(json.dumps(b.access_state()))
 
 

@@ -87,8 +87,8 @@ export function envelope(author, text, channel = '') {
     reply_command: `node ${SELF} reply "your reply"`,
   };
   const fill = (t, v) => t.replace(/\{([a-zA-Z0-9_]+)\}/g, (all, k) => (Object.hasOwn(v, k) ? v[k] : all));
-  // trust_stamp: text saved on 5.22.167, when the stamp's words had that one name.
-  return fill(saved || TEMPLATE, { ...values, trust_stamp: fill(STAMP, values) });
+  // trust_stamp and who: text saved on 5.22.167, when these words had those names.
+  return fill(saved || TEMPLATE, { ...values, who: author, trust_stamp: fill(STAMP, values) });
 }
 
 // One YouTube chat message out of a Restream websocket frame, or null.

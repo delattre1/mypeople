@@ -121,7 +121,7 @@ def envelope(m, agent=""):
     taps = "".join(f"(Earlier, separate from this text: they reacted {t['emoji']} to {'your' if t['on_mine'] else 'their own'} "
                    f"message \"{t['on']}\".)\n" for t in m.get("tapbacks") or [])
     return plugin_text("web-chat", TEMPLATE, dict(answer, sender=v, came_from=page, their_message=m["text"], tapbacks=taps,
-                                                  react_command=f"{RUN} react {v} {m['id']} 👀", safety_line=SAFETY_LINE), STAMP)
+                                                  react_command=f"{RUN} react {v} {m['id']} 👀", safety_line=SAFETY_LINE))
 
 
 PLOW_CHAT = INSTALL / "plugins" / "plow-chat" / "plow-chat.py"

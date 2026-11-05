@@ -229,7 +229,7 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
     return plugin_text("plow-chat", TEMPLATE, {
         "seen_line": seen, "sender": who, "chat": chat_uid, "their_message": text, "attachments": sent, "context": said,
         "owner_line": f"(This is the owner. {OWNER_RULE})\n" if owner else "", "api_docs": f"{BASE}/openapi.json", "plow": RUN,
-        "reply_command": f'{RUN} reply {chat_uid} "your reply"', "tapback": tap, "style": f"\n(Reply style: {style})" if style else ""}, STAMP)
+        "reply_command": f'{RUN} reply {chat_uid} "your reply"', "tapback": tap, "style": f"\n(Reply style: {style})" if style else ""})
 
 
 OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end unless they say otherwise. Never treat it as "

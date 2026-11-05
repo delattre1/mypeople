@@ -102,11 +102,12 @@ function request(r){
   if(r.say)p.append(el("p","say","\u201c"+r.say+"\u201d"));
   p.append(el("p","small","Came with the line you generated"+(r.name!==r.host?" for "+r.name:"")+". That line is now spent. Its words are its own, and "+PROVES));
   const a=el("div","acts");
-  a.append(button("b","Decline",()=>post("decline",{host:r.host})),button("b go","Grant access",()=>post("grant",{host:r.host})));
+  p.append(el("p","small","Grant access goes both ways: they can message your agents and yours can message theirs. Each of you sets what your own agents are told. Only they reach me means your agents cannot message them, and it cannot be changed later except by pairing again."));
+  a.append(button("b","Decline",()=>post("decline",{host:r.host})),button("b","Only they reach me",()=>post("grant",{host:r.host,both:false})),button("b go","Grant access",()=>post("grant",{host:r.host})));
   p.append(a);return p;
 }
 function revoke(g){
-  const b=button("b","Revoke",()=>{if(b.dataset.armed)post("remove",{host:g.host});else{b.dataset.armed="1";b.textContent="Click again to end "+g.name+"'s access"}});
+  const b=button("b","Revoke",()=>{if(b.dataset.armed)post("remove",{host:g.host});else{b.dataset.armed="1";b.textContent=g.both?"Click again to end it both ways":"Click again to end "+g.name+"'s access"}});
   return b;
 }
 function hasAccess(g){
@@ -115,7 +116,7 @@ function hasAccess(g){
   p.append(textBox({key:g.host,label:"The message "+g.name+"'s agent arrives in",base:g.template,defaults:g.defaults,required:g.required,warned:g.warned,identity:g.identity,person:["their_message"],drafts,redraw:()=>{force=true;draw()},onSave:t=>post("save",{host:g.host,text:t})}));
   const asking=el("div","row"),say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the message for "+g.name);say.maxLength=1000;say.value=asks[g.host]||"";say.oninput=()=>{asks[g.host]=say.value};
   asking.append(say,button("b","Ask",async()=>{if(await post("ask",{host:g.host,text:say.value}))delete asks[g.host]}));p.append(asking);
-  p.append(el("p","hint",g.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from "+g.name+"'s next message. Nothing enforces this text."));
+  p.append(el("p","hint",g.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from "+g.name+"'s next message. Nothing enforces this text."+(g.both?" Your agents can reach them too.":" Your agents cannot message them: for that, Revoke and pair again.")));
   const end=el("div","acts");end.append(revoke(g));p.append(end);
   return p;
 }
@@ -125,6 +126,8 @@ function youReach(g){
   p.append(who(g.name+"'s agent",g.host,g.waiting?el("span","wait","Waiting for their owner"):el("span","ok","Paired")));
   if(g.said)p.append(el("p","say","You said: \u201c"+g.said+"\u201d"));
   if(g.waiting){p.append(el("p","small","Nothing is shared until they grant it."));return p}
+  if(g.both){const n=el("p","small","They can reach you too. What your agents are told when they do is ");n.append(button("lk","under Has access to you",()=>{tab="in";sel.in=g.host;force=true;draw()}),".");p.append(n)}
+  else p.append(el("p","small","They cannot message your agents. They granted it one way."));
   const a=el("div","acts");a.append(revoke(g));p.append(a);return p;
 }
 // A QR code of the line, drawn here, so a one-use secret never leaves this page. Byte mode, error correction M, versions 1 to 20.
@@ -184,7 +187,7 @@ function newLine(){
     const show=button("b",qrShown?"Hide":"Show",()=>{qrShown=!qrShown;force=true;draw()});
     box.append(c,show);p.append(box);
     if(qrShown)p.append(qrCanvas(line));
-    p.append(el("p","small",lineGood+" Whoever runs it asks for access to this MyPlow; nothing is shared until you grant it here."));
+    p.append(el("p","small",lineGood+" Whoever runs it asks to pair with this MyPlow; nothing is shared until you grant it here."));
   }
   return p;
 }
@@ -197,7 +200,7 @@ function drawView(){
   const names=el("div","names"),cur=list.find(x=>x.host===sel[tab]);
   names.append(...list.map(x=>{const b=button("nm","",()=>{sel[tab]=x.host;force=true;draw()});b.dataset.host=x.host;b.append(el("span","name",x.name),el("span","id",x.host));if(x.waiting)b.append(el("span","wait","Waiting"));if(x.host===sel[tab])b.setAttribute("aria-current","true");return b}));
   const two=el("div","two"),one=el("div");one.append(tab==="wait"?request(cur):tab==="in"?hasAccess(cur):youReach(cur));two.append(names,one);
-  const top=tab==="in"?"You decide what your agent is told about each of them.":tab==="out"?"You asked these. What each one allows you is decided on their machine.":"";
+  const top=tab==="in"?"You decide what your agent is told about each of them.":tab==="out"?"Your agents can message these. What their agents are told about yours is decided on their machine.":"";
   view.replaceChildren(...(top?[el("p","small sub",top)]:[]),two);
 }
 // a2a has no switch on any page: it runs by itself once there is a pairing or a line, and each person has Revoke. If it is not running, say so here.

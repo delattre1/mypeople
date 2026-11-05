@@ -270,7 +270,7 @@ def envelope(ticket: str, lang: str, text: str, interrupted: bool, test=False) -
            if test else f"{OWNER}, live on the phone")
     return plugin_text("voice-call", TEMPLATE, {"ticket": ticket, "sender": who, "language": lang, "their_message": text, "interrupted": cut,
                                                 "safety_line": "" if test else OWNER_RULE + " ",
-                                                "reply_command": f'python3 {SELF} say {ticket} "..."'}, STAMP)
+                                                "reply_command": f'python3 {SELF} say {ticket} "..."'})
 
 
 def text_owner(text: str) -> bool:

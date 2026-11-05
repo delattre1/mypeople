@@ -103,7 +103,7 @@ def envelope(who: str, text: str, cue: str = "") -> str:
             f"without that is them talking to someone else, so do nothing." if cue else
             "Answer only when they are talking to you, and otherwise do nothing.")
     return plugin_text("voice", TEMPLATE, {"sender": who, "their_message": text, "when_to_answer": when,
-                                           "safety_line": OWNER_RULE, "reply_command": f'{RUN} say "your reply"'}, STAMP)
+                                           "safety_line": OWNER_RULE, "reply_command": f'{RUN} say "your reply"'})
 
 
 def _pairs(s: str) -> list:

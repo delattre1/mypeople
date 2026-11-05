@@ -272,7 +272,7 @@ def format_event(repo, n, event, owned, orphan=False):
     said = "" if event["kind"] in ("merged", "closed") else (body or "(no text)") + " "
     return plugin_text("github-prs", TEMPLATE, {
         "event": "new issue" if noun == "issue" else "PR " + what, "repo": repo, "number": n, "yours": " (your PR)" if owned and noun != "issue" else "",
-        "sender": event["user"], "verdict": " — %s" % verdict if verdict else "", "their_message": said, "link": event["url"], "no_owner_note": tail}, STAMP)
+        "sender": event["user"], "verdict": " — %s" % verdict if verdict else "", "their_message": said, "link": event["url"], "no_owner_note": tail})
 
 
 # ---------------------------------------------------------------- the fleet

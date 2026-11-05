@@ -303,7 +303,7 @@ def envelope(m, ch, who, thread=None):
     return plugin_text("discord-chat", TEMPLATE, {
         "react_command": "%s react %s %s" % (RUN, ch, m["id"]), "user_id": uid, "trust_level": trust, "channel_id": ch, "message_id": m["id"], "sender": name,
         "their_message": flat(m.get("content") or ""), "attachments": files, "context": context(m), "trust_rules": RULES[trust], "engineer_note": own,
-        "where_it_was_said": said, "safety_line": PUBLIC_CHANNEL, "reply_command": answer, "max_files": MAX_FILES}, STAMP)
+        "where_it_was_said": said, "safety_line": PUBLIC_CHANNEL, "reply_command": answer, "max_files": MAX_FILES})
 
 
 # The owner's ask (10-16): one topic, one thread, so the channel is not spammed and stays readable.

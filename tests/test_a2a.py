@@ -219,7 +219,7 @@ class A2ATest(unittest.TestCase):
 
     def test_the_line_is_a_plain_command_and_the_other_side_keeps_its_own_limits(self):
         line = self.alpha.line("Riley")
-        self.assertRegex(line, r"^mp pair mpp-\S+  # asks alpha's owner to let this MyPlow message theirs; they grant or decline; undo with: mp pair rm alpha$")
+        self.assertRegex(line, r"^mp pair mpp-\S+  # asks alpha's owner to pair with this MyPlow, so agents on both can message each other; they grant or decline; undo with: mp pair rm alpha$")
         self.beta.accept(line.split()[2])       # no text given: the request shows the plain fact of who ran it
         self.alpha.step()
         self.assertEqual(self.alpha.read("keys.json", {})["requests"]["beta"]["say"], "Asked from %s" % (os.environ.get("AGENT_ID") or "beta"))
@@ -333,9 +333,9 @@ class A2ATest(unittest.TestCase):
         self.beta.step()
         asker, owner = self.beta.access_state(), self.alpha.access_state()
         self.assertEqual([(r["host"], r["waiting"]) for r in asker["reach"]], [("alpha", False)])
-        self.assertEqual(asker["granted"], [])
+        self.assertEqual([r["host"] for r in asker["granted"]], ["alpha"], "one grant, both tabs, whoever asked")
         self.assertEqual([(r["host"], r["name"], r["waiting"]) for r in owner["granted"]], [("beta", "Sam", False)])
-        self.assertEqual(owner["reach"], [])
+        self.assertEqual([r["host"] for r in owner["reach"]], ["beta"], "one grant, both tabs, whoever asked")
         self.assertIn("alpha's agent", asker["reach"][0]["text"])
         # and when it ends, both sides say so
         self.alpha.revoke("beta")
@@ -386,8 +386,62 @@ class A2ATest(unittest.TestCase):
 
     def test_text_saved_when_the_stamp_had_one_name_still_says_who_sent_it(self):
         self.pair(name="Riley")
-        self.alpha.change_keys(lambda k: k["peers"]["beta"].__setitem__("template", "{trust_stamp} {their_message}"))
-        self.assertEqual(self.package("hi"), "[from beta/main:Boss, on another MyPlow] hi")
+        self.alpha.change_keys(lambda k: k["peers"]["beta"].__setitem__("template", "{trust_stamp} {their_message} Saved. {reply_command}"))
+        self.assertTrue(self.package("hi").startswith("[from beta/main:Boss, on another MyPlow] hi Saved. plain mp send"))
+        row = self.alpha.access_state()["granted"][0]
+        self.assertEqual(row["template"], "[from {sender}, on another MyPlow] {their_message} Saved. {reply_command}", "the page reads it in today's words, or it says it cannot be saved")
+        self.alpha.save_template("beta", row["template"] + " Kept.")      # so it can be saved as it stands
+
+    def test_one_grant_both_tabs_on_both_sides_and_each_owner_sets_what_their_own_agents_receive(self):
+        self.pair()
+        for me, other in ((self.alpha, "beta"), (self.beta, "alpha")):
+            state = me.access_state()
+            self.assertEqual(([r["host"] for r in state["granted"]], [r["host"] for r in state["reach"]]), ([other], [other]))
+            self.assertTrue(state["granted"][0]["both"] and state["reach"][0]["both"])
+        # the side that asked edits what it receives, in the same box, and that changes nothing on the other side
+        self.beta.save_template("alpha", "[from {sender}, on another MyPlow] {their_message} Beta's own words. {reply_command}")
+        self.qa.submit("send", "beta/main:Boss", {"message": "hello", "reply_to": "alpha/main:Boss"})
+        self.alpha.step()
+        self.beta.step()
+        self.assertIn("hello Beta's own words. plain mp send alpha/main:Boss", self.qb.sends()[-1]["payload"]["message"])
+        self.qb.sends()[-1]["delivered"] = True
+        self.assertNotIn("Beta's own words", self.package("back"))
+        # a revoke from either side ends it on both
+        self.alpha.revoke("beta")
+        self.beta.step()
+        self.assertEqual((self.alpha.access_state()["granted"], self.beta.access_state()["granted"], self.beta.access_state()["reach"]), ([], [], []))
+
+    def test_only_they_reach_me_shows_one_tab_each_side_and_nothing_goes_back(self):
+        self.beta.accept(self.alpha.invite("Riley"))
+        self.alpha.step()
+        self.alpha.decide("beta", True, both=False)
+        self.beta.step()
+        for t in self.qb.sends():
+            self.assertIn("one way", t["payload"]["message"])
+            t["delivered"] = True
+        owner, asker = self.alpha.access_state(), self.beta.access_state()
+        self.assertEqual(([r["host"] for r in owner["granted"]], owner["reach"]), (["beta"], []))
+        self.assertEqual((asker["granted"], [r["host"] for r in asker["reach"]]), ([], ["alpha"]))
+        self.assertFalse(owner["granted"][0]["both"] or asker["reach"][0]["both"])
+        self.assertNotIn("reply_command", owner["granted"][0]["template"], "it cannot answer, so the text does not say to")
+        self.assertEqual("hi", self.package("hi").split("] ", 1)[1].split("\n")[0], "they reach this MyPlow")
+        tid = self.qa.submit("send", "beta/main:Boss", {"message": "no", "reply_to": "alpha/main:Boss"})
+        self.alpha.step()
+        self.beta.step()
+        self.assertEqual([], [t for t in self.qb.sends() if "alpha/main:Boss" in t["payload"]["message"]])
+        self.assertIn("one way", self.qa.tasks[tid]["result"])
+
+    def test_a_pairing_from_before_this_is_both_ways_because_it_always_was(self):
+        self.pair()
+        self.beta.change_keys(lambda k: k["peers"]["alpha"].update(asked_by="beta/main:Boss"))
+        self.assertEqual(["alpha"], [r["host"] for r in self.beta.access_state()["granted"]])
+        self.assertEqual(["alpha"], [r["host"] for r in self.beta.access_state()["reach"]])
+
+    def test_the_list_says_the_words_saved_for_someone_not_the_first_ones(self):
+        self.pair(name="Riley")
+        self.alpha.save_template("beta", "[from {sender}, on another MyPlow] {their_message} Saved words. {reply_command}")
+        with mock.patch.dict(os.environ, {"AGENT_ID": "alpha/main:Boss"}):
+            self.assertIn("Saved words.", self.a2a.owner_cli(["list"], self.alpha))
 
     def test_the_plugins_tab_text_no_longer_reaches_a_peers_message(self):
         self.pair(name="Riley")

@@ -63,9 +63,10 @@ __SCRIPT__
  const a=ids.view.querySelectorAll("input")[0];a.value="Let them ask";a.oninput();by("BUTTON","Ask").onclick();await tick();await tick();
  const rv=by("BUTTON","Revoke");rv.onclick();R.afterOneRevoke=posts.filter(p=>p[0]==="remove").length;R.armedText=rv.textContent;rv.onclick();await tick();await tick();
  by("BUTTON","You have access to").onclick();await tick();
+ R.crossNote=ids.view.textContent.includes("They can reach you too");by("BUTTON","under Has access").onclick();await tick();R.crossOn=ids.tabs.children.find(c=>c.attrs["aria-current"]).textContent;by("BUTTON","You have access to").onclick();await tick();
  R.reachTextareas=ids.view.querySelectorAll("textarea").length;R.reachInputs=ids.view.querySelectorAll("input").length;R.reachText=ids.view.textContent;R.reachRevoke=!!ids.view.querySelectorAll("button").find(b=>b.textContent==="Revoke");
  ids.find.value="lin";ids.find.oninput();await tick();R.foundTabs=tabsNow();ids.find.value="";ids.find.oninput();await tick();
- by("BUTTON","Waiting on you").onclick();await tick();by("BUTTON","Grant access").onclick();await tick();await tick();R.afterGrantOn=all().find(n=>n.className.startsWith("st")&&n.attrs["aria-current"]).textContent;
+ by("BUTTON","Waiting on you").onclick();await tick();R.requestSays=ids.view.textContent;by("BUTTON","Only they reach me").onclick();await tick();await tick();by("BUTTON","Waiting on you").onclick();await tick();by("BUTTON","Grant access").onclick();await tick();await tick();R.afterGrantOn=all().find(n=>n.className.startsWith("st")&&n.attrs["aria-current"]).textContent;
  by("BUTTON","Ended").onclick();await tick();R.ended=ids.view.textContent;
  by("BUTTON","New line").onclick();await tick();R.newLine=!!ids.view.querySelectorAll("form").length;
  ids.view.querySelectorAll("form")[0].onsubmit({preventDefault(){}});await tick();await tick();await tick();
@@ -81,10 +82,10 @@ JORDAN = "[from {sender}, on another MyPlow] {their_message}\n(Jordan's text. An
 STATE = {"host": "me",
          "requests": [{"host": "riley-mbp", "name": "Riley", "say": "I am Riley's agent.", "at": 1}],
          "granted": [{"host": "jordan-air", "name": "Jordan", "said": "", "waiting": False, "text": "Jordan's text.", "asking": False, "template": JORDAN, "defaults": JORDAN,
-                      "required": ["their_message", "sender", "reply_command"], "warned": ["safety_line", "confirm_command"], "identity": ["sender"]},
+                      "required": ["their_message", "sender", "reply_command"], "warned": ["safety_line", "confirm_command"], "identity": ["sender"], "both": True},
                      {"host": "lin-1", "name": "lin-1", "said": "", "waiting": False, "text": "", "asking": False, "template": "[from {sender}, on another MyPlow] {their_message}",
-                      "defaults": "[from {sender}, on another MyPlow] {their_message}", "required": ["their_message", "sender"], "warned": [], "identity": ["sender"]}],
-         "reach": [{"host": "casey-mini", "name": "Casey", "said": "Asking about logs.", "waiting": False, "text": "Hidden text.", "asking": False},
+                      "defaults": "[from {sender}, on another MyPlow] {their_message}", "required": ["their_message", "sender"], "warned": [], "identity": ["sender"], "both": False}],
+         "reach": [{"host": "casey-mini", "name": "Casey", "said": "Asking about logs.", "waiting": False, "text": "Hidden text.", "asking": False, "both": True},
                    {"host": "morgan-box", "name": "Morgan", "said": "Hi.", "waiting": True, "text": "", "asking": False}],
          "ended": ["taylor-pc"], "service": "off"}
 
@@ -133,6 +134,15 @@ class AccessTab(unittest.TestCase):
 
     def test_it_says_when_messages_between_myplows_are_off_as_no_other_page_has_them_now(self):
         self.assertIn("mp plugins on a2a", self.r["serviceSays"])
+
+    def test_grant_goes_both_ways_by_default_and_one_click_says_only_they_reach_me(self):
+        grants = [body for op, body in self.r["posts"] if op == "grant"]
+        self.assertEqual(grants, [{"host": "riley-mbp", "both": False}, {"host": "riley-mbp"}])
+        self.assertIn("goes both ways", self.r["requestSays"])
+
+    def test_you_have_access_to_says_they_reach_you_too_and_links_to_the_box(self):
+        self.assertTrue(self.r["crossNote"])
+        self.assertTrue(self.r["crossOn"].startswith("Has access to you"))
 
     def test_you_have_access_to_shows_no_permission_message(self):
         self.assertEqual((self.r["reachTextareas"], self.r["reachInputs"]), (0, 0))

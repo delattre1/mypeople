@@ -2104,7 +2104,7 @@ def do_plugins(argv):
             print("%s installed, off. `mp plugins on %s` runs: %s serve" % (name, name, run))
             return 0
         if verb == "wrap" and len(argv) == 2:
-            print(C.saved_template(argv[1]) or mpplugins.rule(argv[1]) or "%s has no text from your owner." % argv[1])
+            print(mpplugins.saved_text(argv[1]) or mpplugins.rule(argv[1]) or "%s has no text from your owner." % argv[1])
             return 0
         if verb == "wrap" and len(argv) >= 4:
             mpplugins.agent_rule(argv[1], argv[2], " ".join(argv[3:]))
