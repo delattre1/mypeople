@@ -113,7 +113,7 @@ function revoke(g){
 function hasAccess(g){
   const p=el("div","panel");
   p.append(who(g.name+"'s agent",g.host,el("span","ok","Paired")));
-  p.append(textBox({key:g.host,label:"The message "+g.name+"'s agent arrives in",base:g.template,defaults:g.defaults,required:g.required,warned:g.warned,identity:g.identity,person:["their_message"],drafts,redraw:()=>{force=true;draw()},onSave:t=>post("save",{host:g.host,text:t})}));
+  p.append(textBox({key:g.host,label:"The message "+g.name+"'s agent arrives in",base:g.template,defaults:g.defaults,required:g.required,warned:g.warned,identity:g.identity,busy:g.asking,person:["their_message"],drafts,redraw:()=>{force=true;draw()},onSave:t=>post("save",{host:g.host,text:t})}));
   const asking=el("div","row"),say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the message for "+g.name);say.maxLength=1000;say.value=asks[g.host]||"";say.oninput=()=>{asks[g.host]=say.value};
   asking.append(say,button("b","Ask",async()=>{if(await post("ask",{host:g.host,text:say.value}))delete asks[g.host]}));p.append(asking);
   p.append(el("p","hint",g.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from "+g.name+"'s next message. Nothing enforces this text."+(g.both?" Your agents can reach them too.":" Your agents cannot message them: for that, Revoke and pair again.")));

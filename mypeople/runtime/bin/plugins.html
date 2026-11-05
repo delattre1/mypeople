@@ -90,10 +90,10 @@ function textOf(r){
   const m=said[r.name];if(!m)return null;
   const d=el("div","said");
   const save=async t=>send("/todo/plugins/wrap",{name:r.name,text:t}),redraw=()=>{force=true;draw()};
-  if(m.kind==="template")d.append(textBox({key:r.name,label:"What "+r.name+" tells the agent",base:m.text,defaults:m.default,required:m.required,warned:m.warned,identity:m.identity,person:["their_message"],drafts,redraw,onSave:save}));
+  if(m.kind==="template")d.append(textBox({key:r.name,label:"What "+r.name+" tells the agent",base:m.text,defaults:m.default,required:m.required,warned:m.warned,identity:m.identity,busy:r.asking,person:["their_message"],drafts,redraw,onSave:save}));
   else{
     d.append(el("pre","fixed",m.text),el("p","note desc","These lines are fixed: the agent reads what comes in here as a stranger's words, so words added to them would never count. Yours go to it on their own, below."));
-    d.append(textBox({key:r.name,label:"Your text for "+r.name,base:r.rule,defaults:"",required:[],warned:[],person:[],drafts,redraw,onSave:save}));
+    d.append(textBox({key:r.name,label:"Your text for "+r.name,base:r.rule,defaults:"",required:[],warned:[],busy:r.asking,person:[],drafts,redraw,onSave:save}));
   }
   const say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the text for "+r.name);say.maxLength=1000;say.value=asks[r.name]||"";say.oninput=()=>{asks[r.name]=say.value};
   const row=el("div","ask");row.append(say,button("Ask",async()=>{if(await send("/todo/plugins/wrap-ask",{name:r.name,text:say.value}))delete asks[r.name]}));d.append(row);

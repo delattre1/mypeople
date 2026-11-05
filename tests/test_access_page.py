@@ -46,9 +46,9 @@ __SCRIPT__
  R.serviceSays=ids.service.textContent;R.firstTabs=tabsNow();R.firstOn=all().find(n=>n.className.startsWith("st")&&n.attrs["aria-current"]).textContent;R.hot=all().find(n=>n.textContent.startsWith("Waiting on you")&&n.className.startsWith("st")).className;R.request=page().includes("It does not prove who owns that MyPlow.");
  by("BUTTON","Has access to you").onclick();await tick();
  R.names=ids.view.querySelectorAll("button").filter(b=>b.className==="nm").map(b=>b.children[0].textContent);
- R.jordanText=ids.view.querySelectorAll("textarea")[0].value;
+ R.jordanText=ids.view.querySelectorAll("textarea")[0].value;const busyNow=()=>{const e=ids.view.querySelectorAll("div").find(d=>d.className==="ed busy");return e?e.querySelectorAll("span").filter(s=>s.className==="busytag").map(s=>s.textContent).join():""};R.jordanBusy=busyNow();
  document.activeElement=null;listeners.keydown({key:"ArrowDown",target:ids.find,preventDefault(){}});await tick();R.afterDown=cur();
- R.ownText=ids.view.querySelectorAll("textarea")[0].value;
+ R.ownText=ids.view.querySelectorAll("textarea")[0].value;R.ownBusy=busyNow();
  listeners.keydown({key:"ArrowUp",target:ids.find,preventDefault(){}});await tick();R.afterUp=cur();
  const t=ids.view.querySelectorAll("textarea")[0],base=t.value;R.boxCopy=by("BUTTON","Copy").textContent;R.unchangedHidden=by("BUTTON","Save").parent.hidden;
  t.value=base.replace("{their_message}","");t.oninput();R.lostOff=by("BUTTON","Save").disabled;R.lostSays=ids.view.textContent.includes("{their_message} the agent gets none of what the person said, so this cannot be saved");by("BUTTON","Put it back").onclick();R.lostBack=t.value.includes("{their_message}");R.backOn=!by("BUTTON","Save").disabled;
@@ -83,7 +83,7 @@ STATE = {"host": "me",
          "requests": [{"host": "riley-mbp", "name": "Riley", "say": "I am Riley's agent.", "at": 1}],
          "granted": [{"host": "jordan-air", "name": "Jordan", "said": "", "waiting": False, "text": "Jordan's text.", "asking": False, "template": JORDAN, "defaults": JORDAN,
                       "required": ["their_message", "sender", "reply_command"], "warned": ["safety_line", "confirm_command"], "identity": ["sender"], "both": True},
-                     {"host": "lin-1", "name": "lin-1", "said": "", "waiting": False, "text": "", "asking": False, "template": "[from {sender}, on another MyPlow] {their_message}",
+                     {"host": "lin-1", "name": "lin-1", "said": "", "waiting": False, "text": "", "asking": True, "template": "[from {sender}, on another MyPlow] {their_message}",
                       "defaults": "[from {sender}, on another MyPlow] {their_message}", "required": ["their_message", "sender"], "warned": [], "identity": ["sender"], "both": False}],
          "reach": [{"host": "casey-mini", "name": "Casey", "said": "Asking about logs.", "waiting": False, "text": "Hidden text.", "asking": False, "both": True},
                    {"host": "morgan-box", "name": "Morgan", "said": "Hi.", "waiting": True, "text": "", "asking": False}],
@@ -143,6 +143,12 @@ class AccessTab(unittest.TestCase):
     def test_you_have_access_to_says_they_reach_you_too_and_links_to_the_box(self):
         self.assertTrue(self.r["crossNote"])
         self.assertTrue(self.r["crossOn"].startswith("Has access to you"))
+
+    def test_while_the_agent_rewrites_after_an_ask_the_box_says_so_and_moves(self):
+        self.assertEqual(self.r["ownBusy"], "Your agent is rewriting this")
+        self.assertEqual(self.r["jordanBusy"], "", "no ask open, nothing moving")
+        self.assertIn("@keyframes mp-rewrite", BOX)
+        self.assertIn("prefers-reduced-motion", BOX, "still for whoever asked for less motion")
 
     def test_you_have_access_to_shows_no_permission_message(self):
         self.assertEqual((self.r["reachTextareas"], self.r["reachInputs"]), (0, 0))

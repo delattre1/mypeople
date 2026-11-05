@@ -16,7 +16,7 @@ BIN = Path(__file__).resolve().parents[1] / "mypeople" / "runtime" / "bin"
 HTML = (BIN / "plugins.html").read_text()
 SCRIPT = (BIN / "textbox.js").read_text() + HTML[HTML.index("<script>\n") + 9:HTML.rindex("</script>")]
 IDS = re.findall(r'id="([\w-]+)"', HTML[HTML.index("<body"):HTML.index("<script")])
-ROWS = [{"name": "plow-chat", "state": "running", "desc": "Texts", "installed": False, "also": ["lab"], "rule": "", "custom": "", "asking": False},
+ROWS = [{"name": "plow-chat", "state": "running", "desc": "Texts", "installed": False, "also": ["lab"], "rule": "", "custom": "", "asking": True},
         {"name": "voice", "state": "down", "desc": "Agents", "installed": False, "also": [], "rule": "", "custom": "", "asking": False},
         {"name": "github-prs", "state": "off", "desc": "PRs", "installed": False, "also": [], "rule": "", "custom": "", "asking": False},
         {"name": "web-chat", "state": "not set up", "desc": "Web", "installed": False, "also": [], "rule": "", "custom": "", "asking": False}]
@@ -34,7 +34,7 @@ const on=()=>ids.tabs.children.find(c=>c.attrs["aria-current"]).textContent;
 __SCRIPT__
 (async()=>{const R={};await tick();
  R.tabs=tabsNow();R.on=on();R.names=ids.view.querySelectorAll("button").filter(b=>b.className==="nm").map(b=>b.children[0].textContent);
- R.folds=ids.view.querySelectorAll("details").length;R.also=ids.view.textContent.includes("Also running, not switched here: lab");
+ R.plowBusy=(ids.view.querySelectorAll("div").find(d=>d.className==="ed busy")||{textContent:""}).textContent.includes("Your agent is rewriting this");R.folds=ids.view.querySelectorAll("details").length;R.also=ids.view.textContent.includes("Also running, not switched here: lab");
  const t=ids.view.querySelectorAll("textarea")[0],base=t.value;R.said=base;R.copy=by("BUTTON","Copy").textContent;R.yellow=ids.view.querySelectorAll("span").filter(n=>n.className==="v person").map(n=>n.textContent);R.grey=ids.view.querySelectorAll("span").filter(n=>n.className==="v").map(n=>n.textContent);
  t.value=base.replace("{reply_command}","");t.oninput();R.lostOff=by("BUTTON","Save").disabled;by("BUTTON","Put it back").onclick();R.lostBack=t.value.includes("{reply_command}");
  t.value=base.replace("{safety_line}","");t.oninput();R.warnOn=!by("BUTTON","Save").disabled;
@@ -76,6 +76,9 @@ class PluginsTab(unittest.TestCase):
         self.assertEqual(self.r["yellow"], ["{their_message}"])
         self.assertEqual(self.r["grey"], ["{sender}", "{chat}", "{reply_command}", "{safety_line}", "{plow}"])
         self.assertTrue(self.r["also"])
+
+    def test_while_the_agent_rewrites_after_an_ask_the_box_says_so(self):
+        self.assertTrue(self.r["plowBusy"])
 
     def test_a_reply_command_cannot_be_lost_and_a_safety_line_only_warns(self):
         self.assertTrue(self.r["lostOff"] and self.r["lostBack"] and self.r["warnOn"])
