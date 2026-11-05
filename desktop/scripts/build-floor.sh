@@ -5,7 +5,7 @@
 # the versions it builds, for MACOSX_DEPLOYMENT_TARGET. A call to anything newer than that target is a build error, not a crash on
 # an older Mac. tmux links the system's ncurses, which every Mac has.
 #
-#   build-floor.sh PREFIX   -> PREFIX/bin/{tmux,asciinema}, PREFIX/lib/{libssl,libcrypto,libuv,libjson-c,libevent,libutf8proc}
+#   build-floor.sh PREFIX   -> PREFIX/bin/{tmux,asciinema}, PREFIX/lib/{libssl,libcrypto,libuv,libjson-c,libevent,libutf8proc,libjemalloc}
 #
 # CMAKE overrides the cmake to run, as in build-ttyd.sh. ttyd itself is built by build-ttyd.sh with DEPS=PREFIX.
 set -euo pipefail
@@ -24,7 +24,7 @@ get() {
   url="$(curl -fsSL "https://formulae.brew.sh/api/formula/$1.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["urls"]["stable"]["url"])')"
   say "$1 <- $url"
   mkdir -p "$W/$1"
-  curl -fsSL --retry 4 "$url" | tar -xz -C "$W/$1" --strip-components 1
+  curl -fsSL --retry 4 "$url" | tar -x -C "$W/$1" --strip-components 1     # gzip or bzip2: tar tells them apart
 }
 cm() { quiet "$CMAKE" -S "$W/$1" -B "$W/$1/b" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$P" -DCMAKE_INSTALL_LIBDIR=lib \
          -DCMAKE_POLICY_VERSION_MINIMUM=3.5 "${@:2}"; quiet "$CMAKE" --build "$W/$1/b" --target install -j "$J"; }
@@ -37,9 +37,13 @@ get libevent
 (cd "$W/libevent" && quiet ./configure --prefix="$P" --disable-openssl --disable-samples --disable-libevent-regress && quiet make -j"$J" && quiet make install)
 get utf8proc
 quiet make -C "$W/utf8proc" -j"$J" prefix="$P" install
+# tmux on macOS wants jemalloc, as macOS calloc(3) does not always zero what it hands out; Homebrew's tmux, which 169 carried, uses it.
+get jemalloc
+(cd "$W/jemalloc" && quiet ./configure --prefix="$P" --disable-debug --with-jemalloc-prefix= && quiet make -j"$J" && quiet make install_lib install_include)
 get tmux
-# strchrnul: the macOS 15.4 SDK has it and macOS 14 does not, and configure finds it either way, so tmux keeps its own.
-(cd "$W/tmux" && quiet ./configure --prefix="$P" --enable-utf8proc ac_cv_func_strchrnul=no && quiet make -j"$J" && quiet make install)
+# Homebrew's arguments. strchrnul: the macOS 15.4 SDK has it and macOS 14 does not, and configure finds it either way, so tmux keeps its own.
+(cd "$W/tmux" && quiet ./configure --prefix="$P" --enable-utf8proc --enable-sixel --enable-jemalloc ac_cv_func_strchrnul=no \
+   && quiet make -j"$J" && quiet make install)
 get asciinema
 quiet cargo install --locked --path "$W/asciinema" --root "$P"
 say "built for macOS $MACOSX_DEPLOYMENT_TARGET in $P: $(ls "$P/bin" | tr '\n' ' ')"
