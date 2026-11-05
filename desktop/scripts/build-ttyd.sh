@@ -18,13 +18,19 @@ CMAKE="${CMAKE:-cmake}"
 BREW="$(brew --prefix)"
 # DEPS: one prefix holding libuv, json-c and OpenSSL built for an older macOS (build-floor.sh); without it, Homebrew's.
 UV="${DEPS:-$BREW/opt/libuv}"; JSONC="${DEPS:-$BREW/opt/json-c}"; SSL="${DEPS:-$BREW/opt/openssl@3}"
+IGNORE=()
+if [ -n "${DEPS:-}" ]; then
+  # Then nothing of Homebrew's may slip in: its newer OpenSSL, built for the runner's macOS, came in through pkg-config (11-05).
+  export PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig"
+  IGNORE=(-DCMAKE_IGNORE_PREFIX_PATH="$BREW")
+fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 say() { printf '[ttyd] %s\n' "$*"; }
 
 say "libwebsockets $LWS_VERSION (static, libuv built in)"
 curl -fsSL "https://github.com/warmcat/libwebsockets/archive/refs/tags/v$LWS_VERSION.tar.gz" | tar -xz -C "$WORK"
-$CMAKE -S "$WORK/libwebsockets-$LWS_VERSION" -B "$WORK/lws-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+$CMAKE -S "$WORK/libwebsockets-$LWS_VERSION" -B "$WORK/lws-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ${IGNORE[@]+"${IGNORE[@]}"} \
   -DCMAKE_INSTALL_PREFIX="$WORK/lws" \
   -DLWS_WITH_LIBUV=ON -DLWS_WITH_EVLIB_PLUGINS=OFF \
   -DLWS_WITH_SHARED=OFF -DLWS_WITH_STATIC=ON -DLWS_STATIC_PIC=ON \
@@ -42,7 +48,7 @@ perl -pi -e 's/ websockets_shared//' "$cfg"
 
 say "ttyd $TTYD_VERSION"
 curl -fsSL "https://github.com/tsl0922/ttyd/archive/refs/tags/$TTYD_VERSION.tar.gz" | tar -xz -C "$WORK"
-$CMAKE -S "$WORK/ttyd-$TTYD_VERSION" -B "$WORK/ttyd-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+$CMAKE -S "$WORK/ttyd-$TTYD_VERSION" -B "$WORK/ttyd-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ${IGNORE[@]+"${IGNORE[@]}"} \
   -DCMAKE_PREFIX_PATH="$WORK/lws;$UV;$JSONC;$SSL" >/dev/null
 $CMAKE --build "$WORK/ttyd-build" -j 4 >/dev/null
 
