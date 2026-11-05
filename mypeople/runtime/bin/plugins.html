@@ -5,7 +5,7 @@
 :root{--volt:#d5ef8a;--bg:#111110;--panel:#1a1a18;--ink:#f0f0e8;--muted:#9c9c94;--amber:#febc2e;--red:#ff3b30;--mono:"DM Mono","SFMono-Regular",Menlo,monospace;--sans:"DM Sans",system-ui,sans-serif;--serif:"Instrument Serif",Georgia,serif}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--sans)}
-main{max-width:760px;margin:0 auto;padding:18px 16px 60px}
+main{max-width:1000px;margin:0 auto;padding:18px 16px 60px}
 h1{font:400 28px/44px var(--serif);margin:0 0 20px;padding-right:400px}
 #msg:empty{display:none}
 #msg{margin:0 0 14px;color:var(--amber)}
@@ -41,61 +41,97 @@ button.b:disabled{opacity:.5;cursor:default}
 li a{color:inherit}
 .install{margin-top:22px;color:var(--muted);font-size:13px}
 code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
+.tabs{display:inline-flex;flex-wrap:wrap;gap:2px;padding:3px;margin:0 0 14px;border-radius:12px;background:rgba(26,26,24,.82);border:1px solid #ffffff17}
+.st{height:36px;padding:0 13px;border:0;border-radius:9px;background:none;color:rgba(240,240,232,.45);font:500 13px var(--sans);cursor:pointer}
+.st:hover{color:var(--ink);background:rgba(255,255,255,.05)}
+.st[aria-current]{color:var(--ink);background:rgba(255,255,255,.09);box-shadow:inset 0 0 0 1px rgba(255,255,255,.05)}
+.st:focus-visible,.nm:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
+.two{display:grid;grid-template-columns:280px minmax(0,1fr);gap:12px;align-items:start}
+.names{display:flex;flex-direction:column;gap:2px;padding:4px;background:var(--panel);border:1px solid #ffffff14;border-radius:12px}
+.nm{display:flex;justify-content:space-between;gap:8px;align-items:baseline;text-align:left;padding:9px 11px;border:0;border-radius:9px;background:none;color:var(--ink);font:15px var(--sans);cursor:pointer}
+.nm:hover{background:rgba(255,255,255,.05)}
+.nm[aria-current]{background:rgba(255,255,255,.09)}
+.nm .name{min-width:0;overflow-wrap:anywhere}
+.one{padding:14px 16px;background:var(--panel);border:1px solid #ffffff14;border-radius:12px}
+.hd{display:flex;align-items:center;gap:14px}
+.one>.b{margin-top:10px}
+.b.go{background:var(--volt);border-color:var(--volt);color:#111110;font-weight:600}
+@media(max-width:760px){.two{display:block}.names{margin-bottom:10px}}
 @media(max-width:700px){main{padding-top:56px}h1{padding-right:0;margin-bottom:12px}li{flex-wrap:wrap}.text{flex-basis:100%}.state{flex:1}}
 </style></head>
 <body><main>
 <h1>Plugins</h1>
 <p id="msg" role="status"></p>
 <form class="connect" id="connect"><div class="name">Connect a plugin</div><div class="desc">Ask your agent. What it installs shows up below, switched off.</div>
-  <div class="ask"><input id="want" placeholder="Connect my Slack workspace" aria-label="Ask your agent to connect a plugin" maxlength="1000"><button class="b" type="submit">Ask</button></div><p class="note desc" id="asked" role="status"></p></form>
-<ul id="list"></ul>
+  <div class="ask"><input id="want" placeholder="Connect my Slack workspace" aria-label="Ask your agent to connect a plugin" maxlength="1000"><button class="b go" type="submit">Ask</button></div><p class="note desc" id="asked" role="status"></p></form>
+<div class="tabs" id="tabs" role="group" aria-label="Which plugins to show"></div>
+<div id="view"></div>
 <p class="install">Or install one yourself, on the Mac. It arrives switched off: <code>mp plugins install &lt;folder or git URL&gt;</code></p>
 </main>
 <script>
 "use strict";
-const list=document.getElementById("list"),msg=document.getElementById("msg");
-let busy=false,said={},shown="",force=false,lastRules=null,kept=false;  // kept: a click's error, which a poll must not wipe
-const opened=new Set();
+// Every value here came from a plugin's conf or an owner's input: textContent and .value only, never markup.
+const msg=document.getElementById("msg"),tabs=document.getElementById("tabs"),view=document.getElementById("view"),asked=document.getElementById("asked"),want=document.getElementById("want");
+let busy=false,said={},shown="",force=false,lastRules=null,kept=false,rows=null,tab="";  // kept: a click's error, which a poll must not wipe
+const sel={},opened=new Set(),drafts={},asks={},sent=[];
+const TABS=[["running","Running"],["off","Off"],["not set up","Not set up"]];
+// A plugin that is switched on and not running is with those that should be running, and its state says "down".
+const groupOf=r=>r.state==="off"||r.state==="not set up"?r.state:"running";
+const inTab=k=>rows.filter(r=>groupOf(r)===k);
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
-function render(rows){
-  const now=JSON.stringify(rows);
-  if(now===shown)return;  // the 5 s poll must not redraw what they may be reading or selecting
-  if(document.activeElement&&document.activeElement.closest("#list")&&document.activeElement.matches("input,textarea")&&!force)return;  // nor what they are typing
-  force=false;
-  // A saved rule changes what the plugin's message says: read that again, once, not on every poll.
-  const rules=rows.map(r=>r.rule).join("\0");
-  if(lastRules!==null&&rules!==lastRules){lastRules=rules;shown=now;loadSaid();return}
-  lastRules=rules;
-  shown=now;
-  list.replaceChildren(...rows.map(r=>{
-    const li=el("li"),text=el("div","text");
-    text.append(el("div","name",r.name),el("div","desc",r.desc));
-    if(r.also.length)text.append(el("div","also","Also running, not switched here: "+r.also.join(", ")));
-    if(said[r.name]){
-      const d=el("details","said");d.open=opened.has(r.name);
-      d.ontoggle=()=>{d.open?opened.add(r.name):opened.delete(r.name)};
-      d.append(el("summary","","What it tells the agent"),el("pre","",said[r.name]));
-      const lab=el("label","lab desc","Your text, added to every message. The plugin's own lines stay.");
-      const area=el("textarea");area.value=r.rule;area.placeholder="Nothing yet";area.setAttribute("aria-label","Your text for "+r.name);lab.append(area);d.append(lab);
-      const say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the text for "+r.name);say.maxLength=1000;
-      const row=el("div","ask");row.append(say,button("Ask",()=>send("/todo/plugins/wrap-ask",{name:r.name,text:say.value})),button("Save",()=>send("/todo/plugins/wrap",{name:r.name,text:area.value})));d.append(row);
-      d.append(el("p","note desc",r.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from its next message."));
-      if(r.name==="a2a"){const a=el("a","","Access");a.href="/access";const n=el("p","note desc","Each person's own message is on ");n.append(a,".");d.append(n)}
-      text.append(d);
-    }
-    if(r.state==="not set up")text.append(button("Ask your agent to connect it",()=>{document.getElementById("want").value="Connect the "+r.name+" plugin that is already here";send("/todo/plugins/connect",{text:document.getElementById("want").value},true)}));
-    li.append(text,el("span","state "+r.state.replace(/ /g,"-"),r.state));
-    if(r.state!=="not set up"){
-      const b=el("button");b.type="button";b.setAttribute("role","switch");
-      b.setAttribute("aria-checked",String(r.state!=="off"));b.setAttribute("aria-label",r.name);
-      b.onclick=()=>flip(r.name,r.state==="off",b);li.append(b);
-    }
-    return li;
-  }));
-}
+function button(text,fn,cls){const b=el("button",cls||"b",text);b.type="button";b.onclick=fn;return b}
 function fail(status,text){
   if(status===401){msg.textContent="";const a=el("a","","Log in on the board");a.href="/";msg.append(a," to see your plugins.")}
   else msg.textContent=text||"Couldn't reach MyPlow.";
+}
+const stateEl=r=>el("span","state "+r.state.replace(/ /g,"-"),r.state);
+function folded(r){
+  if(!said[r.name])return null;
+  const d=el("details","said");d.open=opened.has(r.name);
+  d.ontoggle=()=>{d.open?opened.add(r.name):opened.delete(r.name)};
+  d.append(el("summary","","What it tells the agent"),el("pre","",said[r.name]));
+  const lab=el("label","lab desc","Your text, added to every message. The plugin's own lines stay.");
+  const area=el("textarea");area.value=r.name in drafts?drafts[r.name]:r.rule;area.placeholder="Nothing yet";area.setAttribute("aria-label","Your text for "+r.name);area.oninput=()=>{drafts[r.name]=area.value};lab.append(area);d.append(lab);
+  const say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the text for "+r.name);say.maxLength=1000;say.value=asks[r.name]||"";say.oninput=()=>{asks[r.name]=say.value};
+  const row=el("div","ask");row.append(say,button("Ask",async()=>{if(await send("/todo/plugins/wrap-ask",{name:r.name,text:say.value}))delete asks[r.name]}),button("Save",async()=>{if(await send("/todo/plugins/wrap",{name:r.name,text:area.value}))delete drafts[r.name]}));d.append(row);
+  d.append(el("p","note desc",r.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from its next message. This text tells the agent that reads the message. Nothing enforces it."));
+  if(r.name==="a2a"){const a=el("a","","Access");a.href="/access";const n=el("p","note desc","Each person's own message is on ");n.append(a,".");d.append(n)}
+  return d;
+}
+function one(r){
+  const p=el("div","one"),hd=el("div","hd"),text=el("div","text");
+  text.append(el("div","name",r.name),el("div","desc",r.desc));
+  if(r.also.length)text.append(el("div","also","Also running, not switched here: "+r.also.join(", ")));
+  hd.append(text,stateEl(r));
+  if(r.state!=="not set up"){const b=el("button");b.type="button";b.setAttribute("role","switch");b.setAttribute("aria-checked",String(r.state!=="off"));b.setAttribute("aria-label",r.name);b.onclick=()=>flip(r,b);hd.append(b)}
+  p.append(hd);
+  if(r.state==="not set up")p.append(button("Ask your agent to connect it",()=>connect("Connect the "+r.name+" plugin that is already here")));
+  const d=folded(r);if(d)p.append(d);
+  return p;
+}
+function draw(){
+  if(!rows)return;
+  if(!tab)tab=(TABS.find(([k])=>inTab(k).length)||TABS[0])[0];
+  tabs.replaceChildren(...TABS.map(([k,n])=>{const b=button(n+" "+inTab(k).length,()=>{tab=k;force=true;draw()},"st");if(tab===k)b.setAttribute("aria-current","page");return b}));
+  // The 5 s poll must not redraw what they are typing in.
+  const a=document.activeElement;
+  if(!force&&!busy&&a&&view.contains(a)&&(a.tagName==="TEXTAREA"||a.tagName==="INPUT"))return;
+  force=false;
+  const list=inTab(tab);
+  if(!list.length)return view.replaceChildren(el("p","desc","Nothing here."));
+  if(!list.find(r=>r.name===sel[tab]))sel[tab]=list[0].name;
+  const names=el("div","names"),two=el("div","two"),right=el("div");
+  names.append(...list.map(r=>{const b=button("",()=>{sel[tab]=r.name;force=true;draw()},"nm");b.append(el("span","name",r.name),stateEl(r));if(r.name===sel[tab])b.setAttribute("aria-current","true");return b}));
+  right.append(one(list.find(r=>r.name===sel[tab])));two.append(names,right);view.replaceChildren(two);
+}
+function render(next){
+  const now=JSON.stringify(next);
+  if(now===shown&&!force)return;  // the 5 s poll must not redraw what they may be reading or selecting
+  rows=next;
+  // A saved rule changes what the plugin's message says: read that again, once, not on every poll.
+  const rules=rows.map(r=>r.rule).join("\0");
+  if(lastRules!==null&&rules!==lastRules){lastRules=rules;shown=now;loadSaid();return}
+  lastRules=rules;shown=now;draw();
 }
 async function load(){
   if(busy)return;
@@ -106,26 +142,30 @@ async function load(){
     if(!busy){if(!kept)msg.textContent="";render(d.plugins)}
   }catch(e){fail(0)}
 }
-function button(text,fn){const b=el("button","b",text);b.type="button";b.onclick=fn;return b}
-async function send(path,body,connect){
-  busy=true;kept=false;document.querySelectorAll("main button.b").forEach(b=>b.disabled=true);
+async function send(path,body){
+  busy=true;kept=false;let ok=false;
+  view.querySelectorAll("button").forEach(b=>b.disabled=true);
   try{
     const r=await fetch(path,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
-    if(r.ok){msg.textContent="";if(connect){asked.textContent="Sent to your agent. Its answer shows on your Boss card.";want.value=""}force=true;render(d.plugins);if(!connect)loadSaid()}else{kept=true;fail(r.status,d.error)}
+    ok=r.ok;
+    if(r.ok){msg.textContent="";force=true;busy=false;render(d.plugins);loadSaid()}else{kept=true;fail(r.status,d.error)}
   }catch(e){kept=true;fail(0)}
-  busy=false;document.querySelectorAll("main button.b").forEach(b=>b.disabled=false);
+  busy=false;force=true;draw();
+  return ok;
 }
-const asked=document.getElementById("asked"),want=document.getElementById("want");
-document.getElementById("connect").onsubmit=e=>{e.preventDefault();send("/todo/plugins/connect",{text:want.value},true)};
-async function flip(name,on,button){
-  busy=true;kept=false;button.disabled=true;
+async function connect(words){
+  if(await send("/todo/plugins/connect",{text:words})){sent.unshift(words);want.value="";asked.replaceChildren(...sent.map(w=>el("div","","Sent to your agent: \u201c"+w+"\u201d. Its answer shows on your Boss card, and what it installs shows up here, switched off.")))}
+}
+document.getElementById("connect").onsubmit=e=>{e.preventDefault();connect(want.value)};
+async function flip(r,b){
+  busy=true;kept=false;b.disabled=true;
   try{
-    const r=await fetch("/todo/plugins/set",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,on})});
-    const d=await r.json().catch(()=>({}));
-    if(r.ok){msg.textContent="";render(d.plugins)}else{kept=true;fail(r.status,d.error)}
+    const x=await fetch("/todo/plugins/set",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:r.name,on:r.state==="off"})});
+    const d=await x.json().catch(()=>({}));
+    if(x.ok){msg.textContent="";const now=d.plugins.find(p=>p.name===r.name);if(now){tab=groupOf(now);sel[tab]=now.name}force=true;busy=false;render(d.plugins)}else{kept=true;fail(x.status,d.error)}
   }catch(e){kept=true;fail(0)}
-  busy=false;button.disabled=false;
+  busy=false;b.disabled=false;
 }
 async function loadSaid(){
   try{

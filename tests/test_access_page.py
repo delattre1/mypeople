@@ -15,8 +15,9 @@ HTML = (Path(__file__).resolve().parents[1] / "mypeople" / "runtime" / "bin" / "
 SCRIPT = HTML[HTML.index("<script>") + 8:HTML.rindex("</script>")]
 IDS = re.findall(r'id="([\w-]+)"', HTML[HTML.index("<body"):HTML.index("<script>")])
 
-HARNESS = r"""
+DOM = r"""
 class N{constructor(t){this.tagName=t.toUpperCase();this.children=[];this.attrs={};this.dataset={};this.className="";this._text="";this.value="";this.parent=null}
+ getContext(){return{fillRect(){},set fillStyle(v){}}}
  get textContent(){return this._text+this.children.map(c=>typeof c==="string"?c:c.textContent).join("")}
  set textContent(v){this._text=String(v);this.children=[]}
  append(...k){for(const c of k){if(c&&c.parent)c.parent=null;if(typeof c!=="string")c.parent=this;this.children.push(c)}}
@@ -28,9 +29,10 @@ class N{constructor(t){this.tagName=t.toUpperCase();this.children=[];this.attrs=
  querySelectorAll(s){const o=[];const t=s.toUpperCase();this.walk(c=>{if(c.tagName===t)o.push(c)});return o}}
 const ids={};const listeners={};
 const document={createElement:t=>new N(t),getElementById:i=>ids[i]||(ids[i]=new N("div")),activeElement:null,addEventListener:(t,f)=>{listeners[t]=f}};
-for(const i of __IDS__){document.getElementById(i)}ids.find.tagName="INPUT";
-const posts=[];const FAKE=__STATE__;
-const fetch=async(u,o)=>{if(o&&o.method==="POST"){const b=JSON.parse(o.body);posts.push([u.split("/").pop(),b]);return{ok:true,status:200,json:async()=>FAKE}}return{ok:true,status:200,json:async()=>FAKE}};
+for(const i of __IDS__){document.getElementById(i)}if(ids.find)ids.find.tagName="INPUT";
+"""
+HARNESS = DOM + r"""const {TextEncoder}=require("util"),crypto=require("crypto");const posts=[];const FAKE=__STATE__;
+const fetch=async(u,o)=>{if(o&&o.method==="POST"){const b=JSON.parse(o.body),op=u.split("/").pop();posts.push([op,b]);return{ok:true,status:200,json:async()=>op==="line"?{line:"mp pair mpp-SECRET"}:FAKE}}return{ok:true,status:200,json:async()=>FAKE}};
 const navigator={clipboard:{writeText:async()=>{}}};const setInterval=()=>0;
 const all=()=>{const o=[];for(const i of __IDS__)ids[i]&&(o.push(ids[i]),ids[i].walk(c=>o.push(c)));return o};
 const page=()=>all().map(n=>n._text).join(" ");
@@ -56,9 +58,15 @@ __SCRIPT__
  by("BUTTON","Waiting on you").onclick();await tick();by("BUTTON","Grant access").onclick();await tick();await tick();R.afterGrantOn=all().find(n=>n.className.startsWith("st")&&n.attrs["aria-current"]).textContent;
  by("BUTTON","Ended").onclick();await tick();R.ended=ids.view.textContent;
  by("BUTTON","New line").onclick();await tick();R.newLine=!!ids.view.querySelectorAll("form").length;
+ ids.view.querySelectorAll("form")[0].onsubmit({preventDefault(){}});await tick();await tick();await tick();
+ R.lineShown=ids.view.textContent.includes("mpp-SECRET");R.qrBefore=ids.view.querySelectorAll("canvas").length;by("BUTTON","Show QR").onclick();await tick();R.qrAfter=ids.view.querySelectorAll("canvas").length;R.hideLabel=!!by("BUTTON","Hide QR");
+ by("BUTTON","Ended").onclick();await tick();by("BUTTON","New line").onclick();await tick();R.qrAfterLeaving=ids.view.querySelectorAll("canvas").length;
+ const M=T=>{const m=qrMatrix(T);return{size:m.length,sha:crypto.createHash("sha256").update(m.map(r=>r.map(b=>b?1:0).join("")).join("")).digest("hex")}};
+ R.qr={short:M("hello"),real:M(__REAL__)};R.tooLong=qrMatrix("x".repeat(1000));
  R.all=page();R.posts=posts;console.log(JSON.stringify(R));process.exit(0)})().catch(e=>{console.error(e);process.exit(1)});
 """
 
+REAL = "mp pair mpp-" + "A" * 228 + "  # asks daniels-MacBook-Pro-2's owner to let this MyPlow message theirs; they grant or decline; undo with: mp pair rm daniels-MacBook-Pro-2"
 STATE = {"host": "me",
          "requests": [{"host": "riley-mbp", "name": "Riley", "say": "I am Riley's agent.", "at": 1}],
          "granted": [{"host": "jordan-air", "name": "Jordan", "said": "", "waiting": False, "text": "Jordan's text.", "asking": False, "package": "p"},
@@ -68,11 +76,14 @@ STATE = {"host": "me",
          "ended": ["taylor-pc"]}
 
 
+PINNED = ("99ccedcf0d82e92a63894c8b42e405a3ac50eafa33ee2ce68fa895813fdcb386", "c1028160c138d9bac909913f1262f9c1870ca52a9e38427d4d4ba192930c42b0")
+
+
 @unittest.skipUnless(shutil.which("node"), "node not installed")
 class AccessTab(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        js = HARNESS.replace("__IDS__", json.dumps(IDS)).replace("__STATE__", json.dumps(STATE)).replace("__SCRIPT__", SCRIPT)
+        js = HARNESS.replace("__IDS__", json.dumps(IDS)).replace("__STATE__", json.dumps(STATE)).replace("__REAL__", json.dumps(REAL)).replace("__SCRIPT__", SCRIPT)
         with tempfile.NamedTemporaryFile("w", suffix=".js") as f:
             f.write(js)
             f.flush()
@@ -123,6 +134,20 @@ class AccessTab(unittest.TestCase):
         self.assertTrue(self.r["afterGrantOn"].startswith("Has access to you"))
         self.assertIn("taylor-pc", self.r["ended"])
         self.assertTrue(self.r["newLine"])
+
+    def test_the_qr_stays_hidden_until_asked_and_again_after_leaving(self):
+        self.assertTrue(self.r["lineShown"])
+        self.assertEqual((self.r["qrBefore"], self.r["qrAfter"], self.r["qrAfterLeaving"]), (0, 1, 0))
+        self.assertTrue(self.r["hideLabel"])
+
+    def test_the_qr_is_made_here_and_decodes(self):
+        for outside in ("<script src", "<img", "https://", "http://"):
+            self.assertNotIn(outside, HTML.replace("http://www.w3.org", ""), "a one-use secret must not leave the page")
+        self.assertIsNone(self.r["tooLong"])
+        # Pinned after zbar read these exact matrices back: any change to the encoder fails here.
+        self.assertEqual(self.r["qr"]["short"]["size"], 21)
+        self.assertEqual(self.r["qr"]["real"]["size"], 77, "a real line is about 380 bytes: version 15")
+        self.assertEqual((self.r["qr"]["short"]["sha"], self.r["qr"]["real"]["sha"]), PINNED)
 
 
 if __name__ == "__main__":

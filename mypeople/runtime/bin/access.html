@@ -53,6 +53,7 @@ textarea:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
 .nm .name,.nm .id{min-width:0}
 .nm .wait{margin-left:0}
 .past{margin-left:auto;font-size:13px;color:var(--muted)}
+.qr{display:block;margin:12px 0 0;max-width:100%;height:auto;background:#fff;border-radius:6px}
 @media(max-width:760px){.two{display:block}.names{margin-bottom:10px}}
 @media(max-width:700px){main{padding-top:56px}h1{padding-right:0;margin-bottom:12px}}
 </style></head>
@@ -70,7 +71,7 @@ const msg=document.getElementById("msg"),view=document.getElementById("view"),ta
 const PROVES="a pairing proves a message came from the MyPlow that used your line. It does not prove who owns that MyPlow.";
 const TELLS="This text tells the agent that reads the message. Nothing enforces it.";
 let busy=false,shown="",force=false,kept=false;  // kept: a click's error, which a poll must not wipe
-let state=null,tab="",q="",line="",lineFor="";
+let state=null,tab="",q="",line="",lineFor="",qrShown=false;
 const sel={wait:"",in:"",out:""},drafts={},asks={},opened=new Set();
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
 function fail(status,text){
@@ -88,7 +89,7 @@ const shownList=k=>{const d=state;
 };
 function drawTabs(){
   tabs.replaceChildren(...[["wait","Waiting on you"],["in","Has access to you"],["out","You have access to"],["end","Ended"],["new","New line"]].map(([k,n])=>{
-    const c=k==="new"?"":shownList(k).length,b=button("st"+(k==="wait"&&c?" hot":""),n+(k==="new"?"":" "+c),()=>{tab=k;force=true;draw()});
+    const c=k==="new"?"":shownList(k).length,b=button("st"+(k==="wait"&&c?" hot":""),n+(k==="new"?"":" "+c),()=>{tab=k;qrShown=false;force=true;draw()});
     if(tab===k)b.setAttribute("aria-current","page");
     return b;
   }));
@@ -128,6 +129,52 @@ function youReach(g){
   if(g.waiting){p.append(el("p","small","Nothing is shared until they grant it."));return p}
   const a=el("div","acts");a.append(revoke(g));p.append(a);return p;
 }
+// A QR code of the line, drawn here, so a one-use secret never leaves this page. Byte mode, error correction M, versions 1 to 20.
+function qrMatrix(text){
+  const data=[...new TextEncoder().encode(text)],EC=[0,10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26],BL=[0,1,1,1,2,2,4,4,4,5,5,5,8,9,9,10,10,11,13,14,16];
+  const rawBits=v=>{let r=(16*v+128)*v+64;if(v>=2){const n=Math.floor(v/7)+2;r-=(25*n-10)*n-55;if(v>=7)r-=36}return r};
+  let v=1;while(v<=20&&4+(v<10?8:16)+8*data.length>(Math.floor(rawBits(v)/8)-EC[v]*BL[v])*8)v++;
+  if(v>20)return null;
+  const cap=Math.floor(rawBits(v)/8)-EC[v]*BL[v],bits=[],put=(x,n)=>{for(let i=n-1;i>=0;i--)bits.push(x>>>i&1)};
+  put(4,4);put(data.length,v<10?8:16);data.forEach(b=>put(b,8));put(0,Math.min(4,cap*8-bits.length));put(0,(8-bits.length%8)%8);
+  const words=[];for(let i=0;i<bits.length;i+=8)words.push(bits.slice(i,i+8).reduce((a,b)=>a*2+b,0));
+  for(let pad=0xEC;words.length<cap;pad^=0xEC^0x11)words.push(pad);
+  // Reed-Solomon over GF(256)
+  const mul=(a,b)=>{let z=0;for(let i=7;i>=0;i--){z=z<<1^(z>>>7)*0x11D;z^=(b>>>i&1)*a}return z};
+  const n=EC[v],gen=Array(n).fill(0);gen[n-1]=1;let root=1;
+  for(let i=0;i<n;i++){for(let j=0;j<n;j++){gen[j]=mul(gen[j],root);if(j+1<n)gen[j]^=gen[j+1]}root=mul(root,2)}
+  const rs=d=>{const r=Array(n).fill(0);d.forEach(b=>{const f=b^r.shift();r.push(0);gen.forEach((g,i)=>{r[i]^=mul(g,f)})});return r};
+  const blocks=[],total=Math.floor(rawBits(v)/8),short=BL[v]-total%BL[v],shortLen=Math.floor(total/BL[v]);
+  for(let i=0,k=0;i<BL[v];i++){const len=shortLen-n+(i<short?0:1),d=words.slice(k,k+len);k+=len;const e=rs(d);if(i<short)d.push(0);blocks.push(d.concat(e))}
+  const all=[];for(let i=0;i<blocks[0].length;i++)blocks.forEach((b,j)=>{if(i!==shortLen-n||j>=short)all.push(b[i])});
+  // The fixed patterns, then the data in its zigzag, then the mask with the lowest penalty
+  const size=17+4*v,m=Array.from({length:size},()=>Array(size).fill(false)),fn=Array.from({length:size},()=>Array(size).fill(false));
+  const set=(x,y,on)=>{m[y][x]=on;fn[y][x]=true};
+  for(let i=0;i<size;i++){set(6,i,i%2===0);set(i,6,i%2===0)}
+  const finder=(cx,cy)=>{for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){const x=cx+dx,y=cy+dy,d=Math.max(Math.abs(dx),Math.abs(dy));if(x>=0&&x<size&&y>=0&&y<size)set(x,y,d!==2&&d!==4)}};
+  finder(3,3);finder(size-4,3);finder(3,size-4);
+  const al=[];if(v>1){const cnt=Math.floor(v/7)+2,step=Math.floor((v*8+cnt*3+5)/(cnt*4-4))*2;al.push(6);for(let p=size-7,i=0;i<cnt-1;i++,p-=step)al.splice(1,0,p)}
+  al.forEach((ax,i)=>al.forEach((ay,j)=>{if((i===0&&j===0)||(i===0&&j===al.length-1)||(i===al.length-1&&j===0))return;for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)set(ax+dx,ay+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1)}));
+  const format=mask=>{let r=mask;for(let i=0;i<10;i++)r=r<<1^(r>>>9)*0x537;const b=(mask<<10|r)^0x5412,g=i=>(b>>>i&1)===1;
+    for(let i=0;i<=5;i++)set(8,i,g(i));set(8,7,g(6));set(8,8,g(7));set(7,8,g(8));for(let i=9;i<15;i++)set(14-i,8,g(i));
+    for(let i=0;i<8;i++)set(size-1-i,8,g(i));for(let i=8;i<15;i++)set(8,size-15+i,g(i));set(8,size-8,true)};
+  format(0);
+  if(v>=7){let r=v;for(let i=0;i<12;i++)r=r<<1^(r>>>11)*0x1F25;const b=v<<12|r;for(let i=0;i<18;i++){const on=(b>>>i&1)===1,a=size-11+i%3,c=Math.floor(i/3);set(a,c,on);set(c,a,on)}}
+  let bit=0;for(let right=size-1;right>=1;right-=2){if(right===6)right=5;for(let vert=0;vert<size;vert++)for(let j=0;j<2;j++){const x=right-j,up=(right+1&2)===0,y=up?size-1-vert:vert;if(!fn[y][x]&&bit<all.length*8){m[y][x]=(all[bit>>>3]>>>(7-(bit&7))&1)===1;bit++}}}
+  const flip=[(x,y)=>(x+y)%2===0,(x,y)=>y%2===0,x=>x%3===0,(x,y)=>(x+y)%3===0,(x,y)=>(Math.floor(x/3)+Math.floor(y/2))%2===0,(x,y)=>x*y%2+x*y%3===0,(x,y)=>(x*y%2+x*y%3)%2===0,(x,y)=>((x+y)%2+x*y%3)%2===0];
+  const applyMask=k=>{for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(!fn[y][x]&&flip[k](x,y))m[y][x]=!m[y][x]};
+  const penalty=()=>{let p=0,dark=0;const line=g=>{let run=0,c=null,h=0;for(let i=0;i<size;i++){const b=g(i);if(b===c){run++;if(run===5)p+=3;else if(run>5)p++}else{c=b;run=1}h=(h<<1|(b?1:0))&0x7FF;if(i>=10&&(h===0b10111010000||h===0b00001011101))p+=40}};
+    for(let a=0;a<size;a++){line(i=>m[a][i]);line(i=>m[i][a])}
+    for(let y=0;y<size;y++)for(let x=0;x<size;x++){if(m[y][x])dark++;if(x<size-1&&y<size-1&&m[y][x]===m[y][x+1]&&m[y][x]===m[y+1][x]&&m[y][x]===m[y+1][x+1])p+=3}
+    return p+Math.floor(Math.abs(dark*20-size*size*10)/(size*size))*10};
+  let best=0,low=Infinity;for(let k=0;k<8;k++){applyMask(k);format(k);const p=penalty();if(p<low){low=p;best=k}applyMask(k)}
+  applyMask(best);format(best);return m;
+}
+function qrCanvas(text){
+  const m=qrMatrix(text);if(!m)return el("p","small","This line is too long for a QR code. Copy it instead.");
+  const c=el("canvas","qr"),scale=7,q=4,s=(m.length+q*2)*scale;c.width=c.height=s;c.setAttribute("role","img");c.setAttribute("aria-label","QR code of this line");
+  const g=c.getContext("2d");g.fillStyle="#fff";g.fillRect(0,0,s,s);g.fillStyle="#000";m.forEach((row,y)=>row.forEach((on,x)=>{if(on)g.fillRect((x+q)*scale,(y+q)*scale,scale,scale)}));return c;
+}
 function newLine(){
   const p=el("div","panel"),f=el("form"),i=el("input");
   i.placeholder="Who is this line for?";i.setAttribute("aria-label","Who is this line for?");i.maxLength=60;i.value=lineFor;i.oninput=()=>{lineFor=i.value};
@@ -135,7 +182,10 @@ function newLine(){
   if(line){
     const box=el("div","line");box.append(el("code","",line));
     const c=button("b","Copy",async()=>{try{await navigator.clipboard.writeText(line);c.textContent="Copied"}catch(e){msg.textContent="Select the line and copy it."}});
-    box.append(c);p.append(box,el("p","small","Good for 24 h and one use. Whoever runs it asks for access to this MyPlow; nothing is shared until you grant it here."));
+    const show=button("b",qrShown?"Hide QR":"Show QR",()=>{qrShown=!qrShown;force=true;draw()});
+    box.append(c,show);p.append(box);
+    if(qrShown)p.append(qrCanvas(line));   // It is a one-use secret: off screen until asked for, since this screen may be on a stream.
+    p.append(el("p","small","Good for 24 h and one use. Whoever runs it asks for access to this MyPlow; nothing is shared until you grant it here."));
   }
   return p;
 }
@@ -189,7 +239,7 @@ async function post(op,body){
     if(!r.ok){kept=true;fail(r.status,d.error)}else msg.textContent="";
   }catch(e){kept=true;fail(0)}
   busy=false;shown="";force=true;
-  if(d.line)line=d.line;
+  if(d.line){line=d.line;qrShown=false}
   if(ok&&op==="grant"){tab="in";sel.in=body.host}   // on to the text they will arrive with
   await load();
   force=true;draw();
