@@ -43,7 +43,7 @@ const tick=()=>new Promise(r=>setImmediate(r));const tabsNow=()=>ids.tabs.childr
 const cur=()=>{const n=all().find(n=>n.className==="nm"&&n.attrs["aria-current"]);return n&&n.children[0].textContent};
 __SCRIPT__
 (async()=>{const R={};await tick();await tick();
- R.firstTabs=tabsNow();R.firstOn=all().find(n=>n.className.startsWith("st")&&n.attrs["aria-current"]).textContent;R.hot=all().find(n=>n.textContent.startsWith("Waiting on you")&&n.className.startsWith("st")).className;R.request=page().includes("It does not prove who owns that MyPlow.");
+ R.serviceSays=ids.service.textContent;R.firstTabs=tabsNow();R.firstOn=all().find(n=>n.className.startsWith("st")&&n.attrs["aria-current"]).textContent;R.hot=all().find(n=>n.textContent.startsWith("Waiting on you")&&n.className.startsWith("st")).className;R.request=page().includes("It does not prove who owns that MyPlow.");
  by("BUTTON","Has access to you").onclick();await tick();
  R.names=ids.view.querySelectorAll("button").filter(b=>b.className==="nm").map(b=>b.children[0].textContent);
  R.jordanText=ids.view.querySelectorAll("textarea")[0].value;
@@ -53,6 +53,9 @@ __SCRIPT__
  const t=ids.view.querySelectorAll("textarea")[0],base=t.value;R.boxCopy=by("BUTTON","Copy").textContent;R.unchangedHidden=by("BUTTON","Save").parent.hidden;
  t.value=base.replace("{their_message}","");t.oninput();R.lostOff=by("BUTTON","Save").disabled;R.lostSays=ids.view.textContent.includes("{their_message} the agent gets none of what the person said, so this cannot be saved");by("BUTTON","Put it back").onclick();R.lostBack=t.value.includes("{their_message}");R.backOn=!by("BUTTON","Save").disabled;
  t.value=base.replace("{reply_command}","");t.oninput();R.replyOff=by("BUTTON","Save").disabled;
+ t.value=base.replace("{sender}","");t.oninput();R.senderOff=by("BUTTON","Save").disabled;R.senderSays=ids.view.textContent.includes("cannot tell who sent this");by("BUTTON","Put it back").onclick();R.senderBack=t.value.startsWith("{sender} ");
+ t.value=base.replace("[from {sender}, on another MyPlow]","Sent by {sender}:");t.oninput();R.wordsOn=!by("BUTTON","Save").disabled;
+ t.value="{their_message} "+base.replace("{their_message}","");t.oninput();R.orderOff=by("BUTTON","Save").disabled;R.orderSays=ids.view.textContent.includes("could arrive first");by("BUTTON","Move it").onclick();R.orderFixed=t.value.indexOf("{sender}")<t.value.indexOf("{their_message}");R.orderOn=!by("BUTTON","Save").disabled;
  t.value=base.replace("{safety_line}","");t.oninput();R.warnOn=!by("BUTTON","Save").disabled;R.warnSays=ids.view.textContent.includes("You can still save it");by("BUTTON","Put it back").onclick();R.warnBack=t.value.includes("{safety_line}");
  t.value=base+" {nonsense}";t.oninput();R.oddSays=ids.view.textContent.includes("{nonsense} is not a variable here, so it goes out exactly as written");
  by("BUTTON","Discard").onclick();await tick();R.discarded=ids.view.querySelectorAll("textarea")[0].value===base;
@@ -74,16 +77,16 @@ __SCRIPT__
 """
 
 REAL = "mp pair mpp-" + "A" * 228 + "  # asks daniels-MacBook-Pro-2's owner to let this MyPlow message theirs; they grant or decline; undo with: mp pair rm daniels-MacBook-Pro-2"
-JORDAN = "{trust_stamp} {their_message}\n(Jordan's text. Answer with {reply_command}. {safety_line} Confirm: {confirm_command})"
+JORDAN = "[from {sender}, on another MyPlow] {their_message}\n(Jordan's text. Answer with {reply_command}. {safety_line} Confirm: {confirm_command})"
 STATE = {"host": "me",
          "requests": [{"host": "riley-mbp", "name": "Riley", "say": "I am Riley's agent.", "at": 1}],
          "granted": [{"host": "jordan-air", "name": "Jordan", "said": "", "waiting": False, "text": "Jordan's text.", "asking": False, "template": JORDAN, "defaults": JORDAN,
-                      "required": ["their_message", "trust_stamp", "reply_command"], "warned": ["safety_line", "confirm_command"]},
-                     {"host": "lin-1", "name": "lin-1", "said": "", "waiting": False, "text": "", "asking": False, "template": "{trust_stamp} {their_message}",
-                      "defaults": "{trust_stamp} {their_message}", "required": ["their_message", "trust_stamp"], "warned": []}],
+                      "required": ["their_message", "sender", "reply_command"], "warned": ["safety_line", "confirm_command"], "identity": ["sender"]},
+                     {"host": "lin-1", "name": "lin-1", "said": "", "waiting": False, "text": "", "asking": False, "template": "[from {sender}, on another MyPlow] {their_message}",
+                      "defaults": "[from {sender}, on another MyPlow] {their_message}", "required": ["their_message", "sender"], "warned": [], "identity": ["sender"]}],
          "reach": [{"host": "casey-mini", "name": "Casey", "said": "Asking about logs.", "waiting": False, "text": "Hidden text.", "asking": False},
                    {"host": "morgan-box", "name": "Morgan", "said": "Hi.", "waiting": True, "text": "", "asking": False}],
-         "ended": ["taylor-pc"]}
+         "ended": ["taylor-pc"], "service": "off"}
 
 
 PINNED = ("99ccedcf0d82e92a63894c8b42e405a3ac50eafa33ee2ce68fa895813fdcb386", "c1028160c138d9bac909913f1262f9c1870ca52a9e38427d4d4ba192930c42b0")
@@ -113,7 +116,7 @@ class AccessTab(unittest.TestCase):
 
     def test_his_machines_get_no_mark_of_their_own(self):
         self.assertEqual(self.r["names"], ["Jordan", "lin-1"])
-        self.assertEqual(self.r["ownText"], "{trust_stamp} {their_message}")
+        self.assertEqual(self.r["ownText"], "[from {sender}, on another MyPlow] {their_message}")
         self.assertNotIn("own machine", HTML)
         self.assertNotIn("Your machines", HTML)
 
@@ -122,8 +125,14 @@ class AccessTab(unittest.TestCase):
         self.assertTrue(self.r["unchangedHidden"], "Save and Discard appear only when changed")
         self.assertTrue(self.r["lostOff"] and self.r["lostSays"] and self.r["lostBack"] and self.r["backOn"])
         self.assertTrue(self.r["replyOff"])
+        self.assertTrue(self.r["senderOff"] and self.r["senderSays"] and self.r["senderBack"], "who sent it comes back first")
+        self.assertTrue(self.r["wordsOn"], "the words around it are the owner's")
+        self.assertTrue(self.r["orderOff"] and self.r["orderSays"] and self.r["orderFixed"] and self.r["orderOn"])
         self.assertTrue(self.r["warnOn"] and self.r["warnSays"] and self.r["warnBack"])
         self.assertTrue(self.r["oddSays"] and self.r["discarded"])
+
+    def test_it_says_when_messages_between_myplows_are_off_as_no_other_page_has_them_now(self):
+        self.assertIn("mp plugins on a2a", self.r["serviceSays"])
 
     def test_you_have_access_to_shows_no_permission_message(self):
         self.assertEqual((self.r["reachTextareas"], self.r["reachInputs"]), (0, 0))

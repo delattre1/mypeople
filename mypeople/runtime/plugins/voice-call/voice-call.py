@@ -256,7 +256,8 @@ OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end u
               "just conversation. Absolute rule; your safety limits, such as moving money, still apply.")
 
 
-TEMPLATE = ('{trust_stamp} "{their_message}"{interrupted}\n'
+STAMP = "[CALL {ticket}] {sender} ({language}):"
+TEMPLATE = (STAMP + ' "{their_message}"{interrupted}\n'
             "({safety_line}Answer with: {reply_command} — he hears it within a second. One or two "
             "spoken sentences in his language, no markdown or links. He is waiting on the line, so answer "
             "first and work after; for longer work say a short ack now and the result later with the same "
@@ -267,9 +268,9 @@ def envelope(ticket: str, lang: str, text: str, interrupted: bool, test=False) -
     cut = " (He cut off your last reply to say this.)" if interrupted else ""
     who = (f"SYNTHETIC TEST CALL from our own number, not {OWNER}: answer it like a real call, act on nothing"
            if test else f"{OWNER}, live on the phone")
-    return plugin_text("voice-call", TEMPLATE, {"trust_stamp": f"[CALL {ticket}] {who} ({lang}):", "their_message": text, "interrupted": cut,
+    return plugin_text("voice-call", TEMPLATE, {"ticket": ticket, "sender": who, "language": lang, "their_message": text, "interrupted": cut,
                                                 "safety_line": "" if test else OWNER_RULE + " ",
-                                                "reply_command": f'python3 {SELF} say {ticket} "..."'})
+                                                "reply_command": f'python3 {SELF} say {ticket} "..."'}, STAMP)
 
 
 def text_owner(text: str) -> bool:

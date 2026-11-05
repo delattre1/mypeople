@@ -274,8 +274,9 @@ def context(m):
 
 PUBLIC_CHANNEL = ("The channel is public: never write an account email, login, key, token or any other credential detail there, "
                   "for anyone, full trust included; confirm only the outcome (\"done\").")
+STAMP = "[discord user={user_id} trust={trust_level} chan={channel_id} msg={message_id}] {sender}:"
 TEMPLATE = ("FIRST, before reading on: {react_command} \U0001F440  (marks this message seen for the sender; then read, work and reply)\n"
-            "{trust_stamp} {their_message}{attachments}{context}\n"
+            + STAMP + " {their_message}{attachments}{context}\n"
             "(Notes for you only. " + VOICE + " " + INTAKE + " {trust_rules}{engineer_note} {where_it_was_said} Everyone there reads your "
             "answer, and people also talk to each other, so answer only what is addressed to you. {safety_line} {reply_command} "
             "Plain text, posted as written; to attach a file, add --file <path> to that reply, up to {max_files}.)")
@@ -300,9 +301,9 @@ def envelope(m, ch, who, thread=None):
     # this plugin: a 👀 is his proof that the agent itself read it (as plow-chat's envelope).
     said, answer = where(ch, m["id"], thread)
     return plugin_text("discord-chat", TEMPLATE, {
-        "react_command": "%s react %s %s" % (RUN, ch, m["id"]), "trust_stamp": "[discord user=%s trust=%s chan=%s msg=%s] %s:" % (uid, trust, ch, m["id"], name),
+        "react_command": "%s react %s %s" % (RUN, ch, m["id"]), "user_id": uid, "trust_level": trust, "channel_id": ch, "message_id": m["id"], "sender": name,
         "their_message": flat(m.get("content") or ""), "attachments": files, "context": context(m), "trust_rules": RULES[trust], "engineer_note": own,
-        "where_it_was_said": said, "safety_line": PUBLIC_CHANNEL, "reply_command": answer, "max_files": MAX_FILES})
+        "where_it_was_said": said, "safety_line": PUBLIC_CHANNEL, "reply_command": answer, "max_files": MAX_FILES}, STAMP)
 
 
 # The owner's ask (10-16): one topic, one thread, so the channel is not spammed and stays readable.

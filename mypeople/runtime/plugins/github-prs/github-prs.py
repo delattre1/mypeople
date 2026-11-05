@@ -251,7 +251,8 @@ def owner_for_card_mention(board, text):
     return ""
 
 
-TEMPLATE = "{trust_stamp}: {their_message}{link}{no_owner_note}"
+STAMP = "[{event}] {repo}#{number}{yours} by {sender}{verdict}"
+TEMPLATE = STAMP + ": {their_message}{link}{no_owner_note}"
 
 
 def format_event(repo, n, event, owned, orphan=False):
@@ -262,12 +263,6 @@ def format_event(repo, n, event, owned, orphan=False):
     what = {"review": "review", "review_comment": "inline review comment",
             "merged": "merged", "closed": "closed"}.get(event["kind"], "comment")
     noun = "issue" if event["kind"] == "issue" else "PR"
-    if noun == "issue":
-        head = "[new issue] %s#%d by %s" % (repo, n, event["user"])
-    else:
-        head = "[PR %s] %s#%d%s by %s" % (what, repo, n, " (your PR)" if owned else "", event["user"])
-    if verdict:
-        head += " — %s" % verdict
     tail = ""
     if orphan:
         # Landing on the Boss with nobody owning it is how a review goes unanswered: it reads as
@@ -275,7 +270,9 @@ def format_event(repo, n, event, owned, orphan=False):
         # work, he does not do it (the owner, 10-21), so it goes to an agent.
         tail = " — no card on the board links this %s, so nobody owns it: give it to an agent." % noun
     said = "" if event["kind"] in ("merged", "closed") else (body or "(no text)") + " "
-    return plugin_text("github-prs", TEMPLATE, {"trust_stamp": head, "their_message": said, "link": event["url"], "no_owner_note": tail})
+    return plugin_text("github-prs", TEMPLATE, {
+        "event": "new issue" if noun == "issue" else "PR " + what, "repo": repo, "number": n, "yours": " (your PR)" if owned and noun != "issue" else "",
+        "sender": event["user"], "verdict": " — %s" % verdict if verdict else "", "their_message": said, "link": event["url"], "no_owner_note": tail}, STAMP)
 
 
 # ---------------------------------------------------------------- the fleet

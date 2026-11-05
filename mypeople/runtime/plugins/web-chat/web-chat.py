@@ -94,7 +94,8 @@ HOW_TO_ANSWER = ("To answer, run: {reply_command} -- it appears live on their pa
                  "sms:<number>&body=<that exact text, URL-encoded> in your reply: the page shows it as a 'Continue on "
                  "iMessage' button that opens Messages with it prefilled. Never write the text or code out for them to "
                  "copy or type, and never say 'tap Continue on iMessage' without the link in that same reply.{style}")
-TEMPLATE = ("{trust_stamp} {their_message}\n{tapbacks}"
+STAMP = "[web-chat] from web visitor {sender}{came_from}:"
+TEMPLATE = (STAMP + " {their_message}\n{tapbacks}"
             "(Someone on Daniel's public web chat page; each visitor is their own thread. FIRST, before reading on: "
             "{react_command} (shows them it was read). {safety_line} " + HOW_TO_ANSWER + ")")
 
@@ -119,8 +120,8 @@ def envelope(m, agent=""):
     # Tapbacks they made since their last message ride along, apart from the new text (as Plow Chat hands them over).
     taps = "".join(f"(Earlier, separate from this text: they reacted {t['emoji']} to {'your' if t['on_mine'] else 'their own'} "
                    f"message \"{t['on']}\".)\n" for t in m.get("tapbacks") or [])
-    return plugin_text("web-chat", TEMPLATE, dict(answer, trust_stamp=f"[web-chat] from web visitor {v}{page}:", their_message=m["text"], tapbacks=taps,
-                                                  react_command=f"{RUN} react {v} {m['id']} 👀", safety_line=SAFETY_LINE))
+    return plugin_text("web-chat", TEMPLATE, dict(answer, sender=v, came_from=page, their_message=m["text"], tapbacks=taps,
+                                                  react_command=f"{RUN} react {v} {m['id']} 👀", safety_line=SAFETY_LINE), STAMP)
 
 
 PLOW_CHAT = INSTALL / "plugins" / "plow-chat" / "plow-chat.py"

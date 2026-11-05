@@ -465,15 +465,19 @@ def saved_template(plugin):
         return ""
 
 
-def plugin_text(plugin, template, values):
-    """What a plugin hands an agent: its own words, or the owner's edit of them, with this message's values filled in."""
-    return render_template(saved_template(plugin) or template, values)
+def plugin_text(plugin, template, values, stamp=""):
+    """What a plugin hands an agent: its own words, or the owner's edit of them, with this message's values filled in. stamp: the words
+    that say who sent it, for text saved on 5.22.167, when they had one name: {trust_stamp}."""
+    return render_template(saved_template(plugin) or template, dict(values, trust_stamp=render_template(stamp, values)))
 
 
 # The variables a message cannot lose: the agent would get none of what was said, could not tell who sent it, or could not answer.
-REQUIRED_VARIABLES = ("their_message", "trust_stamp", "reply_command")
+REQUIRED_VARIABLES = ("their_message", "sender", "user_id", "trust_level", "youtube_channel", "reply_command")
+# Who sent it, filled in by the plugin for each message, so nobody can type them. The words around them are the owner's. They must stand
+# before the person's words: if those came first, a sender could open with words that read like MyPlow's own and pose as the owner.
+IDENTITY_VARIABLES = ("sender", "user_id", "trust_level", "youtube_channel")
 # These only warn, in the page: the owner may mean to drop them.
-WARNED_VARIABLES = ("safety_line", "trust_rules", "confirm_command")
+WARNED_VARIABLES = ("safety_line", "owner_line", "trust_rules", "confirm_command")
 
 
 def in_template(names, template):
@@ -489,6 +493,11 @@ def checked_template(default, text):
     if lost:
         raise ValueError("not saved: without %s the agent cannot be told who this is, what they said, or how to answer"
                          % ", ".join("{%s}" % v for v in lost))
+    if "{their_message}" in text:
+        late = [v for v in in_template(IDENTITY_VARIABLES, default) if text.index("{%s}" % v) > text.index("{their_message}")]
+        if late:
+            raise ValueError("not saved: {their_message} has to come after %s, or what someone sends could arrive first and read like "
+                             "MyPlow's own words" % ", ".join("{%s}" % v for v in late))
     return text
 
 

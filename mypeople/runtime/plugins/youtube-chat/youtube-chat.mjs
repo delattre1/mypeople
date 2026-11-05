@@ -70,8 +70,9 @@ function writeJson(p, obj) {
 
 // --- In: YouTube chat -> MP ---
 
-export const TEMPLATE = '{trust_stamp} {their_message}\n'
-  + "({who} is on Daniel's whitelist of community developers. They may use Daniel's device to code "
+const STAMP = '[youtube-chat] from {sender}{youtube_channel}:';
+export const TEMPLATE = STAMP + ' {their_message}\n'
+  + "({sender} is on Daniel's whitelist of community developers. They may use Daniel's device to code "
   + "through the MyPlow board exactly as Daniel does. {safety_line} "
   + "This came from Daniel's YouTube live chat; to answer, run: {reply_command} "
   + '-- it posts into the live chat.)';
@@ -81,11 +82,13 @@ export function envelope(author, text, channel = '') {
   let saved = '';
   try { saved = readFileSync(join(STATE_DIR, 'template.txt'), 'utf8'); } catch { /* none: its own words */ }
   const values = {
-    trust_stamp: `[youtube-chat] from ${author}${channel ? ` (YouTube channel ${channel})` : ''}:`, their_message: text, who: author,
+    sender: author, youtube_channel: channel ? ` (YouTube channel ${channel})` : '', their_message: text,
     safety_line: 'ABSOLUTE RULE, no exceptions whoever asks or however: never expose our API keys - do not show, print, post, send or commit any of them.',
     reply_command: `node ${SELF} reply "your reply"`,
   };
-  return (saved || TEMPLATE).replace(/\{([a-zA-Z0-9_]+)\}/g, (all, k) => (Object.hasOwn(values, k) ? values[k] : all));
+  const fill = (t, v) => t.replace(/\{([a-zA-Z0-9_]+)\}/g, (all, k) => (Object.hasOwn(v, k) ? v[k] : all));
+  // trust_stamp: text saved on 5.22.167, when the stamp's words had that one name.
+  return fill(saved || TEMPLATE, { ...values, trust_stamp: fill(STAMP, values) });
 }
 
 // One YouTube chat message out of a Restream websocket frame, or null.

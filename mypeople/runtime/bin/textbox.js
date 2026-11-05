@@ -7,10 +7,10 @@
   if(document.head)document.head.append(css);
   const VARS=/\{[a-zA-Z0-9_]+\}/g,mk=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x)e.textContent=x;return e},bt=(c,x,f)=>{const b=mk("button",c,x);b.type="button";b.onclick=f;return b};
   function paint(hl,text,known,person){hl.replaceChildren();let at=0;for(const m of text.matchAll(VARS)){hl.append(document.createTextNode(text.slice(at,m.index)));const v=m[0];hl.append(mk("span",known.includes(v)?(person.includes(v)?"v person":"v"):"v bad",v));at=m.index+v.length}hl.append(document.createTextNode(text.slice(at)+"\n"))}
-  // o: key, label, base (the text as saved), defaults (the text the variables come from), required, warned, person, drafts, redraw, onSave(text)
+  // o: key, label, base (the text as saved), defaults (the text the variables come from), required, warned, identity (who sent it: must stand before the person's words), person, drafts, redraw, onSave(text)
   window.textBox=function(o){
-    const wrap=mk("div"),brace=x=>"{"+x+"}",person=o.person.map(brace),required=o.required.map(brace),warned=o.warned.map(brace),known=[...new Set((o.defaults.match(VARS)||[]))];
-    const lg=mk("p","legend","Yellow is what the person said, grey is filled in by MyPlow. Click one to put it where your cursor is: ");
+    const wrap=mk("div"),brace=x=>"{"+x+"}",person=o.person.map(brace),required=o.required.map(brace),warned=o.warned.map(brace),identity=(o.identity||[]).map(brace),known=[...new Set((o.defaults.match(VARS)||[]))];
+    const lg=mk("p","legend","Yellow is what the person said. Grey is filled in by MyPlow for each message. The rest is your words. Click one to put it where your cursor is: ");
     const ed=mk("div","ed"),hl=mk("pre","hl"),ta=mk("textarea","tx");hl.setAttribute("aria-hidden","true");ta.spellcheck=false;ta.setAttribute("aria-label",o.label);ta.value=o.key in o.drafts?o.drafts[o.key]:o.base;
     known.forEach(v=>{lg.append(bt("chip"+(person.includes(v)?" person":""),v,()=>{const s=ta.selectionStart,e=ta.selectionEnd;ta.setRangeText(v,s,e,"end");ta.focus();sync()}))});
     const copy=bt("cp","Copy",async()=>{try{await navigator.clipboard.writeText(ta.value);copy.textContent="Copied"}catch(e){ta.focus();ta.select();copy.textContent="Press ⌘C"}});
@@ -20,11 +20,13 @@
       if(ta.value!==o.base)o.drafts[o.key]=ta.value;else delete o.drafts[o.key];
       paint(hl,ta.value,known,person);ta.style.height="auto";ta.style.height=(ta.scrollHeight+2)+"px";
       const have=new Set(ta.value.match(VARS)||[]),dirty=ta.value!==o.base,lost=required.filter(v=>!have.has(v));status.replaceChildren();
-      const back=(line,v,cls)=>{const l=mk("p","st "+cls,line+" ");l.append(bt("lk","Put it back at the end",()=>{ta.value=ta.value.replace(/\s*$/,"")+(cls==="stop"?"\n":" ")+v;sync()}));status.append(l)};
-      lost.forEach(v=>back(person.includes(v)?"Without "+v+" the agent gets none of what the person said, so this cannot be saved.":"Without "+v+" the agent cannot tell who this is or how to answer, so this cannot be saved.",v,"stop"));
-      warned.filter(v=>!have.has(v)).forEach(v=>back("Without "+v+" the agent is not told that. You can still save it.",v,"warn"));
+      const fix=(line,cls,label,f)=>{const l=mk("p","st "+cls,line+" ");l.append(bt("lk",label,()=>{f();sync()}));status.append(l)},atEnd=v=>()=>{ta.value=ta.value.replace(/\s*$/,"")+"\n"+v},atStart=v=>()=>{ta.value=v+" "+ta.value};
+      lost.forEach(v=>identity.includes(v)?fix("Without "+v+" the agent cannot tell who sent this, so this cannot be saved.","stop","Put it back at the start",atStart(v)):fix(person.includes(v)?"Without "+v+" the agent gets none of what the person said, so this cannot be saved.":"Without "+v+" the agent cannot answer, so this cannot be saved.","stop","Put it back at the end",atEnd(v)));
+      const said=person[0],at=said?ta.value.indexOf(said):-1,late=at<0?[]:identity.filter(v=>have.has(v)&&ta.value.indexOf(v)>at);
+      if(late.length)fix(said+" has to come after "+late.join(", ")+", or what someone sends could arrive first and read like MyPlow's own words, so this cannot be saved.","stop","Move it to the end",()=>{ta.value=ta.value.replace(said,"").replace(/\s*$/,"")+"\n"+said});
+      warned.filter(v=>!have.has(v)).forEach(v=>fix("Without "+v+" the agent is not told that. You can still save it.","warn","Put it back at the end",atEnd(v)));
       [...have].filter(v=>!known.includes(v)).forEach(v=>status.append(mk("p","st warn",v+" is not a variable here, so it goes out exactly as written.")));
-      acts.hidden=!dirty;sv.disabled=lost.length>0;
+      acts.hidden=!dirty;sv.disabled=lost.length>0||late.length>0;
     }
     ta.oninput=sync;sync();if(window.requestAnimationFrame)requestAnimationFrame(sync);
     return wrap;

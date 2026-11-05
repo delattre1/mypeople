@@ -17,12 +17,11 @@ HTML = (BIN / "plugins.html").read_text()
 SCRIPT = (BIN / "textbox.js").read_text() + HTML[HTML.index("<script>\n") + 9:HTML.rindex("</script>")]
 IDS = re.findall(r'id="([\w-]+)"', HTML[HTML.index("<body"):HTML.index("<script")])
 ROWS = [{"name": "plow-chat", "state": "running", "desc": "Texts", "installed": False, "also": ["lab"], "rule": "", "custom": "", "asking": False},
-        {"name": "a2a", "state": "down", "desc": "Agents", "installed": False, "also": [], "rule": "", "custom": "", "asking": False},
+        {"name": "voice", "state": "down", "desc": "Agents", "installed": False, "also": [], "rule": "", "custom": "", "asking": False},
         {"name": "github-prs", "state": "off", "desc": "PRs", "installed": False, "also": [], "rule": "", "custom": "", "asking": False},
         {"name": "web-chat", "state": "not set up", "desc": "Web", "installed": False, "also": [], "rule": "", "custom": "", "asking": False}]
-PLOW = "{trust_stamp} {their_message}\\nRun {reply_command}. {safety_line} {plow}"
-SAID = {"plow-chat": {"kind": "template", "default": PLOW, "text": PLOW, "required": ["their_message", "trust_stamp", "reply_command"], "warned": ["safety_line"]},
-        "a2a": {"kind": "access", "default": "{trust_stamp} a2a words", "text": "{trust_stamp} a2a words", "required": ["trust_stamp"], "warned": []},
+PLOW = "[plowchat] from {sender} in {chat}: {their_message}\\nRun {reply_command}. {safety_line} {plow}"
+SAID = {"plow-chat": {"kind": "template", "default": PLOW, "text": PLOW, "required": ["their_message", "sender", "reply_command"], "warned": ["safety_line"], "identity": ["sender"]},
         "github-prs": {"kind": "yes", "default": "[LOCKED] <their message>", "text": "[LOCKED] <their message>", "required": [], "warned": []}}
 RUN = r"""
 const posts=[];const FAKE=__ROWS__,SAID=__SAID__;
@@ -44,8 +43,8 @@ __SCRIPT__
  ids.view.querySelectorAll("button").find(b=>b.attrs.role==="switch").onclick();await tick();R.afterSwitch=on();R.tabsAfter=tabsNow();
  ids.view.querySelectorAll("button").find(b=>b.className==="nm"&&b.children[0].textContent==="github-prs").onclick();await tick();
  R.lockedFixed=ids.view.querySelectorAll("pre").find(n=>n.className==="fixed").textContent;R.lockedLegend=ids.view.textContent.includes("Yellow is");const lt=ids.view.querySelectorAll("textarea")[0];lt.value="My own text.";lt.oninput();by("BUTTON","Save").onclick();await tick();
- by("BUTTON","Running").onclick();await tick();ids.view.querySelectorAll("button").find(b=>b.className==="nm"&&b.children[0].textContent==="a2a").onclick();await tick();
- R.down=ids.view.textContent.includes("down");R.accessLink=by("A","Access")!==undefined;R.a2aInputs=ids.view.querySelectorAll("textarea").length+ids.view.querySelectorAll("input").length;R.a2aWords=ids.view.querySelectorAll("pre")[0].textContent;R.a2aSwitch=!!ids.view.querySelectorAll("button").find(b=>b.attrs.role==="switch");
+ by("BUTTON","Running").onclick();await tick();ids.view.querySelectorAll("button").find(b=>b.className==="nm"&&b.children[0].textContent==="voice").onclick();await tick();
+ R.down=ids.view.textContent.includes("down");R.names2=ids.view.querySelectorAll("button").filter(b=>b.className==="nm").map(b=>b.children[0].textContent);
  by("BUTTON","Not set up").onclick();await tick();R.noSwitch=!ids.view.querySelectorAll("button").find(b=>b.attrs.role==="switch");by("BUTTON","Ask your agent to connect it").onclick();await tick();
  ids.want.value="Connect my Slack workspace";ids.connect.onsubmit({preventDefault(){}});await tick();R.asked=ids.asked.textContent;R.wantCleared=ids.want.value;
  R.posts=posts;console.log(JSON.stringify(R));process.exit(0)})().catch(e=>{console.error(e);process.exit(1)});
@@ -70,21 +69,19 @@ class PluginsTab(unittest.TestCase):
         self.assertEqual(self.r["on"], "Running 2")
 
     def test_names_beside_one_plugin_and_its_text_open_with_its_variables_marked(self):
-        self.assertEqual(self.r["names"], ["plow-chat", "a2a"])
+        self.assertEqual(self.r["names"], ["plow-chat", "voice"])
         self.assertEqual(self.r["folds"], 0)
         self.assertEqual(self.r["said"], PLOW)
         self.assertEqual(self.r["copy"], "Copy")
         self.assertEqual(self.r["yellow"], ["{their_message}"])
-        self.assertEqual(self.r["grey"], ["{trust_stamp}", "{reply_command}", "{safety_line}", "{plow}"])
+        self.assertEqual(self.r["grey"], ["{sender}", "{chat}", "{reply_command}", "{safety_line}", "{plow}"])
         self.assertTrue(self.r["also"])
 
     def test_a_reply_command_cannot_be_lost_and_a_safety_line_only_warns(self):
         self.assertTrue(self.r["lostOff"] and self.r["lostBack"] and self.r["warnOn"])
 
-    def test_a2a_keeps_its_switch_and_shows_its_text_read_only_with_a_link_to_access(self):
-        self.assertEqual(self.r["a2aInputs"], 0)
-        self.assertEqual(self.r["a2aWords"], SAID["a2a"]["text"])
-        self.assertTrue(self.r["a2aSwitch"] and self.r["accessLink"])
+    def test_a2a_has_no_special_case_left_here(self):
+        self.assertNotIn("a2a", SCRIPT)
 
     def test_a_locked_plugin_shows_its_lines_fixed_and_the_owners_text_beside_them(self):
         self.assertEqual(self.r["lockedFixed"], SAID["github-prs"]["text"])

@@ -760,7 +760,7 @@ class Handler(C.JSONHandler):
         if p == "/todo/access":
             if not ok:
                 return self._send(401, {"error": "unauthorized"})
-            return self._access("state")
+            return self._access("state", extra={"service": mpplugins.service_state("a2a")})
         if p.startswith("/todo/attach"):
             if not ok:
                 return self._send(401, {"error": "unauthorized"})
@@ -867,12 +867,12 @@ class Handler(C.JSONHandler):
                 t["updated"] = now()
                 save_board(board)
 
-    def _access(self, *op):
+    def _access(self, *op, extra=None):
         """The a2a plugin owns pairing state: the Access page asks it, as mp pair does."""
         try:
             r = subprocess.run([sys.executable, A2A, "access", *op], capture_output=True, text=True, timeout=20)
             if r.returncode == 0:
-                return self._send(200, json.loads(r.stdout))
+                return self._send(200, dict(json.loads(r.stdout), **(extra or {})))
             return self._send(400, {"error": (r.stderr or r.stdout).strip()[:300] or "failed"})
         except (OSError, ValueError, subprocess.TimeoutExpired) as e:
             return self._send(500, {"error": str(e)[:300]})

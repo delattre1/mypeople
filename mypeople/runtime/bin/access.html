@@ -20,6 +20,7 @@ h2{font:600 16px/1.3 var(--sans);margin:26px 0 2px}
 .ok{margin-left:auto;font-size:13px;color:var(--volt)}
 .say{margin:10px 0 0;overflow-wrap:anywhere}
 .small{color:var(--muted);font-size:13px;margin:8px 0 0}
+#service{color:var(--amber);margin:0 0 10px}
 .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
 button.b{height:36px;padding:0 14px;border-radius:9px;border:1px solid #ffffff26;background:none;color:var(--ink);font:500 14px var(--sans);cursor:pointer}
 button.b.go{background:var(--volt);border-color:var(--volt);color:#111110;font-weight:600}
@@ -61,6 +62,7 @@ textarea:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
 <h1>Access</h1>
 <p id="msg" role="status"></p>
 <div class="find"><input id="find" placeholder="Find someone, then use the arrow keys" aria-label="Find someone by name or machine" autocomplete="off"></div>
+<p id="service" class="small" role="status" hidden></p>
 <div class="tabs" id="tabs" role="group" aria-label="Who to show"></div>
 <div id="view"></div>
 </main>
@@ -110,7 +112,7 @@ function revoke(g){
 function hasAccess(g){
   const p=el("div","panel");
   p.append(who(g.name+"'s agent",g.host,el("span","ok","Paired")));
-  p.append(textBox({key:g.host,label:"The message "+g.name+"'s agent arrives in",base:g.template,defaults:g.defaults,required:g.required,warned:g.warned,person:["their_message"],drafts,redraw:()=>{force=true;draw()},onSave:t=>post("save",{host:g.host,text:t})}));
+  p.append(textBox({key:g.host,label:"The message "+g.name+"'s agent arrives in",base:g.template,defaults:g.defaults,required:g.required,warned:g.warned,identity:g.identity,person:["their_message"],drafts,redraw:()=>{force=true;draw()},onSave:t=>post("save",{host:g.host,text:t})}));
   const asking=el("div","row"),say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the message for "+g.name);say.maxLength=1000;say.value=asks[g.host]||"";say.oninput=()=>{asks[g.host]=say.value};
   asking.append(say,button("b","Ask",async()=>{if(await post("ask",{host:g.host,text:say.value}))delete asks[g.host]}));p.append(asking);
   p.append(el("p","hint",g.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from "+g.name+"'s next message. Nothing enforces this text."));
@@ -198,8 +200,11 @@ function drawView(){
   const top=tab==="in"?"You decide what your agent is told about each of them.":tab==="out"?"You asked these. What each one allows you is decided on their machine.":"";
   view.replaceChildren(...(top?[el("p","small sub",top)]:[]),two);
 }
+// a2a has no switch on any page: it runs by itself once there is a pairing or a line, and each person has Revoke. If it is not running, say so here.
+const SERVICE={off:"Messages between MyPlows are switched off, so nobody here can reach you or be reached. Turn them back on in a terminal: mp plugins on a2a",down:"Messages between MyPlows are not moving right now. MyPlow restarts this by itself; if this stays, tell your agent."};
 function draw(){
   if(!state)return;
+  const sv=document.getElementById("service");sv.textContent=SERVICE[state.service]||"";sv.hidden=!SERVICE[state.service];
   if(!tab)tab=state.requests.length?"wait":"in";
   drawTabs();
   // The 5 s poll must not redraw what they are typing in.

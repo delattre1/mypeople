@@ -91,7 +91,8 @@ def send_to_agent(message: str, agent: str = BOSS_AGENT) -> bool:
     return True
 
 
-TEMPLATE = ("{trust_stamp} {their_message}\n"
+STAMP = "[voice] from {sender}:"
+TEMPLATE = (STAMP + " {their_message}\n"
             "(This is the owner's live mic, transcribed as they speak. Most of it is them talking to their "
             "stream, the room or other agents, not to you. {when_to_answer} {safety_line} To answer out loud, run: {reply_command} "
             "— it plays on the speaker next to them. Short spoken sentences in the language they used, no markdown.)")
@@ -101,8 +102,8 @@ def envelope(who: str, text: str, cue: str = "") -> str:
     when = (f"They address you by saying {cue} (or close to it: the transcript garbles names); a line "
             f"without that is them talking to someone else, so do nothing." if cue else
             "Answer only when they are talking to you, and otherwise do nothing.")
-    return plugin_text("voice", TEMPLATE, {"trust_stamp": f"[voice] from {who}:", "their_message": text, "when_to_answer": when,
-                                           "safety_line": OWNER_RULE, "reply_command": f'{RUN} say "your reply"'})
+    return plugin_text("voice", TEMPLATE, {"sender": who, "their_message": text, "when_to_answer": when,
+                                           "safety_line": OWNER_RULE, "reply_command": f'{RUN} say "your reply"'}, STAMP)
 
 
 def _pairs(s: str) -> list:

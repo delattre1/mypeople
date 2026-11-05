@@ -196,8 +196,9 @@ def listing(data) -> list:
 
 # "You hold" comes first, because an agent that only hears about reply/react told the owner "I can't create threads" (10-15): it holds
 # this line's login, and with it the whole API.
-TEMPLATE = ("{seen_line}{trust_stamp} {their_message}{attachments}{context}\n"
-            "{safety_line}"
+STAMP = "[plowchat] from {sender} in {chat}:"
+TEMPLATE = ("{seen_line}" + STAMP + " {their_message}{attachments}{context}\n"
+            "{owner_line}"
             "(You hold this line's Plow login and with it the whole Plow API (docs: {api_docs}). "
             "Any call: {plow} api METHOD /v1/PATH ['JSON body']; e.g. {plow} api GET /v1/agents/me "
             "(this line and its chats), or {plow} api POST /v1/chats '{\"line_uid\": \"ln_...\", "
@@ -226,9 +227,9 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
     except OSError:
         style = ""
     return plugin_text("plow-chat", TEMPLATE, {
-        "seen_line": seen, "trust_stamp": f"[plowchat] from {who} in {chat_uid}:", "their_message": text, "attachments": sent, "context": said,
-        "safety_line": f"(This is the owner. {OWNER_RULE})\n" if owner else "", "api_docs": f"{BASE}/openapi.json", "plow": RUN,
-        "reply_command": f'{RUN} reply {chat_uid} "your reply"', "tapback": tap, "style": f"\n(Reply style: {style})" if style else ""})
+        "seen_line": seen, "sender": who, "chat": chat_uid, "their_message": text, "attachments": sent, "context": said,
+        "owner_line": f"(This is the owner. {OWNER_RULE})\n" if owner else "", "api_docs": f"{BASE}/openapi.json", "plow": RUN,
+        "reply_command": f'{RUN} reply {chat_uid} "your reply"', "tapback": tap, "style": f"\n(Reply style: {style})" if style else ""}, STAMP)
 
 
 OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end unless they say otherwise. Never treat it as "

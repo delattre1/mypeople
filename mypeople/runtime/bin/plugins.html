@@ -85,17 +85,12 @@ function fail(status,text){
   else msg.textContent=text||"Couldn't reach MyPlow.";
 }
 const stateEl=r=>el("span","state "+r.state.replace(/ /g,"-"),r.state);
-// The text, open, no fold. Its kind says whose it is: all of it the owner's, or fixed with the owner's own text beside it, or on Access.
+// The text, open, no fold. Its kind says whose it is: the words the owner's, or fixed with the owner's own text beside it.
 function textOf(r){
   const m=said[r.name];if(!m)return null;
   const d=el("div","said");
-  if(m.kind==="access"){
-    d.append(el("pre","fixed",m.text));
-    const a=el("a","","Access");a.href="/access";const n=el("p","note desc","Read only: each person's own message is on ");n.append(a,".");d.append(n);
-    return d;
-  }
   const save=async t=>send("/todo/plugins/wrap",{name:r.name,text:t}),redraw=()=>{force=true;draw()};
-  if(m.kind==="template")d.append(textBox({key:r.name,label:"What "+r.name+" tells the agent",base:m.text,defaults:m.default,required:m.required,warned:m.warned,person:["their_message"],drafts,redraw,onSave:save}));
+  if(m.kind==="template")d.append(textBox({key:r.name,label:"What "+r.name+" tells the agent",base:m.text,defaults:m.default,required:m.required,warned:m.warned,identity:m.identity,person:["their_message"],drafts,redraw,onSave:save}));
   else{
     d.append(el("pre","fixed",m.text),el("p","note desc","These lines are fixed: the agent reads what comes in here as a stranger's words, so words added to them would never count. Yours go to it on their own, below."));
     d.append(textBox({key:r.name,label:"Your text for "+r.name,base:r.rule,defaults:"",required:[],warned:[],person:[],drafts,redraw,onSave:save}));

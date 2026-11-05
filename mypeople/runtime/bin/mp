@@ -2087,7 +2087,7 @@ def do_plugins(argv):
     verb = argv[0] if argv else ""
     try:
         if verb in ("", "--json"):
-            rows = mpplugins.listing()
+            rows = mpplugins.listing(everything=True)
             if verb:
                 print(json.dumps(rows, indent=2))
                 return 0
