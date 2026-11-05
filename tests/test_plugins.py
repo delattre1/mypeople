@@ -29,6 +29,7 @@ WAS = {
     "github-prs": ("env:GITHUB_PRS", "python3", "github-prs.py"),
     "instagram-comments": ("env:INSTAGRAM_COMMENTS", "python3", "instagram-comments.py"),
     "plow-chat": ("env:PLOW_CHAT", "python3", "plow-chat.py"),
+    "swarm": ("file:state/swarm/config.json", "python3", "swarm.py"),
     "voice": ("file:state/voice/config.json", "python3", "voice.py"),
     "voice-call": ("env:VOICE_CALL", "uv run --script", "voice-call.py"),
     "web-chat": ("file:state/web-chat/creds.json", "python3", "web-chat.py"),
@@ -340,6 +341,8 @@ class Switch(unittest.TestCase):
         self.assertEqual("[g] by {sender}: {their_message}", C.without_old_name("{trust_stamp}: {their_message}", "[g] by {sender}: {their_message}"))
         self.assertEqual('[c] {sender}: "{their_message}"', C.without_old_name('{trust_stamp} "{their_message}"', '[c] {sender}: "{their_message}"\n(x)'))
         self.assertEqual("[p] {sender}: {their_message}", C.without_old_name("{trust_stamp} {their_message}", "{seen_line}[p] {sender}: {their_message}"))
+        both = "[s] {sender}: {their_message} {owner_line}{safety_line}"
+        self.assertEqual(both, C.without_old_name(both, both), "a message with both lines keeps both")
         self.m.save_rule("t", words.replace("{safety_line} ", "Keep it short. "))   # only warned about, in the page
         self.assertEqual(C.plugin_text("t", words, values), "[t] from Ana: {reply_command} and {other}\nRun mp say. Keep it short. x", "applies to the next message")
         self.assertEqual(self.row("t")["custom"], C.saved_template("t"))
@@ -413,12 +416,14 @@ class Switch(unittest.TestCase):
                 # What 5.22.167 would have saved for it, the stamp under its one old name, reads back as exactly these words.
                 stamp = re.search(r"""STAMP = (["'])(.+?)\1""", (d / run[-1]).read_text()).group(2)
                 self.assertIn(stamp, words, d.name)
-                old = words.replace(stamp, "{trust_stamp}").replace("{sender}", "{who}").replace("{owner_line}", "{safety_line}")
+                old = words.replace(stamp, "{trust_stamp}").replace("{sender}", "{who}")
+                if "{safety_line}" not in words:      # Plow Chat's line that says it is the owner had that name on 5.22.167
+                    old = old.replace("{owner_line}", "{safety_line}")
                 self.assertEqual(words, self.m.C.without_old_name(old, words), d.name)
 
     def test_the_owner_rule_is_one_sentence_in_every_plugin_that_carries_it(self):
         found = {re.search(r'^OWNER_RULE = \((.*?)\)$', (PLUGINS / n / f"{n}.py").read_text(), re.S | re.M).group(1)
-                 for n in ("voice", "plow-chat", "voice-call")}
+                 for n in ("voice", "plow-chat", "voice-call", "swarm")}
         self.assertEqual(1, len(found), found)
 
     def test_the_list_never_carries_a_value_from_queue_env(self):

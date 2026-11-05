@@ -525,7 +525,7 @@ def without_old_name(saved, default):
     {safety_line} for Plow Chat's line that says it is the owner. Read in today's words, so it delivers right and the page can show and
     check it. default: the same message's own words, which have those words before {their_message}."""
     words = default[:default.find("{their_message}")].rsplit("\n", 1)[-1].replace("{seen_line}", "").rstrip(' "')
-    if "{owner_line}" in default:
+    if "{owner_line}" in default and "{safety_line}" not in default:      # Plow Chat's, then; a message with both keeps both
         saved = saved.replace("{safety_line}", "{owner_line}")
     return saved.replace("{who}", "{sender}").replace("{trust_stamp}:", words.rstrip(":") + ":").replace("{trust_stamp}", words)
 
