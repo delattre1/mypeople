@@ -10,6 +10,9 @@ h1{font:400 28px/44px var(--serif);margin:0 0 20px;padding-right:400px}
 #msg:empty{display:none}
 #msg{margin:0 0 14px;color:var(--amber)}
 #msg a{color:inherit}
+h2{font:600 16px/1.3 var(--sans);margin:26px 0 2px}
+.small.sub{margin:0 0 10px}
+.wait{margin-left:auto;font-size:13px;color:var(--amber)}
 .panel{padding:14px 16px;margin-bottom:8px;background:var(--panel);border:1px solid #ffffff14;border-radius:12px}
 .who{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .name{font-weight:600;overflow-wrap:anywhere}
@@ -45,13 +48,19 @@ textarea:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
   <div id="line"></div>
 </div>
 <div id="requests"></div>
+<h2>Who has access to you</h2>
+<p class="small sub">You decide what your agent is told about each of them.</p>
 <div id="granted"></div>
+<h2>Who you have access to</h2>
+<p class="small sub">You asked these. What each one allows you is decided on their machine.</p>
+<div id="reach"></div>
+<p class="small" id="ended"></p>
 <p class="small" id="paired"></p>
 </main>
 <script>
 "use strict";
 // Every value here came from another MyPlow, an agent or an owner's input: textContent and .value only, never markup.
-const msg=document.getElementById("msg"),requests=document.getElementById("requests"),granted=document.getElementById("granted"),paired=document.getElementById("paired"),lineBox=document.getElementById("line");
+const msg=document.getElementById("msg"),requests=document.getElementById("requests"),granted=document.getElementById("granted"),reach=document.getElementById("reach"),ended=document.getElementById("ended"),paired=document.getElementById("paired"),lineBox=document.getElementById("line");
 let busy=false,shown="",force=false,kept=false;  // kept: a click's error, which a poll must not wipe
 const opened=new Set();
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
@@ -64,7 +73,7 @@ function who(name,host,extra){const w=el("div","who");w.append(el("span","name",
 function render(d){
   const now=JSON.stringify(d);
   if(now===shown)return;  // the 5 s poll must not redraw what they may be reading
-  if(document.activeElement&&document.activeElement.closest("#granted")&&!busy&&!force)return;  // nor what they are typing
+  if(document.activeElement&&document.activeElement.closest("#granted,#reach")&&!busy&&!force)return;  // nor what they are typing
   force=false;
   shown=now;
   requests.replaceChildren(...d.requests.map(r=>{
@@ -76,21 +85,26 @@ function render(d){
     a.append(button("b","Decline",()=>post("decline",{host:r.host})),button("b go","Grant access",()=>post("grant",{host:r.host})));
     p.append(a);return p;
   }));
-  granted.replaceChildren(...d.granted.map(g=>{
-    const p=el("div","panel");
-    p.append(who(g.name+"'s agent",g.host,el("span","ok","✓ Verified")));
-    const lab=el("label","lab","Permission message");
-    const area=el("textarea");area.value=g.text;area.setAttribute("aria-label","Permission message for "+g.name);lab.append(area);p.append(lab);
-    const saving=el("div","row end");saving.append(button("b","Save",()=>post("save",{host:g.host,text:area.value})));p.append(saving);
-    const asking=el("div","row"),say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the message for "+g.name);say.maxLength=1000;
-    asking.append(say,button("b","Ask",()=>post("ask",{host:g.host,text:say.value})));p.append(asking);
-    p.append(el("p","small",g.asking?"Your agent is rewriting it.":"Applies from "+g.name+"'s next message."));
-    const said=el("details","said");said.open=opened.has(g.host);
-    said.ontoggle=()=>{said.open?opened.add(g.host):opened.delete(g.host)};
-    said.append(el("summary","","What it tells the agent"),el("pre","",g.package));p.append(said);
-    return p;
-  }));
-  paired.textContent=d.paired.length?"Also paired, no permission message: "+d.paired.join(", "):"";
+  granted.replaceChildren(...(d.granted.length?d.granted.map(g=>peer(g,false)):[el("p","small","Nobody yet.")]));
+  reach.replaceChildren(...(d.reach.length?d.reach.map(g=>peer(g,true)):[el("p","small","Nobody yet.")]));
+  ended.textContent=d.ended.length?"Access ended: "+d.ended.join(", "):"";
+  paired.textContent=d.paired.length?"Your own machines, no permission message: "+d.paired.join(", "):"";
+}
+function peer(g,asked){
+  const p=el("div","panel"),host=g.host+(g.own?" · your own machine":"");
+  p.append(who(g.name+"'s agent",host,g.waiting?el("span","wait","Waiting for their owner"):el("span","ok","\u2713 Verified")));
+  if(g.said)p.append(el("p","say","You said: \u201c"+g.said+"\u201d"));
+  if(g.waiting){p.append(el("p","small","Nothing is shared until they grant it."));return p}
+  const lab=el("label","lab",asked?"Their messages to you arrive with this":"Permission message");
+  const area=el("textarea");area.value=g.text;area.setAttribute("aria-label","Permission message for "+g.name);lab.append(area);p.append(lab);
+  const saving=el("div","row end");saving.append(button("b","Save",()=>post("save",{host:g.host,text:area.value})));p.append(saving);
+  const asking=el("div","row"),say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the message for "+g.name);say.maxLength=1000;
+  asking.append(say,button("b","Ask",()=>post("ask",{host:g.host,text:say.value})));p.append(asking);
+  p.append(el("p","small",g.asking?"Your agent is rewriting it.":"Applies from "+g.name+"'s next message."));
+  const said=el("details","said");said.open=opened.has(g.host);
+  said.ontoggle=()=>{said.open?opened.add(g.host):opened.delete(g.host)};
+  said.append(el("summary","","What it tells the agent"),el("pre","",g.package));p.append(said);
+  return p;
 }
 async function load(){
   if(busy)return;

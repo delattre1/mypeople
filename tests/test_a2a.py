@@ -319,6 +319,28 @@ class A2ATest(unittest.TestCase):
         self.beta.step()
         self.assertEqual(self.qb.sends()[-1]["payload"]["message"], "[from alpha, on another MyPlow] " + note)
 
+    def test_the_page_tells_who_has_access_to_you_from_who_you_have_access_to(self):
+        self.pair(grant=False, name="Sam", say="Hello from beta.")
+        asker, owner = self.beta.access_state(), self.alpha.access_state()
+        # the asker: waiting, not verified, not in the list of who has access to it, and nothing to edit yet
+        self.assertEqual(asker["granted"], [])
+        self.assertEqual([(r["host"], r["waiting"], r["said"]) for r in asker["reach"]], [("alpha", True, "Hello from beta.")])
+        self.assertEqual((owner["reach"], owner["granted"]), ([], []))
+        self.assertEqual([r["host"] for r in owner["requests"]], ["beta"])
+        self.alpha.decide("beta", True)
+        self.beta.step()
+        asker, owner = self.beta.access_state(), self.alpha.access_state()
+        self.assertEqual([(r["host"], r["waiting"]) for r in asker["reach"]], [("alpha", False)])
+        self.assertEqual(asker["granted"], [])
+        self.assertEqual([(r["host"], r["name"], r["waiting"], r["own"]) for r in owner["granted"]], [("beta", "Sam", False, False)])
+        self.assertEqual(owner["reach"], [])
+        self.assertIn("alpha's agent", asker["reach"][0]["text"])
+        # and when it ends, both sides say so
+        self.alpha.revoke("beta")
+        self.beta.step()
+        self.assertEqual((self.alpha.access_state()["ended"], self.beta.access_state()["ended"]), (["beta"], ["alpha"]))
+        self.assertEqual(self.beta.access_state()["reach"], [])
+
     def test_a_pairing_from_before_permission_messages_keeps_the_stamp_alone_only_if_its_own(self):
         self.pair()
         self.alpha.change_keys(lambda k: (k["peers"]["beta"].pop("wrap"), k["peers"]["beta"].pop("kind")))
