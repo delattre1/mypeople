@@ -103,6 +103,29 @@ jobs:
           V=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' ../mypeople/__init__.py)
           cargo tauri build --config "{\"version\":\"$V\",\"bundle\":{\"macOS\":{\"minimumSystemVersion\":\"$MIN_MACOS\"}}}"
 
+      # Tauri staples right after notarizing and goes on if Apple does not serve the ticket yet: run 42103746100 shipped notarized
+      # but unstapled, so a Mac offline at install would refuse it. Staple until it holds, put that app in the DMG, and check it there.
+      - name: Staple the app, and the DMG carries the stapled app
+        run: |
+          APP=desktop/src-tauri/target/release/bundle/macos/MyPlow.app
+          DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          for i in $(seq 1 20); do
+            xcrun stapler validate "$APP" >/dev/null 2>&1 && break
+            xcrun stapler staple "$APP" >/dev/null 2>&1 || sleep 30
+          done
+          xcrun stapler validate "$APP"
+          RW="$RUNNER_TEMP/rw.sparseimage"; MNT="$RUNNER_TEMP/dmg-rw"; CHECK="$RUNNER_TEMP/dmg-check"
+          hdiutil convert "$DMG" -format UDSP -o "$RW" -quiet
+          hdiutil attach "$RW" -nobrowse -noautoopen -mountpoint "$MNT" -quiet
+          rm -rf "$MNT/MyPlow.app" && ditto "$APP" "$MNT/MyPlow.app"
+          hdiutil detach "$MNT" -quiet
+          rm "$DMG" && hdiutil convert "$RW" -format UDZO -o "$DMG" -quiet
+          codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
+          hdiutil attach "$DMG" -nobrowse -noautoopen -readonly -mountpoint "$CHECK" -quiet
+          xcrun stapler validate "$CHECK/MyPlow.app"
+          spctl --assess --type execute -vv "$CHECK/MyPlow.app"
+          hdiutil detach "$CHECK" -quiet
+
       - name: Smoke test the built app
         run: desktop/scripts/smoke-test.sh
 
