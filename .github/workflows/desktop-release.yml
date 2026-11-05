@@ -72,7 +72,7 @@ jobs:
       - name: The oldest macOS the carried binaries run on
         run: |
           MIN=$(find desktop/src-tauri/runtime -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 |
-                xargs -0 -n 50 vtool -show-build 2>/dev/null | awk '/minos/{print $2}' | sort -V | tail -1)
+                xargs -0 -n 1 vtool -show-build 2>/dev/null | awk '/minos/{print $2}' | sort -V | tail -1)
           [ -n "$MIN" ] || { echo "no minos read from the carried binaries" >&2; exit 1; }
           echo "carried binaries need macOS $MIN or newer"
           echo "MIN_MACOS=$MIN" >> "$GITHUB_ENV"
