@@ -105,7 +105,6 @@ For Codex, use `codex login` and `--backend codex`.
 | The board | `http://localhost:9933` |
 | The HUD | `http://localhost:9933/dashboard` |
 | The Terminal Graph | `http://localhost:9933/terminal-graph` |
-| A terminal link | port `7681` |
 
 From a shell: `mypeople status`, `mypeople verify`, `mypeople logs` and `mypeople down`. Stopping keeps the board on disk.
 
@@ -652,11 +651,7 @@ After a change, run `mypeople down && mypeople up --detach`.
 | `QUEUE_SECRET` | generated | What agents and daemons authenticate with. |
 | `TODO_PORT` | `9933` | The board. |
 | `HUD_PORT` | `9900` | The HUD and the queue. |
-| `TTYD_PORT` | `7681` | Writable terminals. |
-| `TTYD_RO_PORT` | `TTYD_PORT` + 1 | Read-only terminals, for the Graph's tiles. |
-| `TTYD_BROWSER_PORT` | `TTYD_PORT` | The terminal port that links use. |
 | `TTYD_PUBLIC_URL` | none | A browser-reachable terminal URL for a worker. |
-| `BIND_ADDR` | `0.0.0.0` | The address the board and the HUD listen on. |
 | `DEFAULT_BACKEND` | `claude` | The Boss's backend. |
 | `DEFAULT_AGENT_BACKEND` | `DEFAULT_BACKEND` | New agents' backend. |
 | `DEFAULT_CLAUDE_MODEL`, `DEFAULT_CODEX_MODEL`, `DEFAULT_GROK_MODEL` | see `queue.env` | Default model per backend. |
@@ -670,15 +665,13 @@ If the ports are taken, choose host ports before you start. Links from the board
 
 ```bash
 MYPEOPLE_BACKEND=codex \
-MYPEOPLE_TODO_PORT=39933 MYPEOPLE_HUD_PORT=39900 MYPEOPLE_TTYD_PORT=37681 \
+MYPEOPLE_TODO_PORT=39933 MYPEOPLE_HUD_PORT=39900 \
 docker compose up -d
 ```
 
 ## Who can reach it
 
-> MyPlow has no password. Opening a board page gives that browser a session, and the terminal port is writable.
-
-The default `BIND_ADDR` is `0.0.0.0`. Anyone who can reach the ports can open the board and type into an agent's terminal, so keep them on a network you trust. `BIND_ADDR` covers the board and the HUD. The terminal ports do not read it.
+> Run MyPlow only on a network you trust. It has no password.
 
 ## Worker mode
 
