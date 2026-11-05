@@ -813,6 +813,8 @@ def tmux_server_gone(env=None):
     ponytail: any daemonized tmux counts, so a private `tmux -L` server beside a crashed default one
     holds recovery back until it exits. Naming the socket's owner needs lsof, not on every node.
     """
+    if not hasattr(os, "getuid"):
+        return True  # no uid, no tmux-<uid> directory, no ps (a Windows port on psmux): it cannot tell a stalled server from a gone one, so a refused command is final
     env = os.environ if env is None else env
     path = os.path.join(env.get("TMUX_TMPDIR") or "/tmp", "tmux-%d" % os.getuid(), "default")
     if not os.path.exists(path):

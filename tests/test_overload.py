@@ -207,6 +207,13 @@ class ServerGoneTests(unittest.TestCase):
     def test_no_socket_means_gone(self):
         self.assertTrue(self.C.tmux_server_gone({"TMUX_TMPDIR": self.dir}))
 
+    def test_a_host_without_uids_reads_as_gone(self):
+        # A Windows port on psmux has no os.getuid, no tmux-<uid> socket directory and no ps. Without the guard this raised
+        # AttributeError inside ensure-boss and the Boss never started (5.22.158). Such a host cannot tell a stalled server from a gone one, so a refused command is final.
+        with mock.patch.object(self.C.os, "getuid", create=True):
+            del self.C.os.getuid
+            self.assertTrue(self.C.tmux_server_gone({"TMUX_TMPDIR": self.dir}))
+
     def test_a_stale_socket_after_a_crash_means_gone_so_the_fleet_recovers(self):
         self.assertTrue(self.gone("  1 launchd\n 900 tmux\n"))
 
