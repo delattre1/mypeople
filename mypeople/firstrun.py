@@ -398,10 +398,9 @@ def login_howto():
     instruction instead of three copies drifting apart.
     """
     if os.environ.get("MYPEOPLE_DESKTOP") == "1":
-        # Its one-liner installs Claude only: Codex has to be installed before it can log in.
+        # The one-liner installs the AI its owner chose (Codex pinned, in ~/.local/bin), so a login is all that is left.
         return ["claude auth login",
-                "or, for Codex: brew install --cask codex && codex login" if sys.platform == "darwin"
-                else "or, for Codex: npm install -g @openai/codex && codex login"]
+                "or, for Codex: codex login"]
     if os.environ.get("MYPEOPLE_CONTAINER") == "1":
         return ["docker compose exec -it mypeople claude auth login",
                 "(`codex login` / `grok login` work too)"]
