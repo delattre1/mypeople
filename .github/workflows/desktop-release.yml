@@ -14,13 +14,19 @@ name: Desktop release (signed DMG)
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag to build, e.g. v5.22.170. The workflow comes from the branch it is run on, so a runner change reaches an older tag."
+        required: false
 
 permissions:
   contents: read
 
 jobs:
   dmg:
-    runs-on: macos-14   # arm64: the carried binaries are built for the runner's arch
+    # arm64: the carried binaries are built for the runner's arch. GitHub stopped serving macos-14 on 2026-11-05 (runs cancelled in 3 s,
+    # "macos-14-arm64-us-default is not supported"); its list then had macos-15 and macos-26 for arm64.
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -30,6 +36,8 @@ jobs:
       APPLE_TEAM_ID: 3559PD337Z
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       # Build-machine only: the binaries are copied out of Homebrew and vendored into the app.
       # Nothing here is needed on the machine that installs the DMG.
@@ -59,13 +67,23 @@ jobs:
       - name: Bundle the runtime
         run: PYTHON_SRC="$(~/.local/bin/uv python find 3.13 | xargs dirname | xargs dirname)" desktop/scripts/bundle-runtime.sh
 
+      # The carried tmux and ttyd come from Homebrew bottles built for the runner's macOS, so they need that macOS or newer: a newer
+      # runner raises it. The app says so as its own minimum, so an older Mac refuses to open it instead of opening one that cannot run.
+      - name: The oldest macOS the carried binaries run on
+        run: |
+          MIN=$(find desktop/src-tauri/runtime -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 |
+                xargs -0 -n 50 vtool -show-build 2>/dev/null | awk '/minos/{print $2}' | sort -V | tail -1)
+          [ -n "$MIN" ] || { echo "no minos read from the carried binaries" >&2; exit 1; }
+          echo "carried binaries need macOS $MIN or newer"
+          echo "MIN_MACOS=$MIN" >> "$GITHUB_ENV"
+
       - name: Build, sign and notarize
         working-directory: desktop
         env:
           CI: "true"   # skips the Finder-layout AppleScript, which a runner cannot authorize
         run: |
           V=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' ../mypeople/__init__.py)
-          cargo tauri build --config "{\"version\":\"$V\"}"
+          cargo tauri build --config "{\"version\":\"$V\",\"bundle\":{\"macOS\":{\"minimumSystemVersion\":\"$MIN_MACOS\"}}}"
 
       - name: Smoke test the built app
         run: desktop/scripts/smoke-test.sh
