@@ -104,8 +104,9 @@ jobs:
           cargo tauri build --config "{\"version\":\"$V\",\"bundle\":{\"macOS\":{\"minimumSystemVersion\":\"$MIN_MACOS\"}}}"
 
       # Tauri staples right after notarizing and goes on if Apple does not serve the ticket yet: run 42103746100 shipped notarized
-      # but unstapled, so a Mac offline at install would refuse it. Staple until it holds, put that app in the DMG, and check it there.
-      - name: Staple the app, and the DMG carries the stapled app
+      # but unstapled, so a Mac offline at install would refuse it, and its DMG was never notarized at all. Staple until it holds,
+      # put that app in the DMG, notarize and staple the DMG, and check both.
+      - name: Staple the app, the DMG carries it, and the DMG is notarized and stapled too
         run: |
           APP=desktop/src-tauri/target/release/bundle/macos/MyPlow.app
           DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg)
@@ -121,6 +122,15 @@ jobs:
           hdiutil detach "$MNT" -quiet
           rm "$DMG" && hdiutil convert "$RW" -format UDZO -o "$DMG" -quiet
           codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
+          # Apple notarizes what it is sent: Tauri sent the app, so the DMG goes here, and only an Accepted one ships, stapled.
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 30m --output-format json > "$RUNNER_TEMP/notary.json"
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("DMG notarization:", d.get("status"), d.get("id")); sys.exit(d.get("status") != "Accepted")' "$RUNNER_TEMP/notary.json"
+          for i in $(seq 1 20); do
+            xcrun stapler staple "$DMG" >/dev/null 2>&1 && break
+            sleep 30
+          done
+          xcrun stapler validate "$DMG"
           hdiutil attach "$DMG" -nobrowse -noautoopen -readonly -mountpoint "$CHECK" -quiet
           xcrun stapler validate "$CHECK/MyPlow.app"
           spctl --assess --type execute -vv "$CHECK/MyPlow.app"
