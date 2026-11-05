@@ -138,6 +138,58 @@ class StalledTmuxTests(unittest.TestCase):
         self.assertIn('tmux -N new-session -t "$SESS"', script)
 
 
+class AnyOtherTmuxFailureTests(unittest.TestCase):
+    """review-watch on 4c2a59d: 5.22.154 returned "no windows" for any failure that was not a refused
+    connection, so one odd error from a live server would retire every agent and respawn them."""
+    FAILURE = mock.Mock(returncode=1, stdout="", stderr="protocol version mismatch (client 8, server 9)")
+
+    def load(self, name, roster):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        module = sandbox.load(tmp.name, name)
+        Path(module.ROSTER_PATH).parent.mkdir(parents=True, exist_ok=True)
+        Path(module.ROSTER_PATH).write_text(json.dumps(roster))
+        return module
+
+    def alive(self):
+        return {"test-node/main:eng-1": {"agent_id": "test-node/main:eng-1", "session": "main", "tab": "eng-1",
+                                         "retired": False}}
+
+    def test_a_live_server_that_fails_oddly_is_unknown_not_empty(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        C = sandbox.load(tmp.name, "mpcommon.py")
+        with mock.patch.object(C.subprocess, "run", return_value=self.FAILURE), \
+             mock.patch.object(C, "tmux_server_gone", return_value=False):
+            self.assertIsNone(C.tmux_windows())
+
+    def test_a_server_really_gone_is_empty_so_a_crash_still_recovers(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        C = sandbox.load(tmp.name, "mpcommon.py")
+        with mock.patch.object(C.subprocess, "run", return_value=self.FAILURE), \
+             mock.patch.object(C, "tmux_server_gone", return_value=True):
+            self.assertEqual(set(), C.tmux_windows())
+
+    def test_the_heartbeat_retires_nobody_on_it(self):
+        q = self.load("queue-client.py", self.alive())
+        with mock.patch.object(q.C.subprocess, "run", return_value=self.FAILURE), \
+             mock.patch.object(q.C, "tmux_server_gone", return_value=False), \
+             mock.patch.object(q, "auth_health", return_value={"state": "live"}):
+            self.assertEqual([], q.live_agents())
+        self.assertFalse(json.loads(Path(q.ROSTER_PATH).read_text())["test-node/main:eng-1"]["retired"])
+
+    def test_reconcile_respawns_nobody_on_it(self):
+        mp = self.load("mp", self.alive())
+        with mock.patch.object(mp.subprocess, "run", return_value=self.FAILURE), \
+             mock.patch.object(mp.C, "tmux_server_gone", return_value=False), \
+             mock.patch.object(mp, "is_local", return_value=True), \
+             mock.patch.object(mp, "do_revive") as revive, mock.patch.object(mp, "do_spawn") as spawn:
+            self.assertEqual(0, mp.do_reconcile([]))
+        revive.assert_not_called()
+        spawn.assert_not_called()
+
+
 class ServerGoneTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

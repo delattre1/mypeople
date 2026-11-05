@@ -803,7 +803,7 @@ def tmux_windows(wait=None):
     r = tmux_run("list-windows", "-a", "-F", "#{session_name}:#{window_name}", env=env, wait=wait, text=True)
     if r.returncode == 0:
         return set(r.stdout.splitlines())
-    return None if tmux_refused(r) and not tmux_server_gone(env) else set()
+    return set() if tmux_server_gone(env) else None
 
 
 def pane_key(target, key):
