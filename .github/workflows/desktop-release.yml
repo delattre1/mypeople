@@ -41,6 +41,11 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
+      # A tag older than these build scripts builds with the ones beside this workflow; the app and its runtime stay the tag's.
+      - name: Build scripts from this workflow's commit
+        if: inputs.ref != ''
+        run: git fetch --depth 1 origin ${{ github.sha }} && git checkout FETCH_HEAD -- desktop/scripts
+
       # Build-machine only: the binaries are copied out of Homebrew and vendored into the app.
       # Nothing here is needed on the machine that installs the DMG.
       - name: Tools to vendor
