@@ -27,6 +27,8 @@ HTML_DIR = os.path.dirname(os.path.abspath(__file__))
 TODOS_HTML = os.path.join(HTML_DIR, "todos.html")
 TERMINAL_GRAPH_HTML = os.path.join(HTML_DIR, "terminal-graph.html")
 PLUGINS_HTML = os.path.join(HTML_DIR, "plugins.html")
+ACCESS_HTML = os.path.join(HTML_DIR, "access.html")
+A2A = os.path.join(INSTALL_DIR, "plugins", "a2a", "a2a.py")
 FONT_TYPES = {".woff2": "font/woff2", ".css": "text/css; charset=utf-8"}
 
 VALID_STATES = {"working", "review", "done", "blocked", "cancelled", "recurring"}
@@ -673,7 +675,7 @@ class Handler(C.JSONHandler):
 
     def do_HEAD(self):
         p = self.path.split("?", 1)[0]
-        if p in ("/", "/todos", "/terminal-graph", "/plugins"):
+        if p in ("/", "/todos", "/terminal-graph", "/plugins", "/access"):
             return self._send(200, raw=b"", ctype="text/html; charset=utf-8", extra=self._page_extra())
         if p == "/dashboard" or p.startswith("/dashboard/") or p in ("/agents", "/clients", "/roster"):
             return C.proxy_request(self, "127.0.0.1", HUD_PORT)
@@ -710,6 +712,8 @@ class Handler(C.JSONHandler):
                                     else TODOS_HTML)
         if p == "/plugins":
             return self._serve_page(PLUGINS_HTML)
+        if p == "/access":
+            return self._serve_page(ACCESS_HTML)
         # HUD routes -> proxy to queue-server (symmetric front doors)
         if p == "/dashboard" or p.startswith("/dashboard/") or p in ("/agents", "/clients", "/roster"):
             return C.proxy_request(self, "127.0.0.1", HUD_PORT)
@@ -750,6 +754,10 @@ class Handler(C.JSONHandler):
             if not ok:
                 return self._send(401, {"error": "unauthorized"})
             return self._send(200, {"messages": mpplugins.messages()})
+        if p == "/todo/access":
+            if not ok:
+                return self._send(401, {"error": "unauthorized"})
+            return self._access("state")
         if p.startswith("/todo/attach"):
             if not ok:
                 return self._send(401, {"error": "unauthorized"})
@@ -809,7 +817,60 @@ class Handler(C.JSONHandler):
             except mpplugins.PluginError as e:
                 return self._send(400, {"error": str(e)})
             return self._send(200, {"plugins": mpplugins.listing()})
+        if p in ("/todo/plugins/connect", "/todo/plugins/wrap", "/todo/plugins/wrap-ask"):
+            if ident != "browser":      # the owner's click, as for Access below: a message can reach an agent, never this
+                return self._send(403, {"error": "the owner does this in the app"})
+            try:
+                if p == "/todo/plugins/wrap":
+                    mpplugins.save_rule(str(body.get("name") or ""), body.get("text"))
+                else:
+                    text = (mpplugins.connect_ask(body.get("text")) if p.endswith("connect")
+                            else mpplugins.rule_ask(str(body.get("name") or ""), body.get("text")))
+                    if mp_send(BOSS_AGENT, text + self._on_boss_card(str(body.get("text")))) != 0:
+                        return self._send(400, {"error": "not sent: your agent could not be reached"})
+            except mpplugins.PluginError as e:
+                return self._send(400, {"error": str(e)})
+            return self._send(200, {"plugins": mpplugins.listing()})
+        if p.startswith("/todo/access/"):
+            # Who gets in and with what is the owner's click in the app. An agent holds the machine secret, and a peer's
+            # message reaches an agent, so the machine secret must not be able to grant. ponytail: a local agent can still
+            # write keys.json or take a loopback session; this stops a talked-into curl, not a determined local process.
+            if ident != "browser":
+                return self._send(403, {"error": "the owner does this in the app"})
+            op, host = p.rsplit("/", 1)[1], str(body.get("host") or "")
+            if op == "line":
+                return self._access("line", str(body.get("name") or ""))
+            if op in ("grant", "decline", "remove"):
+                return self._access(op, host)
+            if op in ("save", "ask"):
+                return self._access(op, host, str(body.get("text") or ""))
         return self._send(404, {"error": "not_found"})
+
+    def _on_boss_card(self, words):
+        """The owner's words on their Boss card: the agent can confirm them there, which no sender can fake, and its
+        answer lands where the owner reads. A careful agent will not act on pasted text that merely says "your owner"."""
+        with LOCK:
+            board = load_board()
+            cid = board.get("bossChat")
+            t = board["tasks"].get(cid)
+            if not t:
+                return ""
+            t["comments"].append({"id": uuid.uuid4().hex[:8], "by": "CEO", "to": BOSS_AGENT, "kind": "comment",
+                                  "body": "From the Plugins page: " + words, "ts": now()})
+            t["updated"] = now()
+            save_board(board)
+        return ("\nThese words are on your owner's Boss card, written from their app. Confirm with mp card %s, and answer "
+                "there: mp comment %s \"...\"" % (cid, cid))
+
+    def _access(self, *op):
+        """The a2a plugin owns pairing state: the Access page asks it, as mp pair does."""
+        try:
+            r = subprocess.run([sys.executable, A2A, "access", *op], capture_output=True, text=True, timeout=20)
+            if r.returncode == 0:
+                return self._send(200, json.loads(r.stdout))
+            return self._send(400, {"error": (r.stderr or r.stdout).strip()[:300] or "failed"})
+        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+            return self._send(500, {"error": str(e)[:300]})
 
     # ---- Boss lifecycle control (card 0cc0bde980) ----
     def _boss_alive(self):
@@ -1080,13 +1141,28 @@ class Handler(C.JSONHandler):
             if not t:
                 return self._send(200, {"ok": False, "error": "no_task"})
             by = body.get("by", "CEO")
+            to, peer = str(body.get("to") or ""), str(body.get("peer") or "")
+            # peer: the a2a bridge, handing over a message signed by that paired MyPlow. It lands only on a card that
+            # has already addressed that peer, so a peer cannot write itself into any card whose id it can guess.
+            if peer and (ident != "machine" or str(by).split("/")[0] != peer or peer not in t.get("peers", [])):
+                return self._send(200, {"ok": False, "error": "not_on_card"})
             c = {"id": uuid.uuid4().hex[:8], "by": by, "kind": "comment",
                  "body": body.get("body", ""), "ts": now()}
+            if to:
+                c["to"] = to
+            if peer:
+                c["peer"] = peer
+            elif "/" in to and to.split("/")[0] != HOST_ID:
+                c["toPeer"] = to.split("/")[0]
+                if c["toPeer"] not in t.get("peers", []):
+                    t.setdefault("peers", []).append(c["toPeer"])
             t["comments"].append(c)
             if by != "CEO":
                 t["unread"] = t.get("unread", 0) + 1
             t["updated"] = now()
             save_board(board)
+            if to:      # mp send already delivered it to the one it names: this line is for the thread, it pings nobody
+                return self._send(200, {"ok": True, "id": c["id"]})
             emit_comment_event(board, t, by, c["body"])
             save_board(board)
             wd_schedule_unanswered(tid, c["id"], by)

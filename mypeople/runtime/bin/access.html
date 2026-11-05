@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MyPlow · Access</title>
+<style>
+:root{--volt:#d5ef8a;--bg:#111110;--panel:#1a1a18;--ink:#f0f0e8;--muted:#9c9c94;--amber:#febc2e;--red:#ff3b30;--mono:"DM Mono","SFMono-Regular",Menlo,monospace;--sans:"DM Sans",system-ui,sans-serif;--serif:"Instrument Serif",Georgia,serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--sans)}
+main{max-width:760px;margin:0 auto;padding:18px 16px 60px}
+h1{font:400 28px/44px var(--serif);margin:0 0 20px;padding-right:400px}
+#msg:empty{display:none}
+#msg{margin:0 0 14px;color:var(--amber)}
+#msg a{color:inherit}
+.panel{padding:14px 16px;margin-bottom:8px;background:var(--panel);border:1px solid #ffffff14;border-radius:12px}
+.who{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.name{font-weight:600;overflow-wrap:anywhere}
+.id{font:12px var(--mono);color:var(--muted);overflow-wrap:anywhere}
+.ok{margin-left:auto;font-size:13px;color:var(--volt)}
+.say{margin:10px 0 0;overflow-wrap:anywhere}
+.small{color:var(--muted);font-size:13px;margin:8px 0 0}
+.acts{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+button.b{height:36px;padding:0 14px;border-radius:9px;border:1px solid #ffffff26;background:none;color:var(--ink);font:500 14px var(--sans);cursor:pointer}
+button.b.go{background:var(--volt);border-color:var(--volt);color:#111110;font-weight:600}
+button.b:disabled{opacity:.5;cursor:default}
+button.b:focus-visible,input:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
+form{display:flex;gap:8px}
+input{flex:1;min-width:0;height:36px;padding:0 12px;border-radius:9px;border:1px solid #ffffff26;background:#0f0f0e;color:var(--ink);font:14px var(--sans)}
+.line{display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px 12px;background:#0f0f0e;border:1px solid #ffffff26;border-radius:9px}
+.line code{flex:1;min-width:0;font:13px/1.45 var(--mono);overflow-wrap:anywhere}
+textarea{display:block;width:100%;min-height:96px;margin-top:6px;padding:10px 12px;border-radius:9px;border:1px solid #ffffff26;background:#0f0f0e;color:var(--ink);font:13px/1.5 var(--mono);resize:vertical}
+textarea:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
+.lab{display:block;margin-top:14px;color:var(--muted);font-size:13px}
+.row{display:flex;gap:8px;margin-top:8px}
+.row input{flex:1}
+.row.end{justify-content:flex-end}
+.said{margin-top:8px;color:var(--muted);font-size:13px}
+.said summary{cursor:pointer}
+.said pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--mono);color:var(--ink)}
+@media(max-width:700px){main{padding-top:56px}h1{padding-right:0;margin-bottom:12px}}
+</style></head>
+<body><main>
+<h1>Access</h1>
+<p id="msg" role="status"></p>
+<div class="panel">
+  <form id="new"><input id="for" placeholder="Who is this line for?" aria-label="Who is this line for?" maxlength="60"><button class="b" type="submit">Generate a line</button></form>
+  <div id="line"></div>
+</div>
+<div id="requests"></div>
+<div id="granted"></div>
+<p class="small" id="paired"></p>
+</main>
+<script>
+"use strict";
+// Every value here came from another MyPlow, an agent or an owner's input: textContent and .value only, never markup.
+const msg=document.getElementById("msg"),requests=document.getElementById("requests"),granted=document.getElementById("granted"),paired=document.getElementById("paired"),lineBox=document.getElementById("line");
+let busy=false,shown="",force=false;
+const opened=new Set();
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
+function fail(status,text){
+  if(status===401){msg.textContent="";const a=el("a","","Log in on the board");a.href="/";msg.append(a," to see who has access.")}
+  else msg.textContent=text||"Couldn't reach MyPlow.";
+}
+function button(cls,text,fn){const b=el("button",cls,text);b.type="button";b.onclick=fn;return b}
+function who(name,host,extra){const w=el("div","who");w.append(el("span","name",name),el("span","id",host));if(extra)w.append(extra);return w}
+function render(d){
+  const now=JSON.stringify(d);
+  if(now===shown)return;  // the 5 s poll must not redraw what they may be reading
+  if(document.activeElement&&document.activeElement.closest("#granted")&&!busy&&!force)return;  // nor what they are typing
+  force=false;
+  shown=now;
+  requests.replaceChildren(...d.requests.map(r=>{
+    const p=el("div","panel");
+    p.append(who(r.name+"'s agent asks for access",r.host));
+    if(r.say)p.append(el("p","say","“"+r.say+"”"));
+    p.append(el("p","small","Came with the line you generated"+(r.name!==r.host?" for "+r.name:"")+". That line is now spent."));
+    const a=el("div","acts");
+    a.append(button("b","Decline",()=>post("decline",{host:r.host})),button("b go","Grant access",()=>post("grant",{host:r.host})));
+    p.append(a);return p;
+  }));
+  granted.replaceChildren(...d.granted.map(g=>{
+    const p=el("div","panel");
+    p.append(who(g.name+"'s agent",g.host,el("span","ok","✓ Verified")));
+    const lab=el("label","lab","Permission message");
+    const area=el("textarea");area.value=g.text;area.setAttribute("aria-label","Permission message for "+g.name);lab.append(area);p.append(lab);
+    const saving=el("div","row end");saving.append(button("b","Save",()=>post("save",{host:g.host,text:area.value})));p.append(saving);
+    const asking=el("div","row"),say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the message for "+g.name);say.maxLength=1000;
+    asking.append(say,button("b","Ask",()=>post("ask",{host:g.host,text:say.value})));p.append(asking);
+    p.append(el("p","small",g.asking?"Your agent is rewriting it.":"Applies from "+g.name+"'s next message."));
+    const said=el("details","said");said.open=opened.has(g.host);
+    said.ontoggle=()=>{said.open?opened.add(g.host):opened.delete(g.host)};
+    said.append(el("summary","","What it tells the agent"),el("pre","",g.package));p.append(said);
+    return p;
+  }));
+  paired.textContent=d.paired.length?"Also paired, no permission message: "+d.paired.join(", "):"";
+}
+async function load(){
+  if(busy)return;
+  try{
+    const r=await fetch("/todo/access",{credentials:"same-origin"});
+    if(!r.ok)return fail(r.status);
+    const d=await r.json();
+    if(!busy){msg.textContent="";render(d)}
+  }catch(e){fail(0)}
+}
+async function post(op,body){
+  busy=true;
+  document.querySelectorAll("main button").forEach(b=>b.disabled=true);
+  let d={};
+  try{
+    const r=await fetch("/todo/access/"+op,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    d=await r.json().catch(()=>({}));
+    if(!r.ok)fail(r.status,d.error);else msg.textContent="";
+  }catch(e){fail(0)}
+  busy=false;shown="";force=true;
+  document.querySelectorAll("#new button").forEach(b=>b.disabled=false);
+  if(d.line)showLine(d.line);
+  await load();
+  document.querySelectorAll("main button").forEach(b=>b.disabled=false);
+}
+function showLine(line){
+  const box=el("div","line");box.append(el("code","",line));
+  const c=button("b","Copy",async()=>{try{await navigator.clipboard.writeText(line);c.textContent="Copied"}catch(e){msg.textContent="Select the line and copy it."}});
+  box.append(c);
+  lineBox.replaceChildren(box,el("p","small","Good for 24 h and one use. Whoever runs it asks for access to this MyPlow; nothing is shared until you grant it here."));
+}
+document.getElementById("new").onsubmit=e=>{e.preventDefault();post("line",{name:document.getElementById("for").value})};
+load();setInterval(load,5000);
+</script>
+</body></html>

@@ -996,7 +996,8 @@ def do_spawn(argv, resume_session=None, locked_role_ref=None, expected_role_dige
     return 0
 
 
-SEND_USAGE = "usage: mp send <agent_id> <msg...>   (message may come from stdin)"
+SEND_USAGE = ("usage: mp send [--card <task_id>] <agent_id> <msg...>   (message may come from stdin; "
+              "--card also shows it in that card's thread)")
 
 
 def do_send(argv):
@@ -1008,11 +1009,17 @@ def do_send(argv):
     read, and printed "sent". The recipient got the same string every time, which is the
     tell — real truncation varies with the text, operator error repeats verbatim.
     """
+    card = ""
+    if argv[:1] == ["--card"]:
+        card, argv = (argv[1] if len(argv) > 1 else ""), argv[2:]
+        if not card or not os.environ.get("AGENT_ID", "").strip():
+            print("ERROR: mp send --card needs a card id and $AGENT_ID: the thread shows who said it", file=sys.stderr)
+            return 2
     if not argv:
         print(SEND_USAGE, file=sys.stderr); return 2
     aid = full_aid(argv[0])
     rest = argv[1:]
-    # mp send has NO options, so a flag standing alone as its own argv token is never part
+    # --card, first, is the only option, so any other flag standing alone as its own argv token is never part
     # of a message someone meant to send. Checked at EVERY position, not just the first:
     # the two habits in the wild were `mp send X --by Y <<EOF` (body discarded on unread
     # stdin) and `mp send X "body" --by Y` (body delivered with a literal " --by Y" glued
@@ -1035,6 +1042,8 @@ def do_send(argv):
         msg = sys.stdin.read().strip()
     if not msg:
         print(SEND_USAGE, file=sys.stderr); return 2
+    # supervise.sh names the plugin it starts: the one place nearly every plugin's message passes through.
+    msg += C.owner_rule(os.environ.get("MP_PLUGIN", ""))
     reply_to = os.environ.get("AGENT_ID", "").strip()
     if reply_to:
         reply_to = full_aid(reply_to)
@@ -1042,18 +1051,32 @@ def do_send(argv):
         payload = {"message": msg}
         if reply_to and reply_to != aid:
             payload["reply_to"] = reply_to
+        if card:
+            payload["card"] = card
         ok, result = remote_task("send", aid, payload, timeout=30)
         print(result)
+        if ok and card:
+            on_thread(card, reply_to, aid, msg)
         return 0 if ok else 1
     route_token = C.enqueue_notification_route(aid, reply_to, msg)
     # A Claude session still starting (or behind a dialog) is waited for briefly, then REFUSED
     # with rc 3: a paste there could vanish while this printed "sent". Retrying senders retry.
-    why = C.send_when_ready(C.tmux_target(aid), msg, float(os.environ.get("MP_SEND_READY_WAIT", "10")))
+    why = C.send_when_ready(C.tmux_target(aid), msg + (C.card_note(card, reply_to) if card else ""),
+                            float(os.environ.get("MP_SEND_READY_WAIT", "10")))
     ok = why == "sent"
     if not ok and route_token:
         C.cancel_notification_route(aid, route_token)
     print(why)
+    if ok and card:
+        on_thread(card, reply_to, aid, msg)
     return 0 if ok else (3 if why == "not_ready" else 1)
+
+
+def on_thread(card, by, to, msg):
+    """What mp send --card just delivered, on that card's thread. A card on another MyPlow is its board's to show."""
+    code, res = C.http_json("POST", TODO_URL + "/todo/comment", {"task_id": card, "by": by, "to": to, "body": msg}, HDR, timeout=12)
+    if code != 200 or not (isinstance(res, dict) and res.get("ok")):
+        print("card %s is not on this board: its thread is on the MyPlow that has it" % card)
 
 
 def classify(pane, backend=None):
@@ -2075,6 +2098,13 @@ def do_plugins(argv):
             name, run = mpplugins.install(argv[1])
             print("%s installed, off. `mp plugins on %s` runs: %s serve" % (name, name, run))
             return 0
+        if verb == "wrap" and len(argv) == 2:
+            print(mpplugins.rule(argv[1]) or "%s has no text from your owner." % argv[1])
+            return 0
+        if verb == "wrap" and len(argv) >= 4:
+            mpplugins.agent_rule(argv[1], argv[2], " ".join(argv[3:]))
+            print("saved: %s's next message carries this" % argv[1])
+            return 0
         if verb == "rm" and len(argv) == 2:
             mpplugins.remove(argv[1])
             print("%s removed; state/%s is kept" % (argv[1], argv[1]))
@@ -2106,10 +2136,10 @@ USAGE = {
     "owner": "usage: mp owner <assign|replace|reopen> <task_id> <agent_id>",
     "cron": CRON_USAGE,
     "tcc": TCC_USAGE,
-    "pair": "usage: mp pair | mp pair <code> | mp pair ls | mp pair rm <host>   (the owner pairs this MyPlow "
+    "pair": "usage: mp pair [for <name>] | mp pair <code> [text] | mp pair ls | mp pair wrap <host> | mp pair rm <host>   (the owner pairs this MyPlow "
             "with another, so mp send reaches its agents: <host>/<session>:<tab>)",
     "plugins": "usage: mp plugins [--json] | mp plugins on|off <name> | mp plugins install <folder|git-url> | "
-               "mp plugins rm <name>",
+               "mp plugins wrap <name> [<code> <text>] | mp plugins rm <name>",
 }
 TOP_USAGE = "usage: mp {%s} ...   (mp <verb> --help for one verb)" % "|".join(USAGE)
 

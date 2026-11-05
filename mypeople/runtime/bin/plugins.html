@@ -6,7 +6,7 @@
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--sans)}
 main{max-width:760px;margin:0 auto;padding:18px 16px 60px}
-h1{font:400 28px/44px var(--serif);margin:0 0 20px;padding-right:300px}
+h1{font:400 28px/44px var(--serif);margin:0 0 20px;padding-right:400px}
 #msg:empty{display:none}
 #msg{margin:0 0 14px;color:var(--amber)}
 #msg a{color:inherit}
@@ -27,6 +27,18 @@ button[role=switch]:disabled{opacity:.5;cursor:default}
 .said{margin-top:8px;color:var(--muted);font-size:13px}
 .said summary{cursor:pointer}
 .said pre{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 var(--mono);color:var(--ink)}
+.ask{display:flex;gap:8px;margin-top:8px}
+input,textarea{min-width:0;border-radius:9px;border:1px solid #ffffff26;background:#0f0f0e;color:var(--ink)}
+.ask input{flex:1;height:36px;padding:0 12px;font:14px var(--sans)}
+textarea{display:block;width:100%;min-height:72px;margin-top:6px;padding:10px 12px;font:13px/1.5 var(--mono);resize:vertical}
+input:focus-visible,textarea:focus-visible,button.b:focus-visible{outline:2px solid var(--volt);outline-offset:2px}
+button.b{height:36px;padding:0 14px;border-radius:9px;border:1px solid #ffffff26;background:none;color:var(--ink);font:500 14px var(--sans);cursor:pointer;flex:none}
+button.b:disabled{opacity:.5;cursor:default}
+.lab{display:block;margin-top:12px}
+.note{font-size:13px;margin:6px 0 0}
+.connect{padding:14px 16px;margin-bottom:16px;background:var(--panel);border:1px solid #ffffff14;border-radius:12px}
+.connect .name{margin-bottom:2px}
+li a{color:inherit}
 .install{margin-top:22px;color:var(--muted);font-size:13px}
 code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
 @media(max-width:700px){main{padding-top:56px}h1{padding-right:0;margin-bottom:12px}li{flex-wrap:wrap}.text{flex-basis:100%}.state{flex:1}}
@@ -34,18 +46,26 @@ code{font:12px var(--mono);color:var(--ink);overflow-wrap:anywhere}
 <body><main>
 <h1>Plugins</h1>
 <p id="msg" role="status"></p>
+<form class="connect" id="connect"><div class="name">Connect a plugin</div><div class="desc">Ask your agent. What it installs shows up below, switched off.</div>
+  <div class="ask"><input id="want" placeholder="Connect my Slack workspace" aria-label="Ask your agent to connect a plugin" maxlength="1000"><button class="b" type="submit">Ask</button></div><p class="note desc" id="asked" role="status"></p></form>
 <ul id="list"></ul>
-<p class="install">To install a plugin, run this on the Mac. It arrives switched off: <code>mp plugins install &lt;folder or git URL&gt;</code></p>
+<p class="install">Or install one yourself, on the Mac. It arrives switched off: <code>mp plugins install &lt;folder or git URL&gt;</code></p>
 </main>
 <script>
 "use strict";
 const list=document.getElementById("list"),msg=document.getElementById("msg");
-let busy=false,said={},shown="";
+let busy=false,said={},shown="",force=false,lastRules=null;
 const opened=new Set();
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text)e.textContent=text;return e}
 function render(rows){
   const now=JSON.stringify(rows);
   if(now===shown)return;  // the 5 s poll must not redraw what they may be reading or selecting
+  if(document.activeElement&&document.activeElement.closest("#list")&&document.activeElement.matches("input,textarea")&&!force)return;  // nor what they are typing
+  force=false;
+  // A saved rule changes what the plugin's message says: read that again, once, not on every poll.
+  const rules=rows.map(r=>r.rule).join("\0");
+  if(lastRules!==null&&rules!==lastRules){lastRules=rules;shown=now;loadSaid();return}
+  lastRules=rules;
   shown=now;
   list.replaceChildren(...rows.map(r=>{
     const li=el("li"),text=el("div","text");
@@ -54,8 +74,16 @@ function render(rows){
     if(said[r.name]){
       const d=el("details","said");d.open=opened.has(r.name);
       d.ontoggle=()=>{d.open?opened.add(r.name):opened.delete(r.name)};
-      d.append(el("summary","","What it tells the agent"),el("pre","",said[r.name]));text.append(d);
+      d.append(el("summary","","What it tells the agent"),el("pre","",said[r.name]));
+      const lab=el("label","lab desc","Your text, added to every message. The plugin's own lines stay.");
+      const area=el("textarea");area.value=r.rule;area.placeholder="Nothing yet";area.setAttribute("aria-label","Your text for "+r.name);lab.append(area);d.append(lab);
+      const say=el("input");say.placeholder="Ask your agent to change this";say.setAttribute("aria-label","Ask your agent to change the text for "+r.name);say.maxLength=1000;
+      const row=el("div","ask");row.append(say,button("Ask",()=>send("/todo/plugins/wrap-ask",{name:r.name,text:say.value})),button("Save",()=>send("/todo/plugins/wrap",{name:r.name,text:area.value})));d.append(row);
+      d.append(el("p","note desc",r.asking?"Your agent is rewriting it. Its answer shows on your Boss card.":"Applies from its next message."));
+      if(r.name==="a2a"){const a=el("a","","Access");a.href="/access";const n=el("p","note desc","Each person's own message is on ");n.append(a,".");d.append(n)}
+      text.append(d);
     }
+    if(r.state==="not set up")text.append(button("Ask your agent to connect it",()=>{document.getElementById("want").value="Connect the "+r.name+" plugin that is already here";send("/todo/plugins/connect",{text:document.getElementById("want").value},true)}));
     li.append(text,el("span","state "+r.state.replace(/ /g,"-"),r.state));
     if(r.state!=="not set up"){
       const b=el("button");b.type="button";b.setAttribute("role","switch");
@@ -78,6 +106,18 @@ async function load(){
     if(!busy){msg.textContent="";render(d.plugins)}
   }catch(e){fail(0)}
 }
+function button(text,fn){const b=el("button","b",text);b.type="button";b.onclick=fn;return b}
+async function send(path,body,connect){
+  busy=true;document.querySelectorAll("main button.b").forEach(b=>b.disabled=true);
+  try{
+    const r=await fetch(path,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok){msg.textContent="";if(connect){asked.textContent="Sent to your agent. Its answer shows on your Boss card.";want.value=""}force=true;render(d.plugins);if(!connect)loadSaid()}else fail(r.status,d.error);
+  }catch(e){fail(0)}
+  busy=false;document.querySelectorAll("main button.b").forEach(b=>b.disabled=false);
+}
+const asked=document.getElementById("asked"),want=document.getElementById("want");
+document.getElementById("connect").onsubmit=e=>{e.preventDefault();send("/todo/plugins/connect",{text:want.value},true)};
 async function flip(name,on,button){
   busy=true;button.disabled=true;
   try{
@@ -90,7 +130,7 @@ async function flip(name,on,button){
 async function loadSaid(){
   try{
     const r=await fetch("/todo/plugins/messages",{credentials:"same-origin"});
-    if(r.ok){said=(await r.json()).messages;shown="";load()}
+    if(r.ok){said=(await r.json()).messages;shown="";force=true;load()}
   }catch(e){}
 }
 load();loadSaid();setInterval(load,5000);

@@ -70,7 +70,7 @@ ensure_plugins(){
         [ -n "${!v:-}" ] || continue ;;
       *) continue ;;
     esac
-    ensure "$dir/${run##* } serve$" "exec ${run% *} '$dir/${run##* }' serve"
+    ensure "$dir/${run##* } serve$" "MP_PLUGIN='$name' exec ${run% *} '$dir/${run##* }' serve"
   done
 }
 

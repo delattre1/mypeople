@@ -136,7 +136,9 @@ mp plugins install ./my-plugin      # a folder or a git URL; it arrives off
 mp plugins rm my-plugin             # installed plugins only
 ```
 
-The Plugins page on the board shows the same list and the same switches, and under each plugin what it tells the agent with every message. A plugin that isn't set up yet says so: the sections below say how. Installed plugins live in `$INSTALL_DIR/plugins.d`, and a release never touches them. A plugin runs with your full access, so install only code you trust.
+The Plugins page on the board shows the same list and the same switches, and under each plugin what it tells the agent with every message. A box there asks your agent to connect a plugin; your words and its answer show on your Boss card. Under each plugin you can add your own text to what it tells the agent, by hand or by asking your agent, and its next message carries it, with no restart. The plugin's own lines stay. That text tells an agent; nothing enforces it. A plugin that isn't set up yet says so: the sections below say how. Installed plugins live in `$INSTALL_DIR/plugins.d`, and a release never touches them. A plugin runs with your full access, so install only code you trust.
+
+To put agent-to-agent messages on a task's thread, send them with `mp send --card <task_id> <agent> "..."`. An agent on a paired MyPlow shows there marked as another MyPlow, and lands only on a card that already addressed it. The pairing proves the MyPlow, not who owns it.
 
 A plugin is a folder holding its script and a `plugin.conf`:
 

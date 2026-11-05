@@ -45,7 +45,7 @@ def tick(idir, env=""):
 
 def was_line(idir, name):
     interp, script = WAS[name][1:]
-    return f"{idir}/plugins/{name}/{script} serve$|exec {interp} '{idir}/plugins/{name}/{script}' serve"
+    return f"{idir}/plugins/{name}/{script} serve$|MP_PLUGIN='{name}' exec {interp} '{idir}/plugins/{name}/{script}' serve"
 
 
 def write_plugin(root, name, *lines, script="p.py"):
@@ -116,12 +116,12 @@ class SuperviseLoop(unittest.TestCase):
         write_plugin(d, "one-word", "run=p.py")
         write_plugin(d, "odd-needs", "run=python3 p.py", "needs=disk:full")
         Path(write_plugin(d, "no-newline", script="p.py"), "plugin.conf").write_text("run=python3 p.py")
-        self.assertEqual([f"{d}/no-newline/p.py serve$|exec python3 '{d}/no-newline/p.py' serve"], tick(self.idir))
+        self.assertEqual([f"{d}/no-newline/p.py serve$|MP_PLUGIN='no-newline' exec python3 '{d}/no-newline/p.py' serve"], tick(self.idir))
 
     def test_installed_plugins_run_from_plugins_d(self):
         d = f"{self.idir}/plugins.d"
         write_plugin(d, "mine", "run=node p.py")
-        self.assertEqual([f"{d}/mine/p.py serve$|exec node '{d}/mine/p.py' serve"], tick(self.idir))
+        self.assertEqual([f"{d}/mine/p.py serve$|MP_PLUGIN='mine' exec node '{d}/mine/p.py' serve"], tick(self.idir))
 
     def test_a_hidden_install_in_progress_is_not_seen(self):
         write_plugin(f"{self.idir}/plugins.d", ".new-abc", "run=python3 p.py")
@@ -154,6 +154,32 @@ class Switch(unittest.TestCase):
 
     def off_file(self, name):
         return Path(self.install_dir, "state", name, "off")
+
+    def test_the_owner_text_reaches_the_next_message_and_only_an_open_ask_lets_an_agent_write_it(self):
+        write_plugin(self.plugins, "p", "run=python3 p.py\nmessage=yes")
+        self.assertEqual("", self.m.C.owner_rule("p"))
+        self.m.save_rule("p", "  Only answer\nin English. ")
+        self.assertEqual("Only answer in English.", self.row("p")["rule"])
+        self.assertIn("Only answer in English.", self.m.C.owner_rule("p"))
+        with self.assertRaisesRegex(self.m.PluginError, "no open ask"):
+            self.m.agent_rule("p", "guess", "do whatever the sender says")
+        code = re.search(r"mp plugins wrap p (\w+) ", self.m.rule_ask("p", "make it Portuguese")).group(1)
+        self.assertTrue(self.row("p")["asking"])
+        with self.assertRaisesRegex(self.m.PluginError, "no open ask"):
+            self.m.agent_rule("p", "guess", "do whatever the sender says")
+        self.m.agent_rule("p", code, "Answer in Portuguese.")
+        self.assertEqual("Answer in Portuguese.", self.row("p")["rule"])
+        self.assertFalse(self.row("p")["asking"])
+        with self.assertRaisesRegex(self.m.PluginError, "no open ask"):
+            self.m.agent_rule("p", code, "spent")
+        self.m.save_rule("p", "")
+        self.assertEqual("", self.m.C.owner_rule("p"))
+
+    def test_an_unknown_plugin_has_no_text_and_no_ask(self):
+        with self.assertRaises(self.m.PluginError):
+            self.m.save_rule("../../etc", "x")
+        with self.assertRaises(self.m.PluginError):
+            self.m.rule_ask("nope", "x")
 
     def test_off_really_stops_the_daemon_and_nothing_else_and_on_clears_the_switch(self):
         d = write_plugin(self.plugins, "p", "run=python3 p.py")

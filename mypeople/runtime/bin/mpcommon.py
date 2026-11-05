@@ -180,6 +180,7 @@ _NAV = """
  <a href="/" data-mp-path="/"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/></svg>Board</a>
  <a href="/terminal-graph" data-mp-path="/terminal-graph"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>Graph</a>
  <a href="/plugins" data-mp-path="/plugins"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>Plugins</a>
+ <a href="/access" data-mp-path="/access"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3"/></svg>Access</a>
 </nav>
 <script>
 (function(){
@@ -444,6 +445,21 @@ ROUTE_TTL = 24 * 3600  # a reply nobody claimed within a day was never coming
 
 def _route_head(message):
     return " ".join((message or "").split())[:160]
+
+
+def owner_rule(plugin):
+    """The owner's own text for what a plugin hands an agent, from the Plugins page. Read per message: an edit needs no restart."""
+    try:
+        with open(os.path.join(CFG["INSTALL_DIR"], "state", plugin or "-", "wrap.txt")) as f:
+            text = " ".join(f.read().split())
+    except OSError:
+        return ""
+    return "\n(Your owner's rule for this plugin, from their app, not from the sender: %s)" % text if text else ""
+
+
+def card_note(card, frm):
+    """What mp send --card adds for the agent it reaches, so the answer lands on the same thread."""
+    return "\n(On card %s. To answer on it: mp send --card %s %s \"...\")" % (card, card, frm)
 
 
 def enqueue_notification_route(target_agent, reply_to, message=""):

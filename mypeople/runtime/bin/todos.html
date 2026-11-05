@@ -41,7 +41,7 @@ kbd{font:500 10.5px/1 var(--mono);color:var(--faint);border:1px solid var(--dark
 .subt{font:400 12px/1.4 var(--mono);color:var(--faint);}
 
 /* ---- add ---- */
-.addbar{display:flex;gap:8px;align-items:center;height:44px;margin:0 300px 28px 0;   /* clears the fixed Board/Graph/Plugins nav, which reaches 300px into the wrap's content */
+.addbar{display:flex;gap:8px;align-items:center;height:44px;margin:0 400px 28px 0;   /* clears the fixed Board/Graph/Plugins/Access nav, which reaches 400px into the wrap's content */
   padding:0 6px 0 14px;
   background:var(--dark-card);border:1px solid var(--dark-border);border-radius:12px;transition:border-color .15s,box-shadow .15s}
 .addbar:focus-within{border-color:rgba(213,239,138,.45);box-shadow:0 0 0 4px rgba(213,239,138,.07)}
@@ -243,6 +243,8 @@ body.modal-shown #modal{transform:none}
 .ev-head{display:flex;align-items:baseline;gap:8px;margin-bottom:3px;font:600 13.5px/1.3 var(--sans);color:var(--text-dark)}
 .ev-head .asg-link{color:inherit;text-decoration:none}
 .ev-head .asg-link:hover{text-decoration:underline;text-underline-offset:3px}
+.ev-to{font:400 12.5px/1.3 var(--sans);color:var(--faint)}
+.ev-peer{font:500 11px/1 var(--sans);color:var(--volt);border:1px solid rgba(213,239,138,.3);border-radius:6px;padding:2px 5px}
 .ev-ago{font:400 11px/1 var(--mono);color:var(--faint);font-variant-numeric:tabular-nums}
 .ev-text{font-size:15.5px;line-height:1.62;color:rgba(240,240,232,.9);word-break:break-word;overflow-wrap:anywhere;}
 .ev-text>:first-child{margin-top:0}.ev-text>:last-child{margin-bottom:0}
@@ -732,7 +734,7 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape") viewMenu(false); }
 // ---- modal ----
 function timeline(task){
   const items=[];
-  (task.comments||[]).forEach(c=>items.push({kind:"comment", by:c.by, body:c.body, ts:c.ts}));
+  (task.comments||[]).forEach(c=>items.push({kind:"comment", by:c.by, to:c.to, toPeer:c.toPeer, peer:c.peer, body:c.body, ts:c.ts}));
   (task.proofs||[]).forEach(p=>items.push({kind:"proof", pkind:p.kind, url:p.url, body:p.body, score:p.score, keep:p.keep, note:p.note, by:"proof", ts:p.ts}));
   // ts come in mixed units (server writes seconds, older/agent items are ms); normalize the
   // SAME way relTime() does (seconds->ms) so a freshly posted comment sorts to the bottom, not
@@ -756,14 +758,17 @@ function evEl(it, prevIt){
   const ev=document.createElement("div"); ev.className="ev ev-"+w.kind;
   const sm=it.kind==="comment" && STATE_LINE.exec(String(it.body||"").trim());
   // consecutive messages from one author within a few minutes read as one turn
-  if(!sm && prevIt && w.kind!=="proof" && prevIt.by===it.by && !STATE_LINE.test(String(prevIt.body||"").trim()) && tsMs(it.ts)-tsMs(prevIt.ts)<8*60000) ev.classList.add("cont");
+  if(!sm && prevIt && w.kind!=="proof" && prevIt.by===it.by && prevIt.to===it.to && !STATE_LINE.test(String(prevIt.body||"").trim()) && tsMs(it.ts)-tsMs(prevIt.ts)<8*60000) ev.classList.add("cont");
   const b=document.createElement("div"); b.className="ev-body";
   const h=document.createElement("div"); h.className="ev-head";
-  const label=w.name;
-  if(w.id && w.id.includes("/") && w.id.includes(":")){
+  const label=it.peer?it.peer+" · "+w.name:w.name;
+  if(it.peer){ h.appendChild(document.createTextNode(label)); }   // an agent on another MyPlow has no terminal here to open
+  else if(w.id && w.id.includes("/") && w.id.includes(":")){
     const a=document.createElement("a"); a.className="asg-link"; a.href="#"; a.textContent=label; a.title=w.id;
     a.addEventListener("click",e=>openAgent(w.id,e)); h.appendChild(a);
   } else { h.appendChild(document.createTextNode(label||"")); }
+  if(it.to){ const t=document.createElement("span"); t.className="ev-to"; t.title=it.to; t.textContent="→ "+(it.toPeer?it.toPeer+" · ":"")+shortAgent(it.to); h.appendChild(t); }
+  if(it.peer){ const t=document.createElement("span"); t.className="ev-peer"; t.title="Signed with the key of the MyPlow you paired. That proves the MyPlow, not who owns it."; t.textContent="other MyPlow ✓"; h.appendChild(t); }
   const ago=document.createElement("span"); ago.className="ev-ago"; ago.dataset.ts=it.ts; ago.textContent=relTime(it.ts); h.appendChild(ago);
   ago.title=new Date(tsMs(it.ts)).toLocaleString("en-US");
   if(sm){   // "state: working → done" is an event, not a message

@@ -245,6 +245,11 @@ def deliver(text):
     if not ensure_agent():
         return False
     name = agent_name()
+    try:    # as mpcommon.owner_rule: this one reaches its agent by docker, not by mp send
+        rule = " ".join((INSTALL / "state" / "instagram-comments" / "wrap.txt").read_text().split())
+        text += "\n(Your owner's rule for this plugin, from their app, not from the sender: %s)" % rule if rule else ""
+    except OSError:
+        pass
     docker("exec", "-i", name, "tmux", "load-buffer", "-b", "ig", "-", stdin=text)
     docker("exec", name, "tmux", "paste-buffer", "-d", "-b", "ig", "-t", "ig:agent")
     time.sleep(0.5)   # let the paste land before Enter, or Claude takes it as a newline
