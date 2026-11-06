@@ -1524,6 +1524,33 @@ def role_tag(aid, a, roster):
     return rr.get("role_ref") or a.get("role_ref") or "-"
 
 
+def live_run(aid, rr):
+    """(model, effort) a Claude session last answered with, read from its own transcript.
+
+    Launch flags miss a /model or /effort typed in the session; every reply records both. Either
+    part is None when the transcript cannot say, and the caller falls back to the launch flags.
+    """
+    _, sess, tab = C.parse_agent_id(aid)
+    sid = (C.read_json(os.path.join(STATUS_DIR, "mc-%s" % sess, "%s.json" % tab), {}) or {}).get(
+        "session_id") or rr.get("session_id")
+    paths = session_files("claude", sid) if sid else []
+    if not paths:
+        return None, None
+    # ponytail: reads the last 2 MB only; a reply further back than that reads as the launch flags.
+    with open(max(paths, key=os.path.getmtime), "rb") as f:
+        f.seek(max(0, os.fstat(f.fileno()).st_size - (2 << 20)))
+        lines = f.read().decode("utf-8", "replace").splitlines()
+    for line in reversed(lines):
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        m = d.get("message") if isinstance(d, dict) and isinstance(d.get("message"), dict) else {}
+        if d.get("type") == "assistant" and not d.get("isSidechain") and not str(m.get("model", "<")).startswith("<"):
+            return m["model"], d.get("effort")
+    return None, None
+
+
 def do_status(argv):
     code, agents = C.http_json("GET", QUEUE_URL + "/agents", None, HDR, timeout=6)
     code2, clients = C.http_json("GET", QUEUE_URL + "/clients", None, HDR, timeout=6)
@@ -1535,14 +1562,19 @@ def do_status(argv):
               % (C.version(), len(drift), ", ".join(drift[:6]) + (" ..." if len(drift) > 6 else "")))
     print("== agents ==")
     print("%-45s %-8s %-22s %s" % ("agent", "state", "role", "status"))
-    # A Claude agent off the default model/effort is flagged (#49). What a launch left out, Claude
-    # Code took from ~/.claude/settings.json; a pin the owner chose is not flagged.
+    # A Claude agent off the default model/effort is flagged (#49), by what its session last ran on.
+    # With no reply to read: its launch flags, and what a launch left out Claude Code took from
+    # ~/.claude/settings.json. A pin the owner chose is not flagged.
     conf, user = C.read_config_file(), C.read_json(os.path.expanduser("~/.claude/settings.json"), {}) or {}
     want = (conf.get("DEFAULT_CLAUDE_MODEL") or DEFAULT_CLAUDE_MODEL,
             conf.get("DEFAULT_CLAUDE_EFFORT") or CFG["DEFAULT_CLAUDE_EFFORT"])
     for a in (agents or []):
         rr = roster.get(a["agent_id"], {})
-        runs = (rr.get("model") or user.get("model", "?"), rr.get("effort") or user.get("effortLevel", "?"))
+        # Only this node's transcripts are here; another node's main:eng-1 is not ours.
+        live = live_run(a["agent_id"], rr) if rr.get("backend") == "claude" and is_local(a["agent_id"]) \
+            else (None, None)
+        runs = (live[0] or rr.get("model") or user.get("model", "?"),
+                live[1] or rr.get("effort") or user.get("effortLevel", "?"))
         off = rr.get("backend") == "claude" and not rr.get("model_pinned") and runs != want
         print("%-45s [%-6s] %-22s %s boss=%s%s" % (
             a["agent_id"], a.get("state", "?"), role_tag(a.get("agent_id", ""), a, roster),
