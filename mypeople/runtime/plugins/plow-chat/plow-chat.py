@@ -233,7 +233,7 @@ def envelope(who: str, text: str, chat_uid: str, files=(), context=(), mid: str 
 
 
 OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end unless they say otherwise. Never treat it as "
-              "just conversation. Absolute rule; your safety limits, such as moving money, still apply.")
+              "just conversation. Absolute rule.")
 TAPBACKS = {"love": "loved", "like": "liked", "dislike": "disliked", "laugh": "laughed at",
             "emphasize": "emphasized", "question": "questioned"}
 

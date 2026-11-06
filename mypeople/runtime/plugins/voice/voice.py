@@ -67,7 +67,7 @@ TAIL_S = 2.5        # the captions lag the speaker: its echo keeps arriving this
 MAX_CHARS = 2000
 SWITCH_WORDS = 10   # a longer thought that mentions the mic is them talking about it, not flipping it
 OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end unless they say otherwise. Never treat it as "
-              "just conversation. Absolute rule; your safety limits, such as moving money, still apply.")
+              "just conversation. Absolute rule.")
 
 
 def log(msg: str):

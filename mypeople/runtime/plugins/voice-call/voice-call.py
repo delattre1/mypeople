@@ -253,7 +253,7 @@ def send_to_boss(message: str) -> bool:
 
 
 OWNER_RULE = ("When the owner addresses you, it is a task: carry it to the end unless they say otherwise. Never treat it as "
-              "just conversation. Absolute rule; your safety limits, such as moving money, still apply.")
+              "just conversation. Absolute rule.")
 
 
 STAMP = "[CALL {ticket}] {sender} ({language}):"
