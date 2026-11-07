@@ -1027,11 +1027,28 @@ def tmux_send_message(target, message):
     session name, so a wrong window reported success while every keystroke was discarded.
 
     To a Claude agent a long message goes as paste_pieces, each pasted only once the one before
-    shows in the input box, so no paste spans two pty reads a stall can sit between.
+    shows in the input box, so no paste spans two pty reads a stall can sit between. Deliveries
+    to one pane take turns: another sender's Enter between two pieces submitted half a message
+    (11-07, a [swarm chief] envelope reached the Boss as two).
     """
     if message is None or not str(message).strip():
         return False
-    message = str(message)
+    lock_path = os.path.join(CFG["INSTALL_DIR"], "run", "send-locks", re.sub(r"[^\w.-]", "_", target) + ".lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with open(lock_path, "a+") as lock:
+        give_up = time.time() + PASTE_WAIT + 10   # a stuck sender must not stop every other one
+        while True:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.time() > give_up:
+                    break
+                time.sleep(0.05)
+        return _send_message(target, str(message))
+
+
+def _send_message(target, message):
     env = dict(os.environ)
     env.pop("TMUX", None)  # never target the caller's pane
     buf = "mp-" + base64.urlsafe_b64encode(os.urandom(9)).decode("ascii").rstrip("=")

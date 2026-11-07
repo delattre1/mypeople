@@ -130,9 +130,9 @@ import base64, json, os, sys, time, tty
 log, fd = open(sys.argv[1], "a"), sys.stdin.fileno()
 tty.setraw(fd)
 got = b""
-def draw():   # Claude Code's input box: a rule, the end of what came in, a closing rule
+def draw():   # Claude Code's input box, which grows with what came in: a rule, its size and end, a rule
     tail = got[-50:].decode("utf-8", "replace").replace("\x1b", "").replace("\r", " ").replace("\n", " ")
-    os.write(1, ("\x1b[?2004h\x1b[2J\x1b[H" + "─" * 40 + "\r\n❯ " + tail + "\r\n" + "─" * 40 + "\r\n").encode())
+    os.write(1, ("\x1b[?2004h\x1b[2J\x1b[H" + "─" * 40 + "\r\n❯ [%d] " % len(got) + tail + "\r\n" + "─" * 40 + "\r\n").encode())
 draw()
 while b"\x04" not in got:
     time.sleep(0.3)   # a busy agent: nothing is read for this long, so the pty fills behind it
@@ -193,6 +193,27 @@ class SlowClaudeTests(unittest.TestCase):
         self.assertEqual(msg, b"".join(pastes).replace(b"\r", b"\n").decode("utf-8"))
         outside = raw.split(PASTE_START)[0] + b"".join(p.split(PASTE_END)[1] for p in raw.split(PASTE_START)[1:])
         self.assertEqual(b"\r", outside, "one Enter, after the last piece")
+
+    def test_a_second_sender_waits_for_a_long_message_to_finish(self):
+        """11-07: another sender's Enter between two pieces submitted a [swarm chief] envelope to the
+        Boss as two messages. Deliveries to one pane take turns."""
+        import threading
+        long_msg, short = "Long, ação: %s." % " ".join(["word"] * 400), "a short one"
+        first = threading.Thread(target=self.C.tmux_send_message, args=("mc-slow:boss", long_msg))
+        first.start()
+        time.sleep(0.2)   # the long one holds the pane and is still landing piece by piece
+        self.assertTrue(self.C.tmux_send_message("mc-slow:boss", short))
+        first.join(30)
+        time.sleep(1)
+        subprocess.run(["tmux", "send-keys", "-t", "mc-slow:boss", "C-d"], check=True)
+        for _ in range(50):
+            raw = b"".join(base64.b64decode(json.loads(l)) for l in self.reads.read_text().splitlines())
+            if b"\x04" in raw:
+                break
+            time.sleep(0.1)
+        # The stream as the agent gets it, with "|" for each Enter (neither message has a line break).
+        stream = raw.replace(b"\x04", b"").replace(PASTE_START, b"").replace(PASTE_END, b"").replace(b"\r", b"|")
+        self.assertEqual(long_msg + "|" + short + "|", stream.decode("utf-8"))
 
 
 if __name__ == "__main__":
