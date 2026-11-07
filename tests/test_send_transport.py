@@ -9,6 +9,8 @@ returned True and printed "sent").
 These tests drive real tmux panes. The receiver enables bracketed-paste mode and logs raw
 bytes, which is the only way to see the framing the composer actually gets.
 """
+import base64
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -16,6 +18,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,6 +123,76 @@ class SendTransportTests(unittest.TestCase):
 
     def test_an_empty_message_is_refused(self):
         self.assertFalse(self.C.tmux_send_message(self.target, "   "))
+
+
+SLOW_CLAUDE = r'''
+import base64, json, os, sys, time, tty
+log, fd = open(sys.argv[1], "a"), sys.stdin.fileno()
+tty.setraw(fd)
+got = b""
+def draw():   # Claude Code's input box: a rule, the end of what came in, a closing rule
+    tail = got[-50:].decode("utf-8", "replace").replace("\x1b", "").replace("\r", " ").replace("\n", " ")
+    os.write(1, ("\x1b[?2004h\x1b[2J\x1b[H" + "─" * 40 + "\r\n❯ " + tail + "\r\n" + "─" * 40 + "\r\n").encode())
+draw()
+while b"\x04" not in got:
+    time.sleep(0.3)   # a busy agent: nothing is read for this long, so the pty fills behind it
+    b = os.read(fd, 65536)
+    log.write(json.dumps(base64.b64encode(b).decode()) + "\n"); log.flush()
+    got += b
+    draw()
+'''
+
+
+@unittest.skipUnless(have_tmux(), "tmux not available")
+class SlowClaudeTests(unittest.TestCase):
+    """11-07: an agent busy enough to stall between two pty reads of one long paste got it cut in two
+    (Claude Code ends a paste that has had no bytes for 2 s) and sometimes lost its head: 83 of the
+    Boss's 271 long messages. So a long message reaches a Claude pane as pastes that each start and
+    end inside one read, then one Enter. Real tmux, on a server of its own."""
+
+    def setUp(self):
+        import sandbox
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        self.dir = Path(td.name)
+        env = mock.patch.dict(os.environ, {"TMUX_TMPDIR": str(self.dir)})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("TMUX", None)   # an agent's shell would aim every tmux call at the live server
+        sock = self.dir / ("tmux-%d" % os.getuid()) / "default"
+        self.addCleanup(subprocess.run, ["tmux", "-S", str(sock), "kill-server"], capture_output=True)
+        self.C = sandbox.load(str(self.dir), "mpcommon.py", HOST_ID="node")
+        status = Path(self.C.CFG["INSTALL_DIR"]) / "status" / "mc-slow"
+        status.mkdir(parents=True)
+        (status / "boss.json").write_text(json.dumps({"backend": "claude"}))
+        (self.dir / "claude.py").write_text(SLOW_CLAUDE, encoding="utf-8")
+        self.reads = self.dir / "reads.jsonl"
+        subprocess.run(["tmux", "new-session", "-d", "-s", "mc-slow", "-n", "boss", "-x", "150", "-y", "40",
+                        "%s %s %s" % (sys.executable, self.dir / "claude.py", self.reads)], check=True)
+        for _ in range(50):
+            if self.C.pane_input_state("mc-slow:boss") == "ready":
+                break
+            time.sleep(0.1)
+
+    def test_a_long_message_reaches_a_slow_claude_one_whole_paste_per_read_then_one_enter(self):
+        msg = "\n\n".join("Para %d, ação ⚉: %s." % (i, " ".join(["word"] * 200)) for i in range(5))
+        self.assertTrue(self.C.tmux_send_message("mc-slow:boss", msg))
+        time.sleep(1)
+        subprocess.run(["tmux", "send-keys", "-t", "mc-slow:boss", "C-d"], check=True)
+        for _ in range(50):
+            reads = [base64.b64decode(json.loads(l)) for l in self.reads.read_text().splitlines()]
+            if reads and b"\x04" in reads[-1]:
+                break
+            time.sleep(0.1)
+        self.assertGreater(len(reads), 3)
+        for r in reads:
+            self.assertEqual(r.count(PASTE_START), r.count(PASTE_END), "a paste spanned two reads: %r" % r[:80])
+        raw = b"".join(reads).replace(b"\x04", b"")
+        pastes = [p.split(PASTE_END)[0] for p in raw.split(PASTE_START)[1:]]
+        self.assertGreater(len(pastes), 1)
+        self.assertEqual(msg, b"".join(pastes).replace(b"\r", b"\n").decode("utf-8"))
+        outside = raw.split(PASTE_START)[0] + b"".join(p.split(PASTE_END)[1] for p in raw.split(PASTE_START)[1:])
+        self.assertEqual(b"\r", outside, "one Enter, after the last piece")
 
 
 if __name__ == "__main__":

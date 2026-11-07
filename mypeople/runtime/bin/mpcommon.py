@@ -814,11 +814,45 @@ def claude_composer_ready(screen):
     option). Menus draw `❯` too; a menu's last option can sit under a separator rule, but no
     rule closes it below, only "Enter to select".
     """
-    lines = [l for l in (_ANSI.sub("", raw).rstrip() for raw in screen.splitlines()) if l.strip()][-25:]
+    return claude_input_box(screen, last=25) is not None
+
+
+def claude_input_box(screen, last=None):
+    """The lines of the Claude Code input box on `screen` (the shape claude_composer_ready looks
+    for, in its last `last` lines), or None when there is none."""
+    lines = [l for l in (_ANSI.sub("", raw).rstrip() for raw in screen.splitlines()) if l.strip()][-(last or 0):]
     rule = [l.lstrip().startswith("\u2500" * 8) for l in lines]
-    return any(
-        lines[i].lstrip().startswith("\u276f") and rule[i - 1] and any(rule[i + 1:])
-        for i in range(1, len(lines)))
+    for i in range(len(lines) - 1, 0, -1):
+        if lines[i].lstrip().startswith("\u276f") and rule[i - 1] and any(rule[i + 1:]):
+            return lines[i:i + 1 + rule[i + 1:].index(True)]
+    return None
+
+
+# Claude Code ends a paste that has had no bytes for 2 s (its input reader's IN_PASTE timeout) and
+# takes the rest as typed keys, and a pty hands a paste over about 1 KB per read. So an agent busy
+# enough to stall between two reads of one long paste got it in pieces, and sometimes lost the head
+# (11-07: 83 of the Boss's 271 long messages). A piece this size arrives in one read, and one of at
+# most 800 characters and 2 lines goes into the box as text, not a "[Pasted text]" chip.
+PASTE_BYTES, PASTE_CHARS, PASTE_LINES = 900, 800, 2
+PASTE_WAIT = 30   # seconds a long message waits, in all, for its pieces to show in the box
+
+
+def paste_pieces(message):
+    """`message` in pieces of at most PASTE_BYTES UTF-8 bytes, PASTE_CHARS characters and
+    PASTE_LINES line breaks, cut after a line break or a space when the piece has one."""
+    pieces, rest = [], message
+    while rest:
+        used = breaks = 0
+        for n, ch in enumerate(rest):
+            used, breaks = used + len(ch.encode("utf-8")), breaks + (ch == "\n")
+            if used > PASTE_BYTES or n >= PASTE_CHARS or breaks > PASTE_LINES:
+                break
+        else:
+            return pieces + [rest]
+        cut = rest.rfind("\n", 0, n) + 1 or rest.rfind(" ", 0, n) + 1 or n
+        pieces.append(rest[:cut])
+        rest = rest[cut:]
+    return pieces
 
 
 def _target_backend(target):
@@ -991,6 +1025,9 @@ def tmux_send_message(target, message):
     in ESC[200~ / ESC[201~ so the composer takes it as one atomic paste. Every tmux call is
     now checked, and the target is validated as a PANE -- `has-session` only checked the
     session name, so a wrong window reported success while every keystroke was discarded.
+
+    To a Claude agent a long message goes as paste_pieces, each pasted only once the one before
+    shows in the input box, so no paste spans two pty reads a stall can sit between.
     """
     if message is None or not str(message).strip():
         return False
@@ -1002,27 +1039,33 @@ def tmux_send_message(target, message):
     def tmux(*args, **kw):
         return tmux_run(*args, env=env, **kw)
 
-    pasted = False
+    def box():
+        return claude_input_box(tmux("capture-pane", "-p", "-t", target, text=True).stdout or "")
+
+    pieces = paste_pieces(message) if _target_backend(target) == "claude" else [message]
+    pasted, deadline = 0, time.time() + PASTE_WAIT
     for attempt in range(3):
-        if not pasted:
-            state = pane_input_state(target)
-            if state == "no_pane":
-                time.sleep(0.3)
-                continue
+        while pasted < len(pieces):
+            state = pane_input_state(target) if not pasted else "ready"
             if state == "not_ready":
                 # Refuse rather than paste into a session that is starting or behind a dialog: the
                 # sender learns it failed and can retry, instead of a "sent" that never arrived.
                 return False
-            if tmux("load-buffer", "-b", buf, "-", input=message.encode("utf-8")).returncode != 0:
-                time.sleep(0.3)
-                continue
+            before = box() if len(pieces) > 1 and state == "ready" else None
             # -p = bracketed paste markers, -d = drop the buffer once pasted.
+            if state == "no_pane" or tmux("load-buffer", "-b", buf, "-",
+                                          input=pieces[pasted].encode("utf-8")).returncode:
+                break
             if tmux("paste-buffer", "-p", "-d", "-b", buf, "-t", target).returncode != 0:
                 tmux("delete-buffer", "-b", buf)
-                time.sleep(0.3)
-                continue
-            pasted = True  # a retry from here is for the Enter: pasting again would double the message
-            time.sleep(0.15)
+                break
+            pasted += 1  # a retry from here is for what is left: pasting a piece again would double it
+            while before is not None and box() == before and time.time() < deadline:
+                time.sleep(0.05)
+        if pasted < len(pieces):
+            time.sleep(0.3)
+            continue
+        time.sleep(0.15)
         if not pane_key(target, "Enter"):
             time.sleep(0.3)
             continue

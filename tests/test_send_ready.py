@@ -83,6 +83,19 @@ class ComposerReadyTest(unittest.TestCase):
         self.assertIn("paste-buffer", calls)
         self.assertEqual(calls[-1], "send-keys")
 
+    def test_a_long_message_is_cut_into_pieces_claude_code_takes_whole_and_inline(self):
+        msg = "\n".join(["Para %d: ação ⚉ %s." % (i, " ".join(["word"] * 120)) for i in range(5)] + ["a\nb\nc\nd"])
+        pieces = self.C.paste_pieces(msg)
+        self.assertEqual(msg, "".join(pieces))
+        for p in pieces:
+            self.assertLessEqual(len(p.encode("utf-8")), self.C.PASTE_BYTES)
+            self.assertLessEqual(len(p), self.C.PASTE_CHARS)
+            self.assertLessEqual(p.count("\n"), self.C.PASTE_LINES)
+        self.assertTrue(all(p[-1] in " \n" for p in pieces[:-1]), "cut after a space or a line break")
+        self.assertEqual(["hello"], self.C.paste_pieces("hello"))
+        self.assertEqual(["x" * 800, "x" * 800, "x" * 400], self.C.paste_pieces("x" * 2000), "no space: a hard cut")
+        self.assertEqual(["é" * 450, "é" * 50], self.C.paste_pieces("é" * 500), "900 bytes, never inside a character")
+
     def test_codex_and_non_agent_panes_are_unchanged(self):
         self.assertTrue(self.send(self.agent("codex"), STARTUP)[0])
         self.assertTrue(self.send("mptest-1:0.0", STARTUP)[0])
