@@ -307,6 +307,11 @@ class Switch(unittest.TestCase):
         Path(self.install_dir, "state", "x", "creds.json").write_text("{}")
         self.assertEqual("down", self.row("needs-file")["state"])
 
+    def test_no_ps_reads_down_instead_of_failing(self):
+        write_plugin(self.plugins, "needs-env", "run=python3 p.py", "needs=env:SOME_KEY")
+        with mock.patch.object(self.m.subprocess, "run", side_effect=FileNotFoundError("ps")):
+            self.assertEqual("down", self.row("needs-env")["state"])
+
     def test_messages_come_from_the_plugins_that_declare_one_and_a_broken_one_is_left_out(self):
         write_plugin(self.plugins, "says", "run=python3 p.py", "message=yes").joinpath("p.py").write_text("print('[says] <text>')")
         write_plugin(self.plugins, "silent", "run=python3 p.py").joinpath("p.py").write_text("print('never asked')")

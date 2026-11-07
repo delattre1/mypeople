@@ -90,7 +90,11 @@ def _script(p):
 
 
 def _ps():
-    return subprocess.run(["ps", "-eo", "command="], capture_output=True, text=True).stdout.splitlines()
+    # No ps (Windows) or a hung one: no process list, so a service reads "down" instead of the page failing.
+    try:
+        return subprocess.run(["ps", "-eo", "command="], capture_output=True, text=True, timeout=5).stdout.splitlines()
+    except (OSError, subprocess.TimeoutExpired):
+        return []
 
 
 def _state(name, p, ps):
