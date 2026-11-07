@@ -121,7 +121,20 @@ def _ago(delta_ms):
     return "%d days ago" % (secs // 86400)
 
 
-def claude_probe(timeout=90, runner=None):
+def agent_token():
+    """The CLAUDE_CODE_OAUTH_TOKEN agents start with, or "". tmux's global env hands it to every new pane and the
+    daemons (supervise.sh's env) may not have it: on Mac 2 the agents ran on such a token while `claude auth` held
+    another account, so the probe judged, and billed, that other account every 15 min. Never logged."""
+    try:
+        r = subprocess.run(["tmux", "show-environment", "-g", "CLAUDE_CODE_OAUTH_TOKEN"], capture_output=True,
+                           text=True, timeout=10)
+        name, _, value = r.stdout.strip().partition("=")     # "-NAME" when tmux has it unset
+    except (OSError, subprocess.SubprocessError):
+        name = value = ""
+    return value if name == "CLAUDE_CODE_OAUTH_TOKEN" and value else os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+
+
+def claude_probe(timeout=90, runner=None, token=""):
     """Ask the model for one word. The only signal that cannot be faked by a file on disk."""
     if shutil.which("claude") is None:
         return DEAD, "claude CLI is not on PATH"
@@ -129,6 +142,8 @@ def claude_probe(timeout=90, runner=None):
     # Not an agent turn: without AGENT_ID the lifecycle hooks stay silent, so a probe run from an
     # agent's shell (the test suite) never writes that agent's status or pings the Boss "PONG".
     env = {k: v for k, v in os.environ.items() if k != "AGENT_ID"}
+    if token:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     # No MCP servers: a PONG needs none, and the operator's 1Password MCP under MyPlow is one macOS
     # "would like to access data from other apps" prompt per probe, every 15 min (card 70a20b5dcf).
     try:
@@ -154,10 +169,13 @@ def claude_verdict(probe=True, timeout=90, path=None, now_ms=None, runner=None):
     A structurally-open credential that fails to probe for a NON-auth reason stays LIVE: we do not
     convert "the network is down" into "your login expired".
     """
-    state, detail = claude_credential_state(path=path, now_ms=now_ms)
+    token = agent_token()
+    # With a token the credential file is another account's, so it proves nothing either way.
+    state, detail = ((UNKNOWN, "agents run on a CLAUDE_CODE_OAUTH_TOKEN") if token else
+                     claude_credential_state(path=path, now_ms=now_ms))
     if state == DEAD or not probe:
         return state, detail
-    pstate, pdetail = claude_probe(timeout=timeout, runner=runner)
+    pstate, pdetail = claude_probe(timeout=timeout, runner=runner, token=token)
     if pstate == DEAD:
         return DEAD, pdetail
     if pstate == LIVE:
@@ -202,9 +220,9 @@ def node_auth_health(install_dir, backend="claude", probe_ttl=900, timeout=90, n
                    and now - float(cached.get("probed_ts") or 0) < probe_ttl)
     state, detail = call(probe=not fresh_probe, timeout=timeout)
 
-    if state == LIVE and fresh_probe and cached.get("state") == DEAD:
-        # Structural check says the window is open but the last real probe was refused (revoked
-        # token). Keep the refusal until a probe earns the green back.
+    if state != DEAD and fresh_probe and cached.get("state") == DEAD:
+        # Structural check says the window is open (or cannot tell: a token, a keychain) but the last
+        # real probe was refused (revoked token). Keep the refusal until a probe earns the green back.
         state, detail = DEAD, cached.get("detail") or "backend refused the credential"
 
     out = {"backend": backend, "state": state, "detail": detail, "ts": now,

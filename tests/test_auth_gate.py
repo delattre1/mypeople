@@ -113,6 +113,38 @@ class ProbeTests(unittest.TestCase):
 
 
 class VerdictTests(unittest.TestCase):
+    def setUp(self):
+        token = mock.patch.object(A, "agent_token", return_value="")   # never this machine's tmux and its login
+        token.start()
+        self.addCleanup(token.stop)
+
+    def test_the_probe_judges_the_login_the_agents_run_on(self):
+        """Mac 2: agents ran on a CLAUDE_CODE_OAUTH_TOKEN from tmux's global env while `claude auth` was another
+        account, and the probe checked and billed that account every 15 min."""
+        now = 1_784_000_000_000.0
+        envs = []
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(A, "agent_token", return_value="tok-agents"), \
+                mock.patch.object(A.shutil, "which", return_value="/usr/bin/claude"):
+            p = write_creds(td, refreshTokenExpiresAt=now - HOUR_MS)   # the other account's file reads dead
+            state, _ = A.claude_verdict(path=p, now_ms=now,
+                                        runner=lambda *a, **k: envs.append(k["env"]) or completed("PONG"))
+        self.assertEqual((A.LIVE, "tok-agents"), (state, envs[0].get("CLAUDE_CODE_OAUTH_TOKEN")))
+
+    real_agent_token = staticmethod(A.agent_token)   # taken before setUp stubs it
+
+    def test_the_agents_token_is_what_tmux_gives_a_new_pane(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmux = Path(td) / "tmux"
+            tmux.write_text('#!/bin/sh\necho "$TMUX_SAYS"\n')
+            tmux.chmod(0o755)
+            for says, env_token, want in (("CLAUDE_CODE_OAUTH_TOKEN=tok-tmux", "tok-env", "tok-tmux"),
+                                          ("-CLAUDE_CODE_OAUTH_TOKEN", "tok-env", "tok-env"),   # unset in tmux
+                                          ("", "", "")):
+                env = {"PATH": td, "TMUX_SAYS": says}
+                with mock.patch.dict(os.environ, dict(env, CLAUDE_CODE_OAUTH_TOKEN=env_token) if env_token else env,
+                                     clear=True):
+                    self.assertEqual(want, self.real_agent_token(), says)
+
     def test_offline_node_with_open_window_stays_live(self):
         """A broken network must not be rewritten as an expired login."""
         now = 1_784_000_000_000.0
@@ -237,6 +269,10 @@ class NodeHealthCacheTests(unittest.TestCase):
             # structural-only pass right after: the file looks fine, but nothing re-proved it
             out = A.node_auth_health(td, probe_ttl=900, now=1010.0,
                                      verdict=lambda **k: (A.LIVE, "credential window open"))
+            self.assertEqual(out["state"], A.DEAD)
+            # nor when the file cannot tell (a token login, a keychain)
+            out = A.node_auth_health(td, probe_ttl=900, now=1020.0,
+                                     verdict=lambda **k: (A.UNKNOWN, "agents run on a CLAUDE_CODE_OAUTH_TOKEN"))
             self.assertEqual(out["state"], A.DEAD)
             # TTL expired -> a real probe runs and may restore the green
             out = A.node_auth_health(td, probe_ttl=900, now=5000.0,
