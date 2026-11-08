@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
-from mpcommon import plugin_text  # noqa: E402
+from mpcommon import SEND_TIMEOUT, plugin_text  # noqa: E402
 
 INSTALL = Path(os.environ.get("INSTALL_DIR") or os.environ.get("MYPEOPLE_HOME") or Path.home() / ".local/share/mypeople")
 STATE = Path(os.environ.get("SWARM_STATE_DIR") or INSTALL / "state" / "swarm")
@@ -135,7 +135,7 @@ def envelope(m, owner, cfg):
 
 def send_to_boss(text):
     try:
-        r = subprocess.run([sys.executable, MP_BIN, "send", BOSS, text], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([sys.executable, MP_BIN, "send", BOSS, text], capture_output=True, text=True, timeout=SEND_TIMEOUT)
     except (OSError, subprocess.SubprocessError) as e:
         log("mp send failed: %s" % e)
         return False

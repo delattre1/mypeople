@@ -87,7 +87,7 @@ HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
-from mpcommon import plugin_text  # noqa: E402
+from mpcommon import SEND_TIMEOUT, plugin_text  # noqa: E402
 
 SELF = str(Path(__file__).resolve())
 PLOW_CHAT = str(Path(__file__).resolve().parent.parent / "plow-chat" / "plow-chat.py")
@@ -243,7 +243,7 @@ def scrub(cfg, sid):
 def send_to_boss(message: str) -> bool:
     try:
         r = subprocess.run([sys.executable, MP_BIN, "send", BOSS_AGENT, message],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=SEND_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"ERROR mp send: {e}")
         return False

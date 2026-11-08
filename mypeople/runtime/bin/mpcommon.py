@@ -814,18 +814,23 @@ def claude_composer_ready(screen):
     option). Menus draw `❯` too; a menu's last option can sit under a separator rule, but no
     rule closes it below, only "Enter to select".
     """
-    return claude_input_box(screen, last=25) is not None
-
-
-def claude_input_box(screen, last=None):
-    """The lines of the Claude Code input box on `screen` (the shape claude_composer_ready looks
-    for, in its last `last` lines), or None when there is none."""
-    lines = [l for l in (_ANSI.sub("", raw).rstrip() for raw in screen.splitlines()) if l.strip()][-(last or 0):]
+    lines = [l for l in (_ANSI.sub("", raw).rstrip() for raw in screen.splitlines()) if l.strip()][-25:]
     rule = [l.lstrip().startswith("\u2500" * 8) for l in lines]
-    for i in range(len(lines) - 1, 0, -1):
-        if lines[i].lstrip().startswith("\u276f") and rule[i - 1] and any(rule[i + 1:]):
-            return lines[i:i + 1 + rule[i + 1:].index(True)]
-    return None
+    return any(
+        lines[i].lstrip().startswith("\u276f") and rule[i - 1] and any(rule[i + 1:])
+        for i in range(1, len(lines)))
+
+
+def input_end(screen):
+    """What the input box shows above the screen's last rule (back to the rule before it, or the top
+    of the screen), whitespace removed; None with no rule on screen. Its end is the end of the input
+    even when the box is taller than the window, where its `\u276f` line has scrolled away (11-08: the
+    Boss's window took a 90x25 client's size)."""
+    lines = [l for l in (_ANSI.sub("", raw).rstrip() for raw in screen.splitlines()) if l.strip()]
+    rules = [i for i, l in enumerate(lines) if l.lstrip().startswith("\u2500" * 8)]
+    if not rules:
+        return None
+    return re.sub(r"\s", "", "".join(lines[rules[-2] + 1 if len(rules) > 1 else 0:rules[-1]]))
 
 
 # Claude Code ends a paste that has had no bytes for 2 s (its input reader's IN_PASTE timeout) and
@@ -835,6 +840,11 @@ def claude_input_box(screen, last=None):
 # most 800 characters and 2 lines goes into the box as text, not a "[Pasted text]" chip.
 PASTE_BYTES, PASTE_CHARS, PASTE_LINES = 900, 800, 2
 PASTE_WAIT = 30   # seconds a long message waits, in all, for its pieces to show in the box
+# What a caller gives one mp send: more than its longest delivery (MP_SEND_READY_WAIT 10 s for the
+# box, PASTE_WAIT + 5 for another sender's turn, PASTE_WAIT for the pieces, then the Enter). A shorter
+# one killed mp halfway through a long message, left it unsent in the box and pasted it again on the
+# retry, and its sender was told it had failed (11-08, plow-chat at 30 s with the Boss stalled).
+SEND_TIMEOUT = 90
 
 
 def paste_pieces(message):
@@ -1036,9 +1046,7 @@ def tmux_send_message(target, message):
     lock_path = os.path.join(CFG["INSTALL_DIR"], "run", "send-locks", re.sub(r"[^\w.-]", "_", target) + ".lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     with open(lock_path, "a+") as lock:
-        # A stuck sender must not stop every other one, and waiting plus delivering stays under the
-        # 60 s a Swarm bridge gives one mp send before it kills it and sends again (a double).
-        give_up = time.time() + 20
+        give_up = time.time() + PASTE_WAIT + 5   # another sender's longest turn; a stuck one must not stop every other
         while True:
             try:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1059,7 +1067,7 @@ def _send_message(target, message):
         return tmux_run(*args, env=env, **kw)
 
     def box():
-        return claude_input_box(tmux("capture-pane", "-p", "-t", target, text=True).stdout or "")
+        return input_end(tmux("capture-pane", "-p", "-t", target, text=True).stdout or "")
 
     pieces = paste_pieces(message) if _target_backend(target) == "claude" else [message]
     pasted, deadline = 0, time.time() + PASTE_WAIT
@@ -1085,7 +1093,7 @@ def _send_message(target, message):
             tail = re.sub(r"\s", "", pieces[pasted - 1])[-24:]
             while before is not None and time.time() < deadline:
                 now = box()
-                if now is not None and now != before and re.sub(r"\s", "", "".join(now)).endswith(tail):
+                if now is not None and now != before and now.endswith(tail):
                     break
                 time.sleep(0.05)
         if pasted < len(pieces):

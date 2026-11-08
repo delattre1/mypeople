@@ -51,7 +51,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
-from mpcommon import WebSocket, plugin_text  # noqa: E402  (the one discord-chat holds Discord's gateway with)
+from mpcommon import SEND_TIMEOUT, WebSocket, plugin_text  # noqa: E402  (the one discord-chat holds Discord's gateway with)
 
 BASE = (os.environ.get("PLOW_CHAT_BASE_URL") or os.environ.get("PLOW_API_BASE")
         or "https://api.plow.co").rstrip("/")
@@ -363,13 +363,15 @@ def pick_agent(text: str, message: dict, last: str = "", minutes=None, last_repl
     return agents[choice][0] if choice in agents else BOSS_AGENT
 
 
-def send_to_agent(message: str, agent: str = BOSS_AGENT) -> bool:
+def send_to_agent(message: str, agent: str = BOSS_AGENT):
+    """True: delivered. False: mp refused it, so nothing reached the agent. None: unknown (mp did not
+    finish), so it may have reached the agent: retried, but its sender is never told it failed."""
     try:
         r = subprocess.run([sys.executable, MP_BIN, "send", agent, message],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=SEND_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"ERROR mp send: {e}")
-        return False
+        return None
     if r.returncode != 0:
         log(f"ERROR mp send rc={r.returncode}: {r.stderr.strip()[:200]}")
         return False
@@ -377,6 +379,26 @@ def send_to_agent(message: str, agent: str = BOSS_AGENT) -> bool:
 
 
 WARN_AFTER = 120  # seconds a text may wait for a Boss that is coming back before its sender is told
+NOT_YET = {
+    "en": "Your text reached me but I could not wake the team with it. Retrying; nothing is lost.",
+    "pt": "Sua mensagem chegou aqui, mas ainda não consegui passá-la para a equipe. Vou tentar de novo; nada se perdeu.",
+    "es": "Tu mensaje llegó, pero todavía no pude pasárselo al equipo. Lo intento de nuevo; no se perdió nada.",
+}
+# Words only one of these languages uses a lot. Short texts often carry none of them: then English.
+WORDS = {"pt": set("não nao você voce vc tá tô eu meu minha minhas meus cadê cade aqui isso esse essa tem obrigado "
+                   "obrigada oi olá também tambem consegue quero onde agora então entao pra pro né nós".split()),
+         "es": set("qué cómo dónde usted tú está estoy gracias hola sí muy pero también puedes quiero aquí eso esto "
+                   "ahora entonces nosotros".split())}
+
+
+def language(text: str) -> str:
+    """The language a sender wrote in, of the ones there is a reply for: pt, es, or en."""
+    low = text.lower()
+    words = re.findall(r"[^\W\d_]+", low)
+    score = {lang: sum(w in ws for w in words) + 2 * bool(re.search(marks, low))
+             for lang, ws, marks in (("pt", WORDS["pt"], "[ãõç]"), ("es", WORDS["es"], "[ñ¿¡]"))}
+    best = max(score, key=score.get)
+    return best if score[best] else "en"
 STARTED = time.time()  # a bridge that just started (a reboot, an update) gives the Boss WARN_AFTER too
 
 
@@ -463,8 +485,9 @@ def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
     with STATE_LOCK:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
     target = pick_agent(text, message, *last)
-    if send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid, target.rsplit(":", 1)[1],
-                              owner=is_owner(message.get("sender") or {})), target):
+    sent = send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid, target.rsplit(":", 1)[1],
+                                  owner=is_owner(message.get("sender") or {})), target)
+    if sent:
         if taps:
             with STATE_LOCK:
                 st = read_json(STATE, {})
@@ -481,18 +504,20 @@ def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
                 marks[chat] = prev
         warned = mid in st.get("warned_ids", [])
         late = min(message_age(message), time.time() - STARTED) >= WARN_AFTER
-        if late and not warned:
+        # Only a refusal is a failure to tell them about. An mp send that did not finish may have reached
+        # the Boss (11-08: Camily was told twice that her texts had not, and both had), so that text is
+        # never warned about, then or later.
+        if (late or sent is None) and not warned:
             st["warned_ids"] = (st.get("warned_ids", []) + [mid])[-200:]
         write_json(STATE, st)
-    if not late or warned:
+    if not late or warned or sent is None:
         # A Boss that is coming up (a restart, an in-place update) gets it on the next pass; a text
         # that keeps failing is told once, not every pass.
         return "ERROR mp send failed; retrying next pass"
-    # Say it on the phone that just texted, the one path known to work, instead
+    # Say it on the phone that just texted, the one path known to work, in their language, instead
     # of leaving them waiting on an answer nobody heard.
     try:
-        send_message("Your text reached me but I could not wake the team with it. "
-                     "Retrying; nothing is lost.", chat_uid)
+        send_message(NOT_YET[language(text)], chat_uid)
     except (SystemExit, OSError) as exc:
         log(f"could not warn the sender either: {exc}")
     return "ERROR mp send failed; sender warned, retrying next pass"

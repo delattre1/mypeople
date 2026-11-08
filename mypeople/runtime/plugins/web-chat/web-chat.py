@@ -43,7 +43,7 @@ CREDS, STATE = STATE_DIR / "creds.json", STATE_DIR / "state.json"   # state: {"a
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 TARGET = os.environ.get("BOSS_AGENT") or f"{os.environ.get('HOST_ID') or socket.gethostname().split('.')[0]}/main:Boss"
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
-from mpcommon import plugin_text, render_template  # noqa: E402
+from mpcommon import SEND_TIMEOUT, plugin_text, render_template  # noqa: E402
 
 RUN = f"{sys.executable} {Path(__file__).resolve()}"   # the Boss runs these with the same python that runs the bridge
 
@@ -171,7 +171,7 @@ def target_for(m):
 def deliver(m):
     """One visitor message to the agent that owns it (the Boss unless the router picks another); True once mp took it."""
     to = target_for(m)
-    p = subprocess.run([MP_BIN, "send", to, envelope(m, to.rsplit(":", 1)[1])], capture_output=True, text=True, timeout=60)
+    p = subprocess.run([MP_BIN, "send", to, envelope(m, to.rsplit(":", 1)[1])], capture_output=True, text=True, timeout=SEND_TIMEOUT)
     if p.returncode:
         log(f"mp send failed for {m['visitor']} {m.get('id', m.get('kind'))}: exit {p.returncode}")  # never the stderr: it can quote their text
         return False

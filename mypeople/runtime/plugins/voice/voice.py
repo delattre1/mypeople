@@ -51,7 +51,7 @@ HOST_ID = os.environ.get("HOST_ID") or os.uname().nodename.split(".")[0]
 BOSS_AGENT = os.environ.get("BOSS_AGENT") or f"{HOST_ID}/main:Boss"
 MP_BIN = os.environ.get("MP_BIN") or str(INSTALL / "bin" / "mp")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
-from mpcommon import plugin_text  # noqa: E402
+from mpcommon import SEND_TIMEOUT, plugin_text  # noqa: E402
 
 RUN = f"{sys.executable} {Path(__file__).resolve()}"   # the Boss answers with the python that runs the bridge
 SILENCE_MS = 1500   # a finished sentence ('.', '?', '!') ships after this pause
@@ -81,7 +81,7 @@ def config() -> dict:
 def send_to_agent(message: str, agent: str = BOSS_AGENT) -> bool:
     try:
         r = subprocess.run([sys.executable, MP_BIN, "send", agent, message],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=SEND_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired) as e:   # 10-31: one hung send silenced the old bridge
         log(f"ERROR mp send: {e}")
         return False

@@ -71,7 +71,7 @@ from pathlib import Path
 
 SELF = Path(__file__).resolve()
 sys.path.insert(0, str(SELF.parents[2] / "bin"))
-from mpcommon import Closed, WebSocket, plugin_text  # noqa: E402  (the one the plow-chat bridge holds too)
+from mpcommon import SEND_TIMEOUT, Closed, WebSocket, plugin_text  # noqa: E402  (the one the plow-chat bridge holds too)
 _loader = importlib.machinery.SourceFileLoader(
     "discord_agent", str(SELF.parent.parent / "discord-agent" / "discord-agent.py"))
 DA = importlib.util.module_from_spec(importlib.util.spec_from_loader("discord_agent", _loader))
@@ -329,7 +329,7 @@ def where(ch, mid, thread):
 
 
 def send_to_boss(text):
-    r = subprocess.run([sys.executable, MP_BIN, "send", BOSS, text], capture_output=True, text=True, timeout=60)
+    r = subprocess.run([sys.executable, MP_BIN, "send", BOSS, text], capture_output=True, text=True, timeout=SEND_TIMEOUT)
     if r.returncode:
         log("mp send failed rc=%s: %s" % (r.returncode, (r.stderr or r.stdout).strip()[:200]))
     return r.returncode == 0

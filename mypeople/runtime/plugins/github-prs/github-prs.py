@@ -46,7 +46,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
-from mpcommon import plugin_text  # noqa: E402
+from mpcommon import SEND_TIMEOUT, plugin_text  # noqa: E402
 
 INSTALL = Path(os.environ.get("INSTALL_DIR") or os.environ.get("MYPEOPLE_HOME")
                or Path.home() / ".local/share/mypeople")
@@ -290,7 +290,7 @@ def boss_id():
 
 def deliver(agent, text):
     r = subprocess.run([sys.executable, MP_BIN, "send", agent, text], capture_output=True, text=True,
-                       timeout=60)
+                       timeout=SEND_TIMEOUT)
     return r.returncode == 0
 
 

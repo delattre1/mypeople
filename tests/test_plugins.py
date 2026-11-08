@@ -426,6 +426,18 @@ class Switch(unittest.TestCase):
                     old = old.replace("{owner_line}", "{safety_line}")
                 self.assertEqual(words, self.m.C.without_old_name(old, words), d.name)
 
+    def test_every_plugin_gives_mp_send_more_time_than_one_can_take(self):
+        """11-08: plow-chat gave mp send 30 s. A long text to a stalled Boss took longer, was killed halfway,
+        stayed unsent in the Boss's box, was pasted again on the retry, and its sender was told it failed."""
+        C = self.m.C
+        worst = 10 + (C.PASTE_WAIT + 5) + C.PASTE_WAIT + 5   # mp's box wait, another sender's turn, the pieces, the Enter
+        self.assertGreater(C.SEND_TIMEOUT, worst)
+        calls = [(f.parent.name, m.group(1)) for f in PLUGINS.glob("*/*.py")
+                 for m in re.finditer(r'MP_BIN, "send".{0,400}?timeout=(\w+)', f.read_text(), re.S)]
+        self.assertGreaterEqual(len(calls), 9)
+        for name, timeout in calls:
+            self.assertTrue(timeout == "SEND_TIMEOUT" or int(timeout) >= C.SEND_TIMEOUT, (name, timeout))
+
     def test_the_owner_rule_is_one_sentence_in_every_plugin_that_carries_it(self):
         found = {re.search(r'^OWNER_RULE = \((.*?)\)$', (PLUGINS / n / f"{n}.py").read_text(), re.S | re.M).group(1)
                  for n in ("voice", "plow-chat", "voice-call", "swarm")}

@@ -473,6 +473,36 @@ class PlowChatTest(unittest.TestCase):
         self.pc.send_to_agent = lambda m, agent=None: self.sent.append(m) or True
         self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
 
+    def test_a_send_that_did_not_finish_is_retried_but_never_told_as_failed(self):
+        """11-08: mp send timed out at 30 s while a stalled Boss was still taking the text, and Camily was
+        told in English that it had not reached the team. It had, twice."""
+        self.pc.poll_chat(self.creds, "cht_a")
+        self.msgs.append({"uid": "m2", "direction": "inbound", "body": "[voice note, transcribed] Eu entrei pela porta",
+                          "chat_uid": "cht_a", "created_at": "2"})
+        self.pc.STARTED -= 300  # overdue: the case that used to warn
+        with mock.patch.object(self.pc, "send_message") as warn:
+            self.pc.send_to_agent = lambda m, agent=None: None   # unknown: it may have reached the Boss
+            self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), -1)
+            self.pc.send_to_agent = lambda m, agent=None: False  # and a refusal after that is no news to them
+            self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), -1)
+        warn.assert_not_called()
+        self.pc.send_to_agent = lambda m, agent=None: self.sent.append(m) or True
+        self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
+        self.assertEqual(1, len(self.sent))
+
+    def test_a_refusal_is_told_in_the_language_they_wrote(self):
+        self.pc.poll_chat(self.creds, "cht_a")
+        self.msgs.append({"uid": "m2", "direction": "inbound", "body": "Cadê minhas coisas? Você consegue ver?",
+                          "chat_uid": "cht_a", "created_at": "2"})
+        self.pc.send_to_agent = lambda m, agent=None: False
+        self.pc.STARTED -= 300
+        with mock.patch.object(self.pc, "send_message") as warn:
+            self.pc.poll_chat(self.creds, "cht_a")
+        warn.assert_called_once_with(self.pc.NOT_YET["pt"], "cht_a")
+        for text, lang in (("Onde ta o boleto que eu preciso pagar?", "pt"), ("¿Dónde está mi pedido? Gracias", "es"),
+                           ("Where is the invoice?", "en"), ("No audio", "en"), ("ok", "en")):
+            self.assertEqual(lang, self.pc.language(text), text)
+
     def test_a_text_that_lands_while_the_boss_comes_back_is_not_warned_about(self):
         """An in-place update restarts the bridge before the Boss: the text waits, nobody is told."""
         self.pc.poll_chat(self.creds, "cht_a")
