@@ -644,15 +644,19 @@ class Bridge:
             return self.answered(h, peer, body, sig)
         # From a person's MyPlow, a message with no agent behind it is that agent's note to its own owner, from a version
         # before this rule: not for here, and nobody to answer.
+        # A message dropped here says so to its sender: with no receipt its mp send waited, printed
+        # "queued" and exited 0, so a script took it as delivered (11-08, Mac 2's auto-posts job).
         if "/" not in str(body.get("from")) and not is_own(peer):
             log("dropped a note from %s, which is paired as another person: it has no agent behind it" % h)
-            return True
+            return self.receipt(h, peer, sig, False, "not sent: %s is paired as another person here, so it takes "
+                                "nothing without a named agent behind it" % h)
         frm, to = str(body.get("from")), str(body.get("to"))
         # A Stop-hook notice comes from the host alone (no agent): parse_agent_id reads a bare name as a session.
         if not (AGENT.fullmatch(frm) and AGENT.fullmatch(to) and frm.split("/")[0] == h
                 and C.parse_agent_id(to)[0] == self.host and "/" in to):
             log("dropped a message from %s: from %s to %s" % (h, frm, to))
-            return True
+            return self.receipt(h, peer, sig, False, "not sent: %s takes only a message from a named agent "
+                                "there to a named agent here (this was from %s to %s)" % (self.host, frm, to))
         # peer was read at the top of this pass: a permission message changed since the last one is in this one.
         # On a card only an agent speaks: the hint goes to whoever gets it, and the thread is the card's board's to accept.
         card = str(body.get("card") or "") if "/" in frm else ""
@@ -735,16 +739,21 @@ class Bridge:
         for tid, (h, sig, at) in list(self.inflight.items()):
             code, st = self.queue("GET", "/task/" + tid)
             if code == 200 and isinstance(st, dict) and st.get("ok") is not None and h in peers:
-                body = {"kind": "receipt", "re": sig, "ok": bool(st["ok"]), "result": str(st.get("result"))[:500],
-                        "ts": time.time(), "n": secrets.token_hex(8)}
-                try:
-                    post(peers[h]["relay"].rstrip("/") + "/put", {"box": box(peers[h]["key"], self.host, h),
-                                                                  "msg": self.sign(peers[h]["key"], body)})
-                except (OSError, ValueError):
+                if not self.receipt(h, peers[h], sig, bool(st["ok"]), st.get("result")):
                     continue        # tried again next pass
             elif time.time() - at < 60:
                 continue
             del self.inflight[tid]
+
+    def receipt(self, h, peer, sig, ok, result):
+        """Tell peer h how its message `sig` ended. False when its relay did not take it (try again)."""
+        body = {"kind": "receipt", "re": sig, "ok": ok, "result": str(result)[:500], "ts": time.time(),
+                "n": secrets.token_hex(8)}
+        try:
+            post(peer["relay"].rstrip("/") + "/put", {"box": box(peer["key"], self.host, h), "msg": self.sign(peer["key"], body)})
+        except (OSError, ValueError):
+            return False
+        return True
 
     def done(self, tid, ok, result):
         self.queue("POST", "/task/result", {"task_id": tid, "ok": ok, "result": result})

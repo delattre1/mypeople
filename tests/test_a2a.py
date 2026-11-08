@@ -465,7 +465,8 @@ class A2ATest(unittest.TestCase):
 
     def test_who_asked_in_time_is_heard_after_this_machine_slept_and_then_the_line_is_gone(self):
         self.beta.accept(self.alpha.invite("Riley"))
-        unused, later = self.alpha.invite(), time.time() + 20 * 60
+        self.alpha.invite()                     # a second line, never used
+        later = time.time() + 20 * 60
         self.assertEqual(2, len(self.alpha.read("keys.json", {})["invites"]))
         with mock.patch.object(self.a2a, "post", side_effect=OSError("relay down")), mock.patch.object(self.a2a.time, "time", lambda: later):
             self.alpha.step()
@@ -525,6 +526,19 @@ class A2ATest(unittest.TestCase):
         [notice] = self.qa.sends()
         self.assertEqual(notice["target_agent"], "alpha/main:eng-1")
         self.assertIn("beta/main:eng-9 was retired 4 h ago", notice["payload"]["message"])
+
+    def test_a_message_dropped_over_there_is_not_sent_here(self):
+        """11-08: Mac 1 held Mac 2 as its own, Mac 2 held Mac 1 as another person. A send with no agent behind it
+        crossed, Mac 2 dropped it without a word, and mp send printed "queued" and exited 0: a script took it as sent."""
+        self.pair()
+        self.alpha.set_own("beta", "test")      # only alpha's side: beta still holds alpha as a person
+        tid = self.qa.submit("send", "beta/main:Boss", {"message": "an auto-post, from no agent"})
+        self.alpha.step()
+        self.beta.step()
+        self.alpha.step()
+        self.assertEqual(self.qb.sends(), [])
+        self.assertEqual(False, self.qa.tasks[tid]["ok"])
+        self.assertIn("not sent: alpha is paired as another person here", self.qa.tasks[tid]["result"])
 
     def test_only_send_crosses_and_forgeries_drop(self):
         self.pair()

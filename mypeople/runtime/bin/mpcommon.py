@@ -1036,7 +1036,9 @@ def tmux_send_message(target, message):
     lock_path = os.path.join(CFG["INSTALL_DIR"], "run", "send-locks", re.sub(r"[^\w.-]", "_", target) + ".lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     with open(lock_path, "a+") as lock:
-        give_up = time.time() + PASTE_WAIT + 10   # a stuck sender must not stop every other one
+        # A stuck sender must not stop every other one, and waiting plus delivering stays under the
+        # 60 s a Swarm bridge gives one mp send before it kills it and sends again (a double).
+        give_up = time.time() + 20
         while True:
             try:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1077,7 +1079,14 @@ def _send_message(target, message):
                 tmux("delete-buffer", "-b", buf)
                 break
             pasted += 1  # a retry from here is for what is left: pasting a piece again would double it
-            while before is not None and box() == before and time.time() < deadline:
+            # Landed = the box ends with this piece, so the agent has read it and the pty is empty
+            # again. A box that merely changed is not proof: the Boss's re-wraps on every resize of
+            # its window, and pieces sent on that piled up in the pty and were split again (11-07).
+            tail = re.sub(r"\s", "", pieces[pasted - 1])[-24:]
+            while before is not None and time.time() < deadline:
+                now = box()
+                if now is not None and now != before and re.sub(r"\s", "", "".join(now)).endswith(tail):
+                    break
                 time.sleep(0.05)
         if pasted < len(pieces):
             time.sleep(0.3)

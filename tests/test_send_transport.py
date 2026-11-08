@@ -130,12 +130,17 @@ import base64, json, os, sys, time, tty
 log, fd = open(sys.argv[1], "a"), sys.stdin.fileno()
 tty.setraw(fd)
 got = b""
-def draw():   # Claude Code's input box, which grows with what came in: a rule, its size and end, a rule
-    tail = got[-50:].decode("utf-8", "replace").replace("\x1b", "").replace("\r", " ").replace("\n", " ")
-    os.write(1, ("\x1b[?2004h\x1b[2J\x1b[H" + "─" * 40 + "\r\n❯ [%d] " % len(got) + tail + "\r\n" + "─" * 40 + "\r\n").encode())
+tick = 0
+def draw():   # Claude Code's input box: a rule, a redraw count, the end of what came in, a rule
+    text = got.replace(b"\x1b[200~", b"").replace(b"\x1b[201~", b"")
+    tail = text[-50:].decode("utf-8", "replace").replace("\r", " ").replace("\n", " ")
+    os.write(1, ("\x1b[?2004h\x1b[2J\x1b[H" + "─" * 40 + "\r\n❯ [%d] " % tick + tail + "\r\n" + "─" * 40 + "\r\n").encode())
 draw()
 while b"\x04" not in got:
-    time.sleep(0.3)   # a busy agent: nothing is read for this long, so the pty fills behind it
+    for _ in range(3):   # a busy agent: nothing is read for 0.3 s, so the pty fills behind it, while
+        tick += 1        # its box keeps redrawing (the Boss's re-wraps on every resize of its window)
+        draw()
+        time.sleep(0.1)
     b = os.read(fd, 65536)
     log.write(json.dumps(base64.b64encode(b).decode()) + "\n"); log.flush()
     got += b
@@ -187,6 +192,7 @@ class SlowClaudeTests(unittest.TestCase):
         self.assertGreater(len(reads), 3)
         for r in reads:
             self.assertEqual(r.count(PASTE_START), r.count(PASTE_END), "a paste spanned two reads: %r" % r[:80])
+            self.assertLessEqual(r.count(PASTE_START), 1, "pieces piled up in the pty: %r" % r[:80])
         raw = b"".join(reads).replace(b"\x04", b"")
         pastes = [p.split(PASTE_END)[0] for p in raw.split(PASTE_START)[1:]]
         self.assertGreater(len(pastes), 1)

@@ -9,7 +9,6 @@ new message, about five minutes in the live run). The login alone is meant to st
 Pinned here: bundle-runtime.sh installs the launcher into bin/, the launcher runs the real CLI out of the bundle's own layout
 (bin/, python/bin/python3, pylib/), and the app puts runtime/bin on the PATH the supervisor inherits.
 """
-import os
 from pathlib import Path
 import shutil
 import subprocess
