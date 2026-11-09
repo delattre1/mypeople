@@ -1,0 +1,16 @@
+{
+  "microphone": null,
+  "speaker": null,
+  "cue": "ei Boss",
+  "backend": "codex",
+  "venv": "~/pirata-voz",
+  "logs": "~/pirata-logs",
+  "install_dir": "~/.local/share/mypeople",
+  "mypeople_config": "~/.config/mypeople/queue.env",
+  "stt_port": 8103,
+  "tts_port": 8975,
+  "tts_speed": 1.25,
+  "restart_hour": 4,
+  "restart_minute": 0,
+  "autostart_microphone": true
+}

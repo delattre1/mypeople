@@ -88,6 +88,8 @@ Default state is `~/.local/share/mypeople`; config is `~/.config/mypeople/queue.
 the default Boss backend later with `mypeople up --backend claude|codex --detach`. Existing agents
 always retain their original backend and session when revived.
 
+For optional local Portuguese voice on Apple Silicon (Metal), see [the Mac voice setup](voz/README.md).
+
 ## Python / uv
 
 On a machine that already has Claude Code or Codex, plus tmux, ttyd, and asciinema:

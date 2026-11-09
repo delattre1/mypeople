@@ -1,0 +1,12 @@
+#!/bin/bash
+# Match the same trailing whitespace as the macOS pgrep compatibility wrapper.
+set -euo pipefail
+voice_args=("$@")
+if [ "${#voice_args[@]}" -gt 0 ]; then
+  voice_last=$((${#voice_args[@]} - 1))
+  voice_pattern="${voice_args[$voice_last]}"
+  case "$voice_pattern" in
+    *\$) voice_args[$voice_last]="${voice_pattern%\$}[[:space:]]*$" ;;
+  esac
+fi
+exec /usr/bin/pkill "${voice_args[@]}"

@@ -1,0 +1,13 @@
+#!/bin/bash
+# macOS includes trailing spaces in the command line matched by pgrep -f.
+# MyPlow uses "serve$" to distinguish a daemon from one-shot plugin commands.
+set -euo pipefail
+voice_args=("$@")
+if [ "${#voice_args[@]}" -gt 0 ]; then
+  voice_last=$((${#voice_args[@]} - 1))
+  voice_pattern="${voice_args[$voice_last]}"
+  case "$voice_pattern" in
+    *\$) voice_args[$voice_last]="${voice_pattern%\$}[[:space:]]*$" ;;
+  esac
+fi
+exec /usr/bin/pgrep "${voice_args[@]}"
