@@ -4,10 +4,13 @@ Covers the contract that `mp spawn --role boss|engineer` composes a versioned, d
 bundle (personality + Skills + hooks + toolset + policy), mounts it through each backend's own
 native mechanism, and that no path can yield a Boss without one.
 """
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import tempfile
 import tomllib
 import unittest
@@ -345,6 +348,70 @@ class FirstRunTests(unittest.TestCase):
             reg = json.loads((install / "roles" / "registry.json").read_text())
             for rel in reg["roles"].values():
                 self.assertTrue((install / "roles" / rel).is_file())
+
+
+class RoleAuthoringTests(unittest.TestCase):
+    """`mp role new` is how the agent-creator skill authors a role. It used to be newrole.py in the
+    owner's own workspace, so a Windows user following the skill had nothing to run."""
+
+    def test_registered_roles_name_no_script_the_product_does_not_ship(self):
+        reg = json.loads((ROLES / "registry.json").read_text())
+        for role, rel in reg["roles"].items():
+            spec = json.loads((ROLES / rel).read_text())["spec"]
+            for ref in [spec["personalityRef"]] + [s["ref"] for s in spec["skills"]]:
+                body = (ROLES / ref).read_text()
+                for word in ("newrole.py", "probe.py", "/.local/share/mypeople/roles"):
+                    self.assertNotIn(word, body, "%s (role %s) points at %s" % (ref, role, word))
+
+    def author(self, spec, extra_files=()):
+        """Run `mp role new` on a copy of the packaged store; returns (rc, store, stderr)."""
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        mp = load_mp(td.name)
+        store = Path(td.name) / "roles"
+        shutil.copytree(ROLES, store)
+        mp.ROLE_DIR = str(store)
+        work = Path(td.name) / "work"
+        work.mkdir()
+        for name, text in extra_files:
+            (work / name).write_text(text, encoding="utf-8")
+        (work / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = mp.do_role(["new", str(work / "spec.json")])
+        return rc, store, err.getvalue(), mp
+
+    SPEC = {"name": "hello-world", "version": "1.0.0", "personalityFile": "p.md", "why": "fixture",
+            "contract": {"assert": {"type": "exact", "value": "Hello World"}}}
+
+    def test_a_spec_becomes_a_spawnable_role(self):
+        rc, store, err, mp = self.author(self.SPEC, [("p.md", "You only ever reply: Hello World\n")])
+        self.assertEqual(rc, 0, err)
+        reg = json.loads((store / "registry.json").read_text())
+        self.assertEqual(reg["roles"]["hello-world"], "profiles/hello-world/1.0.0.json")
+        prof = json.loads((store / "profiles/hello-world/1.0.0.json").read_text())
+        self.assertEqual(prof["spec"]["contract"]["probes"], 10)   # the house standard when omitted
+        self.assertEqual(prof["metadata"]["why"], "fixture")
+        self.assertEqual(mp.resolve_role("hello-world", "claude")["role"], "hello-world")
+
+    def test_no_answer_key_no_role(self):
+        spec = dict(self.SPEC, contract={"assert": {"type": "regex", "value": "^Hello"}})
+        rc, store, err, _ = self.author(spec, [("p.md", "x\n")])
+        self.assertEqual(rc, 1)
+        self.assertNotIn("hello-world", json.loads((store / "registry.json").read_text())["roles"])
+
+    def test_an_existing_version_is_never_rewritten(self):
+        spec = dict(self.SPEC, name="tester", version="6.2.0")
+        before = (ROLES / "profiles/tester/6.2.0.json").read_bytes()
+        rc, store, err, _ = self.author(spec, [("p.md", "x\n")])
+        self.assertEqual(rc, 1)
+        self.assertEqual((store / "profiles/tester/6.2.0.json").read_bytes(), before)
+
+    def test_a_role_the_resolver_refuses_is_rolled_back(self):
+        spec = dict(self.SPEC, extraSkills=["skills/not-shipped/1.0.0/SKILL.md"])
+        rc, store, err, _ = self.author(spec, [("p.md", "x\n")])
+        self.assertEqual(rc, 1, err)
+        self.assertEqual((store / "registry.json").read_text(), (ROLES / "registry.json").read_text())
 
 
 if __name__ == "__main__":

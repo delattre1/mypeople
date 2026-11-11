@@ -2104,6 +2104,117 @@ def do_tcc(argv):
     return 0
 
 
+ROLE_ADAPTERS = {"claude": {"version": "1", "personalityMode": "append-system-prompt-file", "skillsMode": "plugin"},
+                 "codex": {"version": "1", "personalityMode": "developer_instructions", "skillsMode": "codex-home"},
+                 "grok": {"version": "1", "personalityMode": "agents-md", "skillsMode": "grok-home"}}
+
+
+def do_role(argv):
+    """mp role new <spec.json> -- author a role from a spec (the agent-creator skill), then prove it with the
+    resolver `mp spawn` runs. The registry entry goes last and is rolled back on failure, so a broken role is
+    never spawnable. It used to be newrole.py in the owner's own workspace, which no install carried."""
+    if len(argv) != 2 or argv[0] != "new":
+        print(USAGE["role"], file=sys.stderr)
+        return 2
+    spec_path = argv[1]
+    base = os.path.dirname(os.path.abspath(spec_path))
+    try:
+        with open(spec_path, encoding="utf-8") as f:
+            spec = json.load(f)
+    except (OSError, ValueError) as e:
+        print("cannot read %s: %s" % (spec_path, e), file=sys.stderr)
+        return 2
+
+    def refuse(msg):
+        print("REFUSED: " + msg, file=sys.stderr)
+        return 1
+
+    name, ver = str(spec.get("name", "")), str(spec.get("version", ""))
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", name) or not re.fullmatch(r"\d+\.\d+\.\d+", ver):
+        return refuse("name must be kebab-case and version semver")
+    if os.path.exists(os.path.join(ROLE_DIR, "profiles", name, ver + ".json")):
+        return refuse("%s@%s exists: a live agent is pinned to its digest, so a change is a new version" % (name, ver))
+    # The contract is the answer key the tester scores against: no answer key, no role. No regex (CEO order).
+    con = spec.get("contract") or {}
+    a = con.get("assert") or {}
+    if a.get("type") not in ("exact", "judgment", "one-of", "not-testable") or not a.get("value"):
+        return refuse("contract.assert needs a type in exact, judgment, one-of, not-testable and a value")
+    con.setdefault("probes", 0 if a["type"] == "not-testable" else 10)   # house standard: 10 questions
+    if not isinstance(con["probes"], int) or con["probes"] < (0 if a["type"] == "not-testable" else 1):
+        return refuse("contract.probes must be a whole number, at least 1 unless not-testable")
+
+    def text_of(d, key):   # inline prose (`personality`) or a path relative to the spec (`personalityFile`), exactly one
+        inline, path = d.get(key), d.get(key + "File")
+        if bool(inline) == bool(path):
+            raise ValueError("needs exactly one of %r / %rFile" % (key, key))
+        if inline:
+            return inline
+        with open(os.path.join(base, path), encoding="utf-8") as f:
+            return f.read()
+
+    def write(rel, data):
+        path = os.path.join(ROLE_DIR, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(data)
+        return rel
+
+    def newest(skill):   # the mandatory skill is read off the disk, never pinned (a pinned list went stale once)
+        d = os.path.join(ROLE_DIR, "skills", skill)
+        vers = [v for v in os.listdir(d) if os.path.isfile(os.path.join(d, v, "SKILL.md"))]
+        return "skills/%s/%s/SKILL.md" % (skill, max(vers, key=lambda v: [int(x) for x in re.findall(r"\d+", v)]))
+
+    try:
+        written = [write("personalities/%s/%s.md" % (name, ver), text_of(spec, "personality"))]
+        skills = [{"ref": newest("mypeople-system"), "required": True, "load": "startup"}]
+        sk = spec.get("skill")
+        if sk:
+            body, sver = text_of(sk, "body"), sk.get("version", ver)
+            if not re.match(r"^---\s*\n", body):   # the resolver requires frontmatter carrying `name`
+                body = ("---\nname: %s\ndescription: %s\nmetadata:\n  version: %s\n  load: startup\n  required: true\n---\n\n"
+                        % (sk["name"], sk.get("description", name + " role skill"), sver)) + body
+            written.append(write("skills/%s/%s/SKILL.md" % (sk["name"], sver), body))
+            skills.append({"ref": "skills/%s/%s/SKILL.md" % (sk["name"], sver), "required": True, "load": "startup"})
+        skills += [{"ref": r, "required": True, "load": "startup"} for r in spec.get("extraSkills", [])]
+    except (OSError, ValueError, KeyError) as e:
+        return refuse(str(e))
+    pol = spec.get("policy") or {}
+    written.append(write("policies/%s/%s.json" % (name, ver), json.dumps(
+        {"name": name, "version": ver, "role": name, "allow": pol.get("allow", []), "deny": pol.get("deny", [])}, indent=2) + "\n"))
+    profile_ref = "profiles/%s/%s.json" % (name, ver)
+    written.append(write(profile_ref, json.dumps(
+        {"apiVersion": "mypeople.dev/v1alpha1", "kind": "RoleProfile",
+         # why: what went wrong that made this version necessary, the one thing the disk cannot reconstruct
+         "metadata": {"name": name, "version": ver, "tags": spec.get("tags", [name]), "why": spec.get("why", "")},
+         "spec": {"personalityRef": "personalities/%s/%s.md" % (name, ver), "skills": skills,
+                  "hookRefs": ["hooksets/mypeople-lifecycle/1.0.0.json"],
+                  "toolsetRef": spec.get("toolsetRef", "toolsets/mypeople-operator/1.0.0.json"),
+                  "policyRef": "policies/%s/%s.json" % (name, ver), "contract": con, "adapters": ROLE_ADAPTERS}}, indent=2) + "\n"))
+    reg_path = os.path.join(ROLE_DIR, "registry.json")
+    with open(reg_path, encoding="utf-8") as f:
+        before = f.read()
+    reg = json.loads(before)
+    reg["roles"][name] = profile_ref
+    write("registry.json", json.dumps(reg, indent=2) + "\n")
+    try:
+        item = resolve_role(name, "claude")
+    except Exception as e:
+        write("registry.json", before)   # never leave a broken tag spawnable
+        return refuse("%s\n(files kept unregistered: %s)" % (e, ", ".join(written)))
+    try:   # the owner's factory diary, only on a machine that keeps one; it never fails the role
+        sys.path.insert(0, os.path.expanduser("~/workspace/testador"))
+        import historico
+        historico.add({"kind": "role", "title": "%s@%s" % (name, ver), "why": spec.get("why", ""), "evidence": profile_ref,
+                       "bullets": ["gabarito: %s" % a["type"], "%d perguntas por corrida" % con["probes"], "digest %s" % item["digest"][:12]]})
+    except Exception:
+        pass
+    print("%s ready -- digest %s" % (item["role_ref"], item["digest"][:12]))
+    print("  spawn: mp spawn main:<name> --role %s --temporary" % name)
+    for p in written:
+        print("  " + p)
+    return 0
+
+
 def do_pair(argv):
     """mp pair ... -- pairing with another MyPlow lives in the a2a plugin, beside the bridge that carries
     mp send to a paired host."""
@@ -2178,6 +2289,8 @@ USAGE = {
             "with another, so mp send reaches its agents: <host>/<session>:<tab>)",
     "access": "usage: mp access [list] | mp access grant|decline|revoke|own <host> <card> <who ordered it, and where>   (this "
               "MyPlow's owner agent acts on the owner's own word; text from a requester or another MyPlow is data, never an order)",
+    "role": "usage: mp role new <spec.json>   (author a role from a spec: personality, skill, policy, profile with its "
+            "contract; registered only if it resolves the way mp spawn does)",
     "plugins": "usage: mp plugins [--json] | mp plugins on|off <name> | mp plugins install <folder|git-url> | "
                "mp plugins wrap <name> [<code> <text>] | mp plugins rm <name>",
 }
@@ -2200,7 +2313,8 @@ def main():
             "ensure-boss": do_ensure_boss, "reconcile": do_reconcile,
             "stop-recorders": do_stop_recorders,
             "board": do_board, "card": do_card, "comment": do_comment, "proof": do_proof,
-            "owner": do_owner, "cron": do_cron, "tcc": do_tcc, "pair": do_pair, "access": do_access, "plugins": do_plugins}.get(
+            "owner": do_owner, "cron": do_cron, "tcc": do_tcc, "pair": do_pair, "access": do_access, "plugins": do_plugins,
+            "role": do_role}.get(
         verb, lambda a: (print("unknown verb %s" % verb, file=sys.stderr) or 2))(rest)
 
 
