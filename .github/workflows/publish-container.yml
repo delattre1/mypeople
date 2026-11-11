@@ -140,6 +140,35 @@ jobs:
           set -euo pipefail
           docker buildx imagetools inspect "${IMAGE}:${{ steps.version.outputs.value }}"
 
+  # The Kitchen kind (new-myplow's Kitchen homes) runs this same image under its own name: a Kitchen home is not a
+  # MyPlow (Daniel 11-11, card 42d657d0fe). Same digest, no rebuild, every release, so new-myplow never points at a
+  # version without it. Its own job: a failure here never holds back the cloud image. The package was made public by
+  # hand once and gives this repo's Actions write access (package settings, Manage Actions access).
+  kitchen:
+    name: kitchen name
+    needs: merge
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag ghcr.io/delattre1/kitchen on the same digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          v='${{ needs.merge.outputs.version }}'
+          docker buildx imagetools create -t "ghcr.io/delattre1/kitchen:$v" "${IMAGE}:$v"
+          a=$(docker buildx imagetools inspect --raw "${IMAGE}:$v" | sha256sum)
+          b=$(docker buildx imagetools inspect --raw "ghcr.io/delattre1/kitchen:$v" | sha256sum)
+          [ "$a" = "$b" ] || { echo "ghcr.io/delattre1/kitchen:$v is not the digest of ${IMAGE}:$v"; exit 1; }
+          echo "Kitchen image: ghcr.io/delattre1/kitchen:$v (same digest as ${IMAGE}:$v)" | tee -a "$GITHUB_STEP_SUMMARY"
+
   # MyPlow as a Plow cloud agent (cloud/Dockerfile), on top of the release just published. Its own
   # package, whose :latest IS the cloud image: exe.dev boots <repo>:latest whatever digest Plow pins
   # (proved 2026-10-01: a 5.20.2 digest booted 5.20.3), so inside this repo the pin got the base.
