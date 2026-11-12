@@ -11,8 +11,11 @@ comes from the account's own Agent Card (swarm.owner).
 
   swarm.py setup <account> [emoji]                  act as this account (`swarm accounts list`); emoji claims a message, 👀 if left out
   swarm.py serve                                    the bridge (supervise.sh runs it)
-  swarm.py reply <room> <event_id> [--file PATH] <text>  answer in that message's thread
-  swarm.py claim <room> <event_id>                  react to a message you take on, before the work
+  swarm.py reply <room> <event_id> [--file PATH] [--priority REF|NAME] [--skip-priority] <text>  answer in that message's thread
+  swarm.py claim <room> <event_id> [--priority REF|NAME] [--skip-priority]  react to a message you take on, before the work
+      A reply inherits its thread's priority. If Swarm refuses one for naming none, the room's entry in
+      state/swarm/priorities.json is used; a room without one is not sent (pass --priority, or edit the file).
+      --skip-priority sends with none: a real exception only, logged by the server.
   swarm.py join <room>                              accept an invitation (a room's #room:server or !id)
   swarm.py attachment <room> <event_id>             download what a message has attached
   swarm.py directory                                the company's members and their cards
@@ -310,8 +313,8 @@ def bridge_running():
         return False
 
 
-def ask(tool, args):
-    """One tool call made by the running bridge, which holds the account; waits up to 2 minutes for how it went."""
+def call(tool, args):
+    """One tool call made by the running bridge, which holds the account: (ok, text), waiting up to 2 minutes."""
     name = "%020d" % time.time_ns()
     write_json(OUTBOX / (name + ".json"), {"tool": tool, "args": args})
     done = OUTBOX / (name + ".done")
@@ -319,28 +322,82 @@ def ask(tool, args):
         if done.exists():
             r = read_json(done, {})
             done.unlink()
-            print(r.get("text") or ("done" if r.get("ok") else "failed"))
-            return 0 if r.get("ok") else 1
+            return bool(r.get("ok")), r.get("text") or ("done" if r.get("ok") else "failed")
         time.sleep(0.5)
-    print("not done: the Swarm bridge did not answer in 2 minutes%s; it is still queued for it"
-          % ("" if bridge_running() else " (it is not running: mp plugins on swarm)"))
+    return False, ("not done: the Swarm bridge did not answer in 2 minutes%s; it is still queued for it"
+                   % ("" if bridge_running() else " (it is not running: mp plugins on swarm)"))
+
+
+def ask(tool, args):
+    ok, text = call(tool, args)
+    print(text)
+    return 0 if ok else 1
+
+
+PRIORITIES = STATE / "priorities.json"   # {"rooms": {room: ref}, "names": {short: ref}}: the Boss edits it
+
+
+def priority_refusal(text):
+    """Swarm's answer to a send or react that names no priority and inherits none: {sent: false, note}."""
+    try:
+        r = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(r, dict):
+        return None
+    note = str(r.get("note", ""))
+    return r if r.get("sent") is False or (note.startswith("Not sent") and "priority" in note) else None
+
+
+def with_priority(tool, args, room, priority=None, skip=False):
+    """swarm 0.1.9-97 ties every message to a priority. Named: that one. Otherwise nothing is attached first, so a
+    reply inherits its thread's; only when Swarm refuses for want of one is the room's entry in PRIORITIES used, and a
+    room without one is not sent. --skip-priority is the server's logged exception, never a default."""
+    known = read_json(PRIORITIES, {})
+    if skip:
+        return ask(tool, dict(args, dangerously_skip_attaching_a_priority=True))
+    if priority:
+        return ask(tool, dict(args, priority=known.get("names", {}).get(priority, priority)))
+    ok, text = call(tool, args)
+    refusal = priority_refusal(text) if ok else None
+    if refusal is None or "priority" not in str(refusal.get("note", "")):
+        print(text)
+        return 0 if ok else 1
+    ref = known.get("rooms", {}).get(room)
+    if ref:
+        return ask(tool, dict(args, priority=ref))
+    print(text)
+    print("swarm: not sent: %s has no priority. Pass --priority REF (or a name from %s), or add the room to that file."
+          % (room, PRIORITIES))
     return 1
 
 
+def options(args, start):
+    """--file PATH, --priority REF and --skip-priority after the first `start` arguments; the rest is the text."""
+    head, rest, got = args[:start], args[start:], {"file": None, "priority": None, "skip": False}
+    while rest and rest[0] in ("--file", "--priority", "--skip-priority"):
+        if rest[0] == "--skip-priority":
+            got["skip"], rest = True, rest[1:]
+        elif len(rest) > 1:
+            got[rest[0][2:]], rest = rest[1], rest[2:]
+        else:
+            break
+    return head, rest, got
+
+
 def reply(args):
-    file = None
-    while len(args) > 3 and args[2] == "--file":
-        file = args[3]
-        args = args[:2] + args[4:]
-    if len(args) < 3:
-        raise SystemExit("usage: swarm.py reply <room> <event_id> [--file PATH] <text>")
-    return ask("send", {k: v for k, v in (("room", args[0]), ("in_reply_to", args[1]), ("text", " ".join(args[2:])),
-                                          ("file", file)) if v})
+    (room, event), words, o = (options(args, 2) if len(args) >= 2 else ((None, None), [], {}))
+    if not words:
+        raise SystemExit("usage: swarm.py reply <room> <event_id> [--file PATH] [--priority REF|NAME] [--skip-priority] <text>")
+    send = {k: v for k, v in (("room", room), ("in_reply_to", event), ("text", " ".join(words)), ("file", o["file"])) if v}
+    return with_priority("send", send, room, o["priority"], o["skip"])
 
 
-def claim(room, event):
+def claim(room, event, *opts):
     emoji = config().get("emoji")
-    return ask("react", dict({"room": room, "event_id": event}, **({"emoji": emoji} if emoji else {})))
+    _, _, o = options([room, event, *opts], 2)
+    return with_priority("react", dict({"room": room, "event_id": event}, **({"emoji": emoji} if emoji else {})), room,
+                         o["priority"], o["skip"])
 
 
 def setup(account, emoji=None):
@@ -357,7 +414,7 @@ def main(argv):
         serve()
     elif cmd == "reply":
         return reply(args)
-    elif cmd == "claim" and len(args) == 2:
+    elif cmd == "claim" and len(args) >= 2:
         return claim(*args)
     elif cmd == "join" and len(args) == 1:
         return ask("join", {"room": args[0], "account": config()["account"]})

@@ -152,5 +152,38 @@ class SwarmPlugin(unittest.TestCase):
         self.assertEqual([], list((self.dir / "state" / "spool").glob("*")))
 
 
+    # swarm 0.1.9-97: every message serves a priority. Inherit first, then the room map, else fail loudly; skip only when asked.
+    REFUSED = json.dumps({"sent": False, "account": ME, "room": GENERAL, "note": "Not sent: name the priority this serves (priority=<ref>)"})
+
+    def drive(self, answers, fn, *args):
+        sent = []
+        with mock.patch.object(self.s, "call", side_effect=lambda tool, a: sent.append((tool, a)) or answers.pop(0)):
+            return fn(*args), sent
+
+    def test_a_reply_goes_out_bare_so_it_inherits_its_threads_priority(self):
+        rc, sent = self.drive([(True, '{"event_id":"$x"}')], self.s.reply, [GENERAL, "$e", "on", "it"])
+        self.assertEqual(0, rc)
+        self.assertEqual([("send", {"room": GENERAL, "in_reply_to": "$e", "text": "on it"})], sent)
+
+    def test_a_refusal_for_want_of_a_priority_retries_with_the_rooms_entry(self):
+        self.s.write_json(self.s.PRIORITIES, {"rooms": {GENERAL: "!r:x/ops"}})
+        rc, sent = self.drive([(True, self.REFUSED), (True, '{"event_id":"$x"}')], self.s.reply, [GENERAL, "$e", "hi"])
+        self.assertEqual(0, rc)
+        self.assertEqual([None, "!r:x/ops"], [a.get("priority") for _, a in sent])
+
+    def test_a_room_with_no_entry_is_not_sent_and_says_so(self):
+        rc, sent = self.drive([(True, self.REFUSED)], self.s.reply, [GENERAL, "$e", "hi"])
+        self.assertEqual(1, rc, "fails loudly instead of skipping")
+        self.assertEqual(1, len(sent))
+        self.assertNotIn("dangerously_skip_attaching_a_priority", sent[0][1])
+
+    def test_a_named_priority_and_the_skip_are_only_what_was_asked(self):
+        self.s.write_json(self.s.PRIORITIES, {"names": {"android": "!r:x/85298c6b"}})
+        rc, sent = self.drive([(True, "{}")], self.s.reply, [GENERAL, "$e", "--priority", "android", "hi"])
+        self.assertEqual((0, "!r:x/85298c6b", "hi"), (rc, sent[0][1]["priority"], sent[0][1]["text"]))
+        rc, sent = self.drive([(True, "{}")], self.s.claim, GENERAL, "$e", "--skip-priority")
+        self.assertEqual(("react", True), (sent[0][0], sent[0][1]["dangerously_skip_attaching_a_priority"]))
+
+
 if __name__ == "__main__":
     unittest.main()
