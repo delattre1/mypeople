@@ -37,6 +37,11 @@ elif sys.argv[1:] == ["mcp", "hermes"]:
             log.write(json.dumps(m["params"]) + "\n"); log.flush()
         elif m.get("method") == "tools/call":
             log.write(json.dumps(m["params"], ensure_ascii=False) + "\n"); log.flush()
+            if m["params"]["name"] == "ask":      # it asks the client something and waits for the answer
+                say({"id": "q1", "method": "elicitation/create", "params": {}})
+                log.write(sys.stdin.readline()); log.flush()
+            if m["params"]["name"] == "late":
+                import time; time.sleep(0.4)
             joined = {"account": ME, "members": [{"user_id": ME, "card": {"swarm.owner": OWNER}}, {"user_id": OWNER}]}
             say({"id": m["id"], "result": {"content": [{"type": "text", "text": json.dumps(joined) if m["params"]["name"] == "join" else "ok"}]}})
             if m["params"]["name"] == "join" and m["params"]["arguments"]["room"] == GENERAL:
@@ -151,6 +156,26 @@ class SwarmPlugin(unittest.TestCase):
         self.assertEqual([], list((self.dir / "state" / "outbox").glob("*")))
         self.assertEqual([], list((self.dir / "state" / "spool").glob("*")))
 
+
+    def test_a_late_answer_and_a_question_from_swarm_are_logged_and_never_block(self):
+        said = []
+        with mock.patch.object(self.s, "log", said.append):
+            mcp = self.s.Mcp(lambda m: None)
+            threading.Thread(target=mcp.read, daemon=True).start()
+            self.assertEqual((True, "ok"), mcp.tool("ask", {}, timeout=5), "its question is refused, so the call still ends")
+            with self.assertRaises(TimeoutError):
+                mcp.tool("late", {}, timeout=0.1)
+            for _ in range(60):
+                if any("too late" in x for x in said):
+                    break
+                time.sleep(0.05)
+            mcp.p.stdin.close()
+            mcp.p.wait(5)
+            mcp.err.close()
+        self.assertEqual({"code": -32601, "message": "method not found"}, [c for c in self.calls_made() if c.get("id") == "q1"][0]["error"])
+        self.assertTrue(any("asked elicitation/create" in x for x in said), said)
+        self.assertTrue(any("did not answer tools/call late" in x for x in said), said)
+        self.assertTrue(any("answered tools/call late after" in x and '"ok"' in x for x in said), said)
 
     # swarm 0.1.9-97: every message serves a priority. Inherit first, then the room map, else fail loudly; skip only when asked.
     REFUSED = json.dumps({"sent": False, "account": ME, "room": GENERAL, "note": "Not sent: name the priority this serves (priority=<ref>)"})

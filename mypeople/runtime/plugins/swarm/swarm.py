@@ -175,6 +175,7 @@ class Mcp:
         self.p = subprocess.Popen([swarm_bin(), "mcp", "hermes"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=self.err, text=True, bufsize=1, env=dict(os.environ, SWARM_PLUGIN="1"))
         self.on_message, self.waiting, self.ids, self.wlock = on_message, {}, itertools.count(1), threading.Lock()
+        self.gave_up = {}   # id -> (when asked, what): an answer that comes after the wait ended is logged, not lost unseen
 
     def write(self, msg):
         with self.wlock:
@@ -185,8 +186,12 @@ class Mcp:
         rid, done = next(self.ids), threading.Event()
         self.waiting[rid] = [done, None]
         self.write({"id": rid, "method": method, "params": params})
+        asked = time.time()
         if not done.wait(timeout):
             self.waiting.pop(rid, None)
+            what = "%s %s" % (method, params.get("name", "")) if method == "tools/call" else method
+            self.gave_up[rid] = (asked, what)
+            log("swarm mcp did not answer %s in %d s" % (what, timeout))
             raise TimeoutError("swarm mcp did not answer %s" % method)
         return self.waiting.pop(rid)[1]
 
@@ -203,14 +208,24 @@ class Mcp:
             try:
                 m = json.loads(line)
             except ValueError:
+                log("swarm mcp wrote a line that is not JSON (%d chars)" % len(line))
+                continue
+            if not isinstance(m, dict):
                 continue
             if m.get("method") == "notifications/swarm/deliver":
                 p = m.get("params") or {}
                 self.on_message(parse(p.get("text")))
                 self.write({"method": "notifications/swarm/delivered", "params": {"id": p.get("id")}})
-            elif m.get("id") in self.waiting:
+            elif m.get("id") in self.waiting and "method" not in m:
                 self.waiting[m["id"]][1] = m
                 self.waiting[m["id"]][0].set()
+            elif "method" in m and "id" in m:   # it asks this client something: say no, or it may wait for ever
+                log("swarm mcp asked %s: answered that this client has no such method" % m["method"])
+                self.write({"id": m["id"], "error": {"code": -32601, "message": "method not found"}})
+            elif m.get("id") in self.gave_up:
+                asked, what = self.gave_up.pop(m["id"])
+                log("swarm mcp answered %s after %d s, too late for the caller: %s"
+                    % (what, time.time() - asked, json.dumps(m.get("error") or m.get("result"), ensure_ascii=False)[:300]))
         for w in list(self.waiting.values()):
             w[0].set()
         return self.p.wait()
