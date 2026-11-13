@@ -18,6 +18,7 @@ comes from the account's own Agent Card (swarm.owner).
       A reply inherits its thread's priority. If Swarm refuses one for naming none, the room's entry in
       state/swarm/priorities.json is used; a room without one is not sent (pass --priority, or edit the file).
       --skip-priority sends with none: a real exception only, logged by the server.
+      Both print swarm's answer: "sent": true with its event_id, or "sent": false with why (and exit 1).
   swarm.py join <room>                              accept an invitation (a room's #room:server or !id)
   swarm.py attachment <room> <event_id>             download what a message has attached
   swarm.py history <room> [thread_event_id]         the room's last 20 messages, or that thread's
@@ -416,10 +417,26 @@ def call(tool, args):
         if done.exists():
             r = read_json(done, {})
             done.unlink()
-            return bool(r.get("ok")), r.get("text") or ("done" if r.get("ok") else "failed")
+            ok, text = bool(r.get("ok")), r.get("text") or ("done" if r.get("ok") else "failed")
+            return went(text) if ok and tool in ("send", "react") else (ok, text)
         time.sleep(0.5)
-    return False, ("not done: the Swarm bridge did not answer in 2 minutes%s; it is still queued for it"
-                   % ("" if bridge_running() else " (it is not running: mp plugins on swarm)"))
+    return False, ("not done: the Swarm bridge did not answer in 2 minutes%s; it is still queued and goes when the bridge takes "
+                   "it, so do not send it again" % ("" if bridge_running() else " (it is not running: mp plugins on swarm)"))
+
+
+def went(text):
+    """(sent, text) of a send or react swarm answered. Swarm says "sent" only to refuse ("sent": false with unseen, cards or a
+    note), so a good send printed no "sent" at all, read as not sent, and went out twice (11-13). Now it says "sent": true;
+    a refusal is printed as swarm gave it, and fails."""
+    try:
+        r = json.loads(text)
+    except ValueError:
+        r = None
+    if not isinstance(r, dict):
+        return True, json.dumps({"sent": True, "answer": text}, ensure_ascii=False)
+    if r.get("sent") is False or ("sent" not in r and str(r.get("note", "")).startswith("Not sent")):
+        return False, text
+    return True, json.dumps(dict({"sent": True}, **r), ensure_ascii=False)
 
 
 def ask(tool, args):
@@ -453,7 +470,7 @@ def with_priority(tool, args, room, priority=None, skip=False):
     if priority:
         return ask(tool, dict(args, priority=known.get("names", {}).get(priority, priority)))
     ok, text = call(tool, args)
-    refusal = priority_refusal(text) if ok else None
+    refusal = priority_refusal(text)
     if refusal is None or "priority" not in str(refusal.get("note", "")):
         print(text)
         return 0 if ok else 1

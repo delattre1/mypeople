@@ -2,6 +2,7 @@
 known from the Agent Card and never from an on-behalf-of claim, and answers and claims go back through the same session into the
 message's thread. A stub `swarm` plays the CLI and its plugin protocol: nothing here reaches a server."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -238,6 +239,25 @@ class SwarmPlugin(unittest.TestCase):
         self.assertEqual(1, rc, "fails loudly instead of skipping")
         self.assertEqual(1, len(sent))
         self.assertNotIn("dangerously_skip_attaching_a_priority", sent[0][1])
+
+    def test_a_good_send_says_sent_true_and_a_refusal_says_false_and_fails(self):
+        """11-13: swarm answers a good send with no "sent" key; the Boss read that as not sent and sent it again."""
+        answers = [(True, json.dumps({"account": ME, "event_id": "$x", "room": GENERAL})),
+                   (True, json.dumps({"sent": False, "unseen": [{"event_id": "$y"}], "note": "These replies reached this thread"})),
+                   (True, "reacted")]
+        mcp, stop = mock.Mock(tool=lambda tool, args, refused=None: answers.pop(0)), threading.Event()
+        t = threading.Thread(target=self.s.outbox, args=(lambda: mcp, stop))   # the real bridge side, a fake swarm
+        t.start()
+        try:
+            with mock.patch("sys.stdout", new=io.StringIO()) as out:
+                rcs = [self.s.reply([GENERAL, "$e", "hi"]), self.s.reply([GENERAL, "$e", "hi"]), self.s.claim(GENERAL, "$e")]
+        finally:
+            stop.set()
+            t.join(5)
+        printed = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual([0, 1, 0], rcs)
+        self.assertEqual([True, False, True], [p["sent"] for p in printed])
+        self.assertEqual(("$x", [{"event_id": "$y"}], "reacted"), (printed[0]["event_id"], printed[1]["unseen"], printed[2]["answer"]))
 
     def test_a_named_priority_and_the_skip_are_only_what_was_asked(self):
         self.s.write_json(self.s.PRIORITIES, {"names": {"android": "!r:x/85298c6b"}})
