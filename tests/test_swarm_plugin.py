@@ -40,6 +40,9 @@ elif sys.argv[1:] == ["mcp", "hermes"]:
             if m["params"]["name"] == "ask":      # it asks the client something and waits for the answer
                 say({"id": "q1", "method": "elicitation/create", "params": {}})
                 log.write(sys.stdin.readline()); log.flush()
+            if m["params"]["arguments"].get("text") == "refused, then silence":   # swarm 0.1.9-97 on 11-12: the refusal is logged, never answered
+                print(json.dumps({"event": "swarm.priority", "kind": "refused_send", "ref": None, "room": m["params"]["arguments"]["room"], "ts": 1}), file=sys.stderr, flush=True)
+                continue
             if m["params"]["name"] == "late":
                 import time; time.sleep(0.4)
             joined = {"account": ME, "members": [{"user_id": ME, "card": {"swarm.owner": OWNER}}, {"user_id": OWNER}]}
@@ -196,6 +199,20 @@ class SwarmPlugin(unittest.TestCase):
         self.assertTrue(any("asked elicitation/create" in x for x in said), said)
         self.assertTrue(any("did not answer tools/call late" in x for x in said), said)
         self.assertTrue(any("answered tools/call late after" in x and '"ok"' in x for x in said), said)
+
+    def test_a_refusal_swarm_logs_but_never_answers_is_still_that_refusal(self):
+        mcp = self.s.Mcp(lambda m: None)
+        threading.Thread(target=mcp.read, daemon=True).start()
+        started = time.time()
+        with mock.patch.object(self.s, "REFUSAL_WAIT", 0.2), mock.patch.object(self.s, "log", lambda m: None):
+            r = self.s.run_tool(mcp, {"tool": "send", "args": {"room": GENERAL, "text": "refused, then silence"}})
+            named = self.s.run_tool(mcp, {"tool": "send", "args": {"room": GENERAL, "text": "hi", "priority": "!r:x/ops"}})
+        mcp.p.stdin.close()
+        mcp.p.wait(5)
+        mcp.err.close()
+        self.assertLess(time.time() - started, 10, "it does not wait out the 90 s")
+        self.assertTrue(r["ok"] and self.s.priority_refusal(r["text"]), "so reply and claim retry with the room's priority: %r" % r)
+        self.assertEqual({"ok": True, "text": "ok"}, named, "a call that names its priority is answered as before")
 
     # swarm 0.1.9-97: every message serves a priority. Inherit first, then the room map, else fail loudly; skip only when asked.
     REFUSED = json.dumps({"sent": False, "account": ME, "room": GENERAL, "note": "Not sent: name the priority this serves (priority=<ref>)"})

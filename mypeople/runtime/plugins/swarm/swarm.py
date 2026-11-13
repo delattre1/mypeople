@@ -169,6 +169,32 @@ def deliver(owner, cfg, send=send_to_boss):
     return True
 
 
+REFUSAL_WAIT = 10   # seconds swarm gets to answer a refusal it has already logged
+
+
+class Refused(Exception):
+    """swarm logged that it refused the call for naming no priority, and then gave no answer."""
+
+
+def logged_refusal(pos, room):
+    """Whether swarm's own log (mcp.log, from byte pos on) says it refused a send or react in this room for want of a priority."""
+    try:
+        with open(STATE / "mcp.log", "rb") as f:
+            f.seek(pos)
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        if line.startswith("{") and '"swarm.priority"' in line:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get("room") == room and str(e.get("kind", "")).startswith("refused_"):
+                return True
+    return False
+
+
 class Mcp:
     """`swarm mcp hermes` as this bridge's one session: requests matched to answers by id, deliveries to on_message."""
 
@@ -185,22 +211,31 @@ class Mcp:
             self.p.stdin.write(json.dumps(dict(msg, jsonrpc="2.0"), ensure_ascii=False) + "\n")
             self.p.stdin.flush()
 
-    def call(self, method, params, timeout=90):
+    def call(self, method, params, timeout=90, refused=None):
+        """The answer to one request. refused() says swarm has logged a refusal of it: REFUSAL_WAIT later, still unanswered, it raises Refused."""
         rid, done = next(self.ids), threading.Event()
         self.waiting[rid] = [done, None]
         self.write({"id": rid, "method": method, "params": params})
-        asked = time.time()
-        if not done.wait(timeout):
-            self.waiting.pop(rid, None)
-            what = "%s %s" % (method, params.get("name", "")) if method == "tools/call" else method
-            self.gave_up[rid] = (asked, what)
-            log("swarm mcp did not answer %s in %d s" % (what, timeout))
-            raise TimeoutError("swarm mcp did not answer %s" % method)
+        asked, logged = time.time(), None
+        while not done.wait(min(1, timeout)):
+            now = time.time()
+            if refused and logged is None and refused():
+                logged = now
+            late = now - asked >= timeout
+            if late or (logged is not None and now - logged >= REFUSAL_WAIT):
+                self.waiting.pop(rid, None)
+                what = "%s %s" % (method, params.get("name", "")) if method == "tools/call" else method
+                self.gave_up[rid] = (asked, what)
+                if late:
+                    log("swarm mcp did not answer %s in %d s" % (what, timeout))
+                    raise TimeoutError("swarm mcp did not answer %s" % method)
+                log("swarm refused %s for naming no priority and did not say so in %d s: taken as that refusal" % (what, REFUSAL_WAIT))
+                raise Refused(what)
         return self.waiting.pop(rid)[1]
 
-    def tool(self, name, args, timeout=90):
+    def tool(self, name, args, timeout=90, refused=None):
         """(ok, text) of one tool call in this bridge's session."""
-        r = self.call("tools/call", {"name": name, "arguments": args, "_meta": {"swarm/session": SESSION}}, timeout) or {}
+        r = self.call("tools/call", {"name": name, "arguments": args, "_meta": {"swarm/session": SESSION}}, timeout, refused) or {}
         res = r.get("result") or {}
         text = " ".join(c.get("text", "") for c in res.get("content", []) if c.get("type") == "text") or json.dumps(r.get("error") or res)[:300]
         return not r.get("error") and not res.get("isError"), text
@@ -235,8 +270,20 @@ class Mcp:
 
 
 def run_tool(mcp, req):
+    tool, args, refused = req["tool"], req["args"], None
+    if tool in ("send", "react") and "priority" not in args and not args.get("dangerously_skip_attaching_a_priority"):
+        # ponytail: swarm 0.1.9-97 on plow logs its "no priority" refusal and then never answers the call (11-12, told to Cedar).
+        # Its log line stands in for the answer, so the caller retries with the room's priority. Leans on that stderr line's
+        # shape: drop this once swarm answers its refusals again.
+        try:
+            pos = (STATE / "mcp.log").stat().st_size
+            refused = lambda: logged_refusal(pos, args.get("room"))
+        except OSError:
+            pass
     try:
-        ok, text = mcp.tool(req["tool"], req["args"])
+        ok, text = mcp.tool(tool, args, refused=refused)
+    except Refused:
+        ok, text = True, json.dumps({"sent": False, "note": "Not sent: name the priority this serves (swarm logged this refusal and gave no answer)"})
     except (OSError, TimeoutError) as e:
         ok, text = False, str(e)
     return {"ok": ok, "text": text}
