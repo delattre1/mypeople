@@ -485,8 +485,17 @@ def route_message(message: dict, chat: str = "", last: tuple = ()) -> str:
     with STATE_LOCK:
         taps = read_json(STATE, {}).get("pending_tapbacks", [])
     target = pick_agent(text, message, *last)
-    sent = send_to_agent(envelope(who, text, chat_uid, files, notes + context(message) + taps, mid, target.rsplit(":", 1)[1],
-                                  owner=is_owner(message.get("sender") or {})), target)
+    pack = lambda agent: envelope(who, text, chat_uid, files, notes + context(message) + taps, mid, agent.rsplit(":", 1)[1],
+                                  owner=is_owner(message.get("sender") or {}))
+    sent = send_to_agent(pack(target), target)
+    if sent is False and target != BOSS_AGENT and min(message_age(message), time.time() - STARTED) >= WARN_AFTER:
+        # An agent that keeps refusing (11-13: a feedback prompt held one's pane 42 min; 11-10: ~10 h) hands the
+        # text to the Boss, told why. A Boss that refuses too falls through to the sender's warning below.
+        name, held = target.rsplit(":", 1)[1], target
+        log(f"{name} refused it past {WARN_AFTER}s; to the Boss")
+        target = BOSS_AGENT
+        sent = send_to_agent(f"[{name} could not take this for over {WARN_AFTER // 60} min (pane not ready, a dialog?); "
+                             f"it came to you instead: mp peek {held}]\n" + pack(target), target)
     if sent:
         if taps:
             with STATE_LOCK:

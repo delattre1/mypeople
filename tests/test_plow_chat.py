@@ -524,6 +524,41 @@ class PlowChatTest(unittest.TestCase):
         self.pc.send_to_agent = lambda m, agent=None: self.sent.append(m) or True
         self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
 
+    def test_a_text_an_agent_keeps_refusing_goes_to_the_boss_once_with_a_note(self):
+        """11-13: a feedback prompt held an agent's pane for 42 min (11-10: ~10 h), every pass retried only that
+        agent, and its owner was told nobody got the text. Past WARN_AFTER the Boss takes it, told why."""
+        (Path(self.tmp.name) / "style.md").write_text("Sign once: ~{name}")
+        self.pc.poll_chat(self.creds, "cht_a")
+        now = self.pc.datetime.now(self.pc.timezone.utc)
+        self.msgs.append({"uid": "m2", "direction": "inbound", "body": "Chef, a loja está aberta?",
+                          "chat_uid": "cht_a", "created_at": now.isoformat()})
+        self.pc.pick_agent = lambda *a: "h/main:Chef"
+        tried = []
+        self.pc.send_to_agent = lambda m, agent=None: tried.append(agent) or (
+            agent != "h/main:Chef" and (self.sent.append(m) or True))
+        self.pc.STARTED -= 300
+        with mock.patch.object(self.pc, "send_message") as warn:
+            self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), -1)
+            self.assertEqual(tried, ["h/main:Chef"], "under WARN_AFTER it waits for Chef, never the Boss")
+            self.msgs[-1]["created_at"] = (now - timedelta(seconds=150)).isoformat()
+            self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 1)
+            self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), 0)
+        warn.assert_not_called()
+        self.assertEqual(tried, ["h/main:Chef", "h/main:Chef", "h/main:Boss"], "routed once")
+        self.assertEqual(self.sent[0].split("\n")[0], "[Chef could not take this for over 2 min (pane not ready, "
+                                                      "a dialog?); it came to you instead: mp peek h/main:Chef]")
+        self.assertIn("a loja está aberta?", self.sent[0])
+        self.assertTrue(self.sent[0].endswith("~Boss)"), "the Boss answers it as the Boss")
+        # The Boss refuses too: today's path, the sender is told once.
+        tried.clear()
+        self.msgs.append({"uid": "m3", "direction": "inbound", "body": "alô?", "chat_uid": "cht_a",
+                          "created_at": (now - timedelta(seconds=150)).isoformat()})
+        self.pc.send_to_agent = lambda m, agent=None: tried.append(agent) or False
+        with mock.patch.object(self.pc, "send_message") as warn:
+            self.assertEqual(self.pc.poll_chat(self.creds, "cht_a"), -1)
+        warn.assert_called_once()
+        self.assertEqual(tried, ["h/main:Chef", "h/main:Boss"])
+
 
     def test_the_socket_routes_at_once_and_a_reconnect_drops_and_repeats_nothing(self):
         """A ping is answered and a frame routes its chat at once; a text sent while the socket was
