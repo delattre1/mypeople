@@ -3,7 +3,9 @@
 to the Boss, as Plow Chat does for texts.
 
 Pushed, not polled: one `swarm mcp hermes` process (the plugin protocol, SWARM_PLUGIN=1) holds the account for this bridge's one
-session, joins its rooms and pushes each message, decrypted, the moment it lands. Every message is kept in a spool before the CLI
+session, joins its rooms and pushes each message, decrypted, the moment it lands. What came in while no bridge was up is not
+pushed again: each join answers with the messages `missed`, and the bridge hands those to the Boss too. config.json's `also` lists
+the owner's accounts on other Swarm servers; their rooms are joined in the same session. Every message is kept in a spool before the CLI
 is told it was delivered (only that moves its read cursor) and before it is handed to the Boss with mp send, so a Boss that is
 down loses nothing. The Boss's answers, claims and lookups go back through the same process as tool calls. Bound to this one
 session on purpose: `swarm install claude` would let every Claude session on the Mac act as any account on it. Who the owner is
@@ -18,6 +20,7 @@ comes from the account's own Agent Card (swarm.owner).
       --skip-priority sends with none: a real exception only, logged by the server.
   swarm.py join <room>                              accept an invitation (a room's #room:server or !id)
   swarm.py attachment <room> <event_id>             download what a message has attached
+  swarm.py history <room> [thread_event_id]         the room's last 20 messages, or that thread's
   swarm.py directory                                the company's members and their cards
   swarm.py message                                  what the Boss is handed, for the Plugins page
   swarm.py status
@@ -260,13 +263,32 @@ def owner_in(joined, mine):
     return next((str((m.get("card") or {}).get("swarm.owner") or "") for m in members if m.get("user_id") == mine), "")
 
 
+def missed_in(joined, room, ours):
+    """What a join says came in while the account was away, oldest first, as messages for the Boss; its own are left out."""
+    try:
+        miss = json.loads(joined).get("missed") or {}
+    except (ValueError, AttributeError):
+        return []
+    out = []
+    for m in (miss.get("messages") or []) if isinstance(miss, dict) else []:
+        if isinstance(m, dict) and m.get("sender") not in ours:
+            at = m.get("created_at")
+            when = time.strftime("%H:%M", time.localtime(at / 1000 if at > 1e11 else at)) if isinstance(at, (int, float)) else "earlier"
+            out.append(dict(m, room=m.get("room") or room,
+                            content="(missed while the bridge was away, sent %s) %s" % (when, m.get("content") or m.get("text") or "")))
+    if out and miss.get("capped"):
+        out[-1]["content"] += " (more were missed in this room than Swarm lists: read it with %s history %s)" % (RUN, shlex.quote(room))
+    return out
+
+
 def bridge(cfg, owner, send=send_to_boss):
     """One swarm mcp process for its whole life: joins the account's rooms, messages in, tool calls out. Returns its exit code.
     owner is a one-item list: the first join that names the owner fills it in for the whole bridge."""
     mine = cfg["account"]
+    ours = [mine] + [a for a in cfg.get("also") or [] if a != mine]   # the same owner's accounts on other Swarm servers
 
     def on_message(m):
-        if m.get("sender") == mine:   # its own, as the server stored it: the receipt for what it sent
+        if m.get("sender") in ours:   # its own, as the server stored it: the receipt for what it sent
             log("sent %s in %s%s" % (m.get("event_id"), m.get("room"), " with %s (%s)" % (m["attachment"], m.get("attachment_mime_type"))
                                                                    if m.get("attachment") else ""))
             return
@@ -281,15 +303,25 @@ def bridge(cfg, owner, send=send_to_boss):
         mcp.call("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                 "clientInfo": {"name": "myplow-swarm", "version": "1"}}, timeout=60)
         mcp.write({"method": "notifications/initialized"})
-        rooms, joined = next((a.get("rooms") or [] for a in accounts() if a.get("account") == mine), []), 0
-        for room in rooms:   # only rooms it is in, by full name or id: join creates a room whose name does not exist
-            ok, text = mcp.tool("join", {"room": room, "account": mine}, timeout=60)
-            if ok:
-                joined += 1
-                owner[0] = owner[0] or owner_in(text, mine)
-            else:
-                log("could not join %s: %s" % (room, text[:200]))
-        log("in %d of %d rooms as %s; owner %s" % (joined, len(rooms), mine, owner[0] or "unknown: nobody is treated as the owner"))
+        known, missed = accounts(), 0
+        for acct in ours:
+            rooms, joined = next((a.get("rooms") or [] for a in known if a.get("account") == acct), []), 0
+            for room in rooms:   # only rooms it is in, by full name or id: join creates a room whose name does not exist
+                ok, text = mcp.tool("join", {"room": room, "account": acct}, timeout=60)
+                if ok:
+                    joined += 1
+                    if acct == mine:
+                        owner[0] = owner[0] or owner_in(text, mine)
+                    for m in missed_in(text, room, ours):
+                        keep(m)
+                        missed += 1
+                else:
+                    log("could not join %s: %s" % (room, text[:200]))
+            log("in %d of %d rooms as %s%s" % (joined, len(rooms), acct, "; owner %s" % (owner[0] or "unknown: nobody is treated as the owner")
+                                                 if acct == mine else ""))
+        if missed:
+            log("%d messages came in while no bridge was up: handed to the Boss" % missed)
+            threading.Thread(target=deliver, args=(owner[0], cfg, send), daemon=True).start()
         current["mcp"] = mcp
     except (OSError, TimeoutError) as e:
         log("swarm mcp did not start: %s" % e)
@@ -435,6 +467,8 @@ def main(argv):
         return ask("join", {"room": args[0], "account": config()["account"]})
     elif cmd == "attachment" and len(args) == 2:
         return ask("get_attachment", {"room": args[0], "event_id": args[1]})
+    elif cmd == "history" and len(args) in (1, 2):
+        return ask("history", dict({"room": args[0]}, **({"thread": args[1]} if len(args) == 2 else {})))
     elif cmd == "directory" and not args:
         return ask("directory", {})
     elif cmd == "setup" and len(args) in (1, 2):

@@ -43,6 +43,10 @@ elif sys.argv[1:] == ["mcp", "hermes"]:
             if m["params"]["name"] == "late":
                 import time; time.sleep(0.4)
             joined = {"account": ME, "members": [{"user_id": ME, "card": {"swarm.owner": OWNER}}, {"user_id": OWNER}]}
+            if m["params"]["arguments"].get("room") == "!noname:x":   # what came in while no bridge was up: told once, at the join
+                joined["missed"] = {"count": 2, "capped": False, "messages": [
+                    {"event_id": "$m1", "room": "!noname:x", "sender": "@so:x", "display_name": "so", "created_at": 1794526776, "text": "while you were out"},
+                    {"event_id": "$m2", "room": "!noname:x", "sender": ME, "created_at": 1794526777, "text": "my own"}]}
             say({"id": m["id"], "result": {"content": [{"type": "text", "text": json.dumps(joined) if m["params"]["name"] == "join" else "ok"}]}})
             if m["params"]["name"] == "join" and m["params"]["arguments"]["room"] == GENERAL:
                 for i, (sender, text) in enumerate(((("@so:x", "first &amp; only")), (ME, "my own")), 1):
@@ -138,9 +142,16 @@ class SwarmPlugin(unittest.TestCase):
             if told:
                 break
             time.sleep(0.05)
+        for _ in range(100):
+            if len(told) > 1:
+                break
+            time.sleep(0.05)
         self.assertEqual(OWNER, owner[0], "the owner its card names, from the join")
-        self.assertEqual(1, len(told), "its own message is not for its Boss")
-        self.assertTrue(told[0].startswith("[swarm] from so (@so:x) in #general: first & only\n("), told[0])
+        self.assertEqual(2, len(told), "its own messages, pushed or missed, are not for its Boss")
+        live = [x for x in told if "first & only" in x]
+        self.assertTrue(live and live[0].startswith("[swarm] from so (@so:x) in #general: first & only\n("), told)
+        was_out = [x for x in told if "while you were out" in x]
+        self.assertTrue(was_out and "(missed while the bridge was away, sent " in was_out[0] and "reply '!noname:x' '$m1'" in was_out[0], told)
         self.assertEqual(0, self.s.reply([GENERAL, "$e-first", "--file", "/tmp/a.png", "so,", "done"]))
         self.assertEqual(0, self.s.claim(GENERAL, "$e-first"))
         t.join(10)
@@ -156,6 +167,15 @@ class SwarmPlugin(unittest.TestCase):
         self.assertEqual([], list((self.dir / "state" / "outbox").glob("*")))
         self.assertEqual([], list((self.dir / "state" / "spool").glob("*")))
 
+
+    def test_the_owners_accounts_on_other_servers_are_joined_in_the_same_session(self):
+        self.s.write_json(self.s.PIDFILE, {"pid": os.getpid()})
+        t = threading.Thread(target=self.s.bridge, args=(dict(self.cfg, also=["@other:x"]), [""], lambda x: True))
+        t.start()
+        self.assertEqual(0, self.s.claim(GENERAL, "$e-first"))     # answered only once every join is done; it also ends the stub
+        t.join(10)
+        self.assertEqual([("!noname:x", ME), (GENERAL, ME), ("#x:x", "@other:x")],
+                         [(c["arguments"]["room"], c["arguments"]["account"]) for c in self.calls_made() if c.get("name") == "join"])
 
     def test_a_late_answer_and_a_question_from_swarm_are_logged_and_never_block(self):
         said = []
