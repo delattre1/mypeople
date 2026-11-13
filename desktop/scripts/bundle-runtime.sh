@@ -68,16 +68,26 @@ install -m 755 "$HERE/mypeople-launcher.sh" "$OUT/bin/mypeople"
 # ---------------------------------------------------------------- native binaries
 # Recursively vendor a Mach-O file's non-system dylibs and repoint its load commands.
 vendor_deps() {
-  local target="$1" dep base
+  local target="$1" dep base src rp
   # Skip the install-name line (first line of otool output for a dylib) and system paths that
   # every Mac already has: those must keep resolving to the OS copy, not a frozen one.
   while read -r dep; do
+    src="$dep"
     case "$dep" in
-      /usr/lib/*|/System/*|@*|'') continue ;;
+      /usr/lib/*|/System/*|@executable_path/*|@loader_path/*|'') continue ;;
+      # cmake names what it installs by @rpath (the floor's libuv and json-c). The file is on one of
+      # the target's own rpaths. Skipped like the other '@' names, ttyd shipped loading both from the
+      # build machine's folder and aborted on every other Mac (5.22.174 to 5.22.185).
+      @rpath/*)
+        src=""
+        while read -r rp; do
+          [ -f "$rp/${dep#@rpath/}" ] && { src="$rp/${dep#@rpath/}"; break; }
+        done < <(otool -l "$target" | awk '$1=="cmd"{r=($2=="LC_RPATH")} r&&$1=="path"{print $2}')
+        [ -n "$src" ] || { echo "[bundle] $target: $dep is on none of its rpaths" >&2; exit 1; } ;;
     esac
     base="$(basename "$dep")"
     if [ ! -f "$OUT/lib/$base" ]; then
-      cp "$dep" "$OUT/lib/$base"
+      cp "$src" "$OUT/lib/$base"
       chmod u+w "$OUT/lib/$base"
       install_name_tool -id "@executable_path/../lib/$base" "$OUT/lib/$base" 2>/dev/null
       vendor_deps "$OUT/lib/$base"          # its own dependencies come along too
@@ -100,6 +110,13 @@ for tool in ttyd tmux asciinema; do
   vendor_deps "$OUT/bin/$tool"
 done
 rm -rf "$TTYD_BUILD"
+
+# Every carried binary must now load only the OS's libraries or the bundle's. Any other name
+# resolves on the build machine alone, and the smoke test runs there too, so it cannot see it.
+for f in "$OUT"/bin/* "$OUT"/lib/*.dylib; do
+  bad="$(otool -L "$f" 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -v -E '^(/usr/lib/|/System/|@executable_path/)' || true)"
+  [ -z "$bad" ] || { echo "[bundle] $f still loads from outside the bundle:" $bad >&2; exit 1; }
+done
 
 # tmux's ncurses has Homebrew's terminal-definition folder compiled in and nothing else, so on a Mac
 # without Homebrew any tmux client on a terminal dies with "can't find terminfo database": the
